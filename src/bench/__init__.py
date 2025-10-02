@@ -3,5 +3,5 @@
 __version__ = "0.1.18"
 __name__ = "spacer_matching_bench"
 
-from .utils import *
 from .bench import *
+from .utils import *
