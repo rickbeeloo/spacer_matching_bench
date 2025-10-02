@@ -3,6 +3,7 @@ name = "spacer_matching_bench"
 dynamic = ["version"]
 authors = [
     { name = "Uri Neri", email = "uneri@lbl.gov" },
+    { name = "Rick Beeloo", email = "biobeeloo@gmail.com" },
     { name = "Simon Roux", email = "sroux@lbl.gov" },
     { name = "Antonio Camargo", email = "antoniop.camargo@lbl.gov" },
     { name = "Brian Bushnell", email = "bbushnell@lbl.gov" },

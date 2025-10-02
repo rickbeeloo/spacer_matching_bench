@@ -1,7 +1,11 @@
+# THIS IS THE GitHub repository for continued devlopment, for the original repository see: [https://code.jgi.doe.gov/spacersdb/spacer_matching_bench](https://code.jgi.doe.gov/spacersdb/spacer_matching_bench)
+
+
 # Benchmarking protospacer identification tools
 Scripts, code, and data for the manuscript: "Tool Choice drastically Impacts CRISPR Spacer-Protospacer Detection"   
 Raw data files available in zenodo: [https://zenodo.org/doi/10.5281/zenodo.15171878](https://zenodo.org/doi/10.5281/zenodo.15171878).  
 This benchmark is a companion project to the [SpacerDB](https://spacers.jgi.doe.gov/) and the [SpacerExtractor](https://code.jgi.doe.gov/SRoux/spacerextractor) tools.  
+
 
 ## Overview
 CLI Python script for simulating spacer insertions into contigs and benchmarking sequence aligners. Generates synthetic data with known ground truth and evaluates aligner performance metrics (precision, recall, F1) and runtime. Note that for proper in-depth analysis, the jupyter notebooks are preferable (less heuristics, more detailed, and runs additional tests to verify the different tool reported alignments (so more consistent approach)).
@@ -167,7 +171,7 @@ If you use this software or data in your research, please cite accordingly:
 1. The software repository:
 ```
 @software{spacer_matching_bench,
-  author = {Uri Neri, Antonio Pedro Camargo, Brian Bushnell, Simon Roux},
+  author = {Uri Neri, Rick Beeloo,  Antonio Pedro Camargo, Brian Bushnell, Simon Roux},
   title = {spacer_matching_bench: Benchmarking protospacer identification tools},
   year = {2025},
   publisher = {gitlab},
