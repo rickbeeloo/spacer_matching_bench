@@ -13,7 +13,7 @@ import parasail as ps
 import polars as pl
 import pyfastx as pfx
 import pysam
-import pysam.samtools
+# import pysam.samtools
 from needletail import parse_fastx_file  # , NeedletailError, normalize_seq
 from tqdm import tqdm
 
@@ -29,74 +29,6 @@ def read_fasta_needletail(fasta_file):
         seqs.append(record.seq)
         seq_ids.append(record.id)
     return seq_ids, seqs
-
-
-def read_fasta_polars(fasta_file, idcol="contig_id", seqcol="contig_seq"):
-    # read fasta file with needletail
-    seq_ids, seqs = read_fasta_needletail(fasta_file)
-    return pl.DataFrame({idcol: seq_ids, seqcol: seqs})
-
-
-def create_fasta_index_needletail(fasta_file, fai_output=None):
-    """Create a FASTA index (.fai) file similar to samtools faidx. Currently BORKED.
-
-    Format: NAME LENGTH OFFSET LINEBASES LINEWIDTH
-    - NAME: Name of sequence
-    - LENGTH: Length of sequence
-    - OFFSET: Offset of first base in sequence (including header)
-    - LINEBASES: Number of bases per line
-    - LINEWIDTH: Number of bytes per line (including newline)
-
-    Args:
-        fasta_file (str): Path to input FASTA file
-        fai_output (str, optional): Path to output .fai file. If None, uses fasta_file + '.fai'
-
-    Returns:
-        str: Path to created index file
-    """
-
-    if fai_output is None:
-        fai_output = fasta_file + ".fai"
-
-    index_entries = []
-    offset = 0
-
-    with open(fasta_file, "rb") as f:
-        for record in parse_fastx_file(fasta_file):
-            # Get sequence name
-            name = record.id
-
-            # Get sequence length
-            seq_len = record.seq.__sizeof__() + 1
-
-            # Calculate line metrics from first sequence line
-            seq_lines = record.seq.split("\n")
-            if len(seq_lines) > 0:
-                linebases = len(seq_lines[0])
-                linewidth = linebases + 1  # Add 1 for newline
-            else:
-                linebases = seq_len
-                linewidth = seq_len + 1
-
-            # Calculate offset of first base
-            header_line = f">{name}\n"
-            seq_offset = offset + len(header_line)
-
-            # Add entry
-            index_entries.append(
-                f"{name}\t{seq_len}\t{seq_offset}\t{linebases}\t{linewidth}"
-            )
-
-            # Update offset for next sequence
-            # Account for header, sequence, and newlines
-            offset = f.tell()
-
-    # Write index file
-    with open(fai_output, "w") as f:
-        f.write("\n".join(index_entries))
-
-    return fai_output
-
 
 def generate_random_sequence(length):
     return "".join(random.choice("ATCG") for _ in range(length))
@@ -521,14 +453,6 @@ def read_fasta(filename):
     return sequences
 
 
-def is_it_there(subsequence, sequence):
-    return sequence.contains(subsequence)
-
-
-def is_it_there_fromtbl(mama_seq, baby_seq, start_pos, end_pos):
-    return mama_seq[start_pos:end_pos].contains(baby_seq)
-
-
 def run_tool(tool, results_dir, max_runs=1, warmups=1):
     create_bash_script(tool, results_dir, max_runs=max_runs, warmups=warmups)
     subprocess.run(f"{results_dir}/bash_scripts/{tool['script_name']}", shell=True)
@@ -582,11 +506,6 @@ def clean_before_rerun(tool_name, results_dir):
     os.system(f"rm -rf {results_dir}/raw_outputs/{tool_name}*sam")
     os.system(f"rm -rf {results_dir}/bash_scripts/{tool_name}*")
     os.system(f"rm -rf {results_dir}/raw_outputs/tmp*")
-
-
-def insert_spacer(contig, spacer, position):
-    # deprecated
-    return contig[:position] + spacer + contig[position:]
 
 
 def get_aln_len_from_cigar(cigar):

@@ -1,7 +1,7 @@
 import os
-from md2pdf.core import md2pdf
+from md2pdf.core import md2pdf # type: ignore
 import glob
-from pypdf import PdfWriter, PdfReader
+from pypdf import PdfWriter, PdfReader # type: ignore
 
 
 

@@ -83,16 +83,52 @@ bash ./src/bench/utils/tool_env_maker.sh
 After installation, you can run the benchmarking tool using either:
 
 ```bash
-spacer_matching_bench [options]
+spacer_bencher [command] [options]
 ```
 
 or directly via Python:
 
 ```bash
-python -m bench.bench [options]
+python -m bench.bench [command] [options]
 ```
 
-### Available Options:
+### Available Commands:
+
+#### `full_run` - Complete benchmarking pipeline (original functionality)
+```bash
+spacer_bencher full_run --contig_length_range 1000 32000 --spacer_length_range 20 60 --n_mismatch_range 0 5 --sample_size_contigs 1500 --sample_size_spacers 50 --insertion_range 1 5 --threads 1 --prop_rc 0.5
+```
+
+#### `simulate` - Generate simulated sequences only
+```bash
+spacer_bencher simulate --sample_size_contigs 1500 --sample_size_spacers 50 --output_dir results/my_simulation
+```
+
+#### `generate_scripts` - Generate tool execution scripts
+```bash
+spacer_bencher generate_scripts --input_dir results/my_simulation --threads 1 --skip_tools "vsearch"
+```
+
+#### `run_tools` - Execute tools on simulated data
+```bash
+spacer_bencher run_tools --input_dir results/my_simulation --threads 1 --max_runs 5
+```
+
+#### `subsample` - Intelligently subsample real dataset
+```bash
+spacer_bencher subsample \
+    --contigs /path/to/contigs.fa \
+    --spacers /path/to/spacers.fa \
+    --metadata /path/to/metadata.tsv \
+    --reduce 0.1 \
+    --hq 0.8 \
+    --output_dir results/subsampled \
+    --taxonomic_rank p \
+    --gc_bins 10 \
+    --length_bins 10
+```
+
+### Common Options (shared across all commands):
 - `--contig_length_range`, `-cl`: Range of contig lengths [default: 1000 32000]
 - `--sample_size_contigs`, `-nc`: Number of contigs to generate [default: 1500]
 - `--sample_size_spacers`, `-ns`: Number of spacers to generate [default: 50]
@@ -101,25 +137,15 @@ python -m bench.bench [options]
 - `--insertion_range`, `-ir`: Range of number of insertions per contig [default: 1 5]
 - `--prop_rc`, `-prc`: Proportion of spacers to reverse complement [default: 0.5]
 - `--threads`, `-t`: Number of threads [default: 1]
-- `--contigs`, `-c`: Path to contigs file (optional, will generate simulated data if not provided)
-- `--spacers`, `-s`: Path to spacers file (optional, will generate simulated data if not provided)
+- `--contigs`, `-c`: Path to contigs file (optional)
+- `--spacers`, `-s`: Path to spacers file (optional)
+- `--id_prefix`, `-id`: Prefix for sequence IDs (optional)
+
+### Tool-specific Options (for `generate_scripts` and `run_tools`):
 - `--max_mismatches`, `-mm`: Maximum number of mismatches to allow [default: 5]
 - `--max_runs`, `-mr`: Maximum number of hyperfine runs [default: 5]
 - `--warmups`, `-w`: Number of hyperfine warmups [default: 0]
 - `--skip_tools`, `-st`: Comma-separated list of tools to skip [default: "vsearch"]
-- `--id_prefix`, `-id`: Prefix for sequence IDs (optional, defaults to hash of parameters)
-
-### Example Command:
-```bash
-spacer_matching_bench --contig_length_range 1000 32000 \
-                     --spacer_length_range 20 60 \
-                     --n_mismatch_range 0 5 \
-                     --sample_size_contigs 150 \
-                     --sample_size_spacers 5 \
-                     --insertion_range 1 5 \
-                     --threads 16 \
-                     --prop_rc 0.5
-```
 
 ### Results
 By default, the results will be saved in a directory under `results/` with a name that reflects the parameters used, following the pattern:
