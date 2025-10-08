@@ -36,11 +36,29 @@ def main():
         print(f"Error: Input directory {input_dir} does not exist")
         return
     
+    # Create necessary subdirectories
+    os.makedirs(f"{input_dir}/raw_outputs", exist_ok=True)
+    os.makedirs(f"{input_dir}/bash_scripts", exist_ok=True)
+    
     # Set up args object for populate_tools
     args.results_dir = input_dir
     
+    # Determine file paths
+    if args.spacers:
+        spacers_file = args.spacers
+    else:
+        spacers_file = f"{input_dir}/simulated_data/simulated_spacers.fa"
+    
+    if args.contigs:
+        contigs_file = args.contigs
+    else:
+        contigs_file = f"{input_dir}/simulated_data/simulated_contigs.fa"
+    
+    # Store file paths in args for populate_tools
+    args.contigs_file = contigs_file
+    args.spacers_file = spacers_file
+    
     # Create spacer length dataframe from existing data
-    spacers_file = f"{input_dir}/simulated_data/simulated_spacers.fa"
     if not os.path.exists(spacers_file):
         print(f"Error: Spacers file {spacers_file} not found")
         return
@@ -69,7 +87,7 @@ def main():
         tools,
         max_mismatches=args.max_mismatches,
         spacer_lendf=spacer_lendf,
-        ref_file=f"{input_dir}/simulated_data/simulated_contigs.fa",
+        ref_file=contigs_file,
     )
     tools_results.write_csv(f"{input_dir}/tools_results.tsv", separator="\t")
     print(f"Wrote tool results to {input_dir}/tools_results.tsv")

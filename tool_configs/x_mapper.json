@@ -1,0 +1,10 @@
+{
+  "name": "x_mapper",
+  "output_file": "{output_dir}/x_mapper_output.sam",
+  "parse_function_name": "parse_sam",
+  "script_name": "x_mapper.sh",
+  "mamba_env": "x-mapper_env",
+  "command": [
+    "java -Xmx4g -jar x-mapper.jar --reference {contigs_file} --queries {spacers_file} --out-sam {output_dir}/x_mapper_output.sam --num-threads {threads} --max-penalty 0.2 --max-penalty-span 2 --snp-penalty 1 --new-indel-penalty 1.5 --extend-indel-penalty 0.5"
+  ]
+}

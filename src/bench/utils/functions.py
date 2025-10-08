@@ -485,9 +485,9 @@ def create_bash_script(tool, results_dir, max_runs=1, warmups=1):
     with open(f"{results_dir}/bash_scripts/{tool['script_name']}", "w") as f:
         f.write("#!/bin/bash\n")
         # Always initialize mamba shell
-        f.write('eval "$(mamba shell hook --shell bash)"\n')
+        f.write('eval "$(micromamba shell hook --shell bash)"\n')
         if mamba_env:
-            f.write(f"mamba activate {mamba_env}\n")
+            f.write(f"micromamba activate {mamba_env}\n")
         f.write(f"{' '.join(hyperfine_command)} ")
         f.write(f"'{' '.join(tool['command'])}'")
 

@@ -3,8 +3,8 @@
     "output_file": "{output_dir}/sassy.tsv",
     "parse_function_name": "parse_sassy",
     "script_name": "sassy.sh",
-    "mamba_env": "sassy_env",
+    "mamba_env": "benchy",
     "command": [
         "sassy query --alphabet iupac {spacers_file} 3 {contigs_file} -o {output_dir}/sassy.tsv"
     ]
-  }
+}

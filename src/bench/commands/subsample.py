@@ -304,7 +304,6 @@ def subsample_dataset(
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(f"{output_dir}/subsampled_data", exist_ok=True)
     
     # Read metadata
     logger.info(f"Reading metadata from {metadata_file}")
@@ -335,7 +334,7 @@ def subsample_dataset(
     
     # Filter by quality if specified
     hq_contigs = metadata.filter(pl.col('hq') == True)
-    hq_contigs = hq_contigs.head(int(len(hq_contigs) * hq_fraction))
+    hq_contigs = hq_contigs.sample(fraction=hq_fraction)
 
     logger.info(f"Selected {hq_contigs.height} high-quality contigs")
     
@@ -360,7 +359,7 @@ def subsample_dataset(
     logger.info(f"Selected {len(selected_contigs)} contigs total")
     
     # Write subsampled contigs
-    contigs_output = f"{output_dir}/subsampled_data/subsampled_contigs.fa"
+    contigs_output = f"{output_dir}/subsampled_contigs.fa"
     logger.info(f"Writing selected contigs to {contigs_output}")
     written_contigs = write_subsampled_sequences(contigs_file, selected_contigs, contigs_output, extract_method)
     logger.info(f"Written {written_contigs} subsampled contigs")
@@ -368,7 +367,7 @@ def subsample_dataset(
     # Write subsampled metadata
     selected_contig_set = set(selected_contigs)
     subsampled_metadata = hq_contigs.filter(pl.col('seqid').is_in(selected_contig_set))
-    metadata_output = f"{output_dir}/subsampled_data/subsampled_metadata.tsv"
+    metadata_output = f"{output_dir}/subsampled_metadata.tsv"
     logger.info(f"Writing subsampled metadata to {metadata_output}")
     subsampled_metadata.write_csv(metadata_output, separator="\t")
     

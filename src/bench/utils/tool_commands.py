@@ -11,8 +11,17 @@ def populate_tools(args, spacer_lendf=None):
     Populate tools dictionary by reading all jsons from the tool_configs dir.
     """
     threads = args.threads
-    contigs_file = f"{args.results_dir}/simulated_data/simulated_contigs.fa"
-    spacers_file = f"{args.results_dir}/simulated_data/simulated_spacers.fa"
+    # Use custom file paths if provided, otherwise use defaults
+    if hasattr(args, 'contigs_file') and args.contigs_file:
+        contigs_file = args.contigs_file
+    else:
+        contigs_file = f"{args.results_dir}/simulated_data/simulated_contigs.fa"
+    
+    if hasattr(args, 'spacers_file') and args.spacers_file:
+        spacers_file = args.spacers_file
+    else:
+        spacers_file = f"{args.results_dir}/simulated_data/simulated_spacers.fa"
+    
     results_dir = args.results_dir
     output_dir = f"{args.results_dir}/raw_outputs/"
 
