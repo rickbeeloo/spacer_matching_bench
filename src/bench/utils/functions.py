@@ -1596,6 +1596,7 @@ def get_seq_from_fastx(
     return_df=True,
     idcol="contig_id",
     seqcol="contig_seq",
+    output_file=None,
 ):
     if isinstance(seq_ids, str):
         seq_ids = [seq_ids]
@@ -1605,26 +1606,38 @@ def get_seq_from_fastx(
     with tempfile.NamedTemporaryFile(delete=False, mode="w") as tmp_file:
         tmp_file.write("\n".join(seq_ids))
         tmp_file_path = tmp_file.name
-    seqs = (
-        subprocess.run(
-            f"pyfastx extract {seqfile} -l '{tmp_file_path}' | seqkit seq -w 0",
-            shell=True,
-            capture_output=True,
+    if output_file is None:
+        seqs = (
+            subprocess.run(
+                f"pyfastx extract {seqfile} -l '{tmp_file_path}' | seqkit seq -w 0",
+                shell=True,
+                capture_output=True,
+            )
+            .stdout.decode("utf-8")
+            .replace(">", "")
+            .splitlines()
         )
-        .stdout.decode("utf-8")
-        .replace(">", "")
-        .splitlines()
-    )
-    tmp_file.close()
-    os.remove(tmp_file_path)
-    if not return_df and not return_dict:
-        return seqs
-    found_ids = [x.removeprefix(">") for x in seqs[::2]]
-    seq_dicts = dict(zip(found_ids, seqs[1::2]))
-    if return_dict:
-        return seq_dicts
-    elif return_df:
-        return pl.DataFrame({idcol: found_ids, seqcol: seqs[1::2]})
+        tmp_file.close()
+        os.remove(tmp_file_path)
+        if not return_df and not return_dict:
+            return seqs
+        found_ids = [x.removeprefix(">") for x in seqs[::2]]
+        seq_dicts = dict(zip(found_ids, seqs[1::2]))
+        if return_dict:
+            return seq_dicts
+        elif return_df:
+            return pl.DataFrame({idcol: found_ids, seqcol: seqs[1::2]})
+    else:
+        import pyfastx as pfx
+        with open(output_file, "w") as f:
+            fa = pfx.Fasta(seqfile)
+            # load all sequence names into a set object
+            all_names = set(fa.keys())
+            for seqname in seq_ids:
+                if seqname in all_names:
+                    seq = fa[seqname].seq
+                    f.write(f">{seqname}\n{seq}\n")
+        return output_file
 
 
 def soft_fetch_fastx(fa, id, start=None, end=None, strand=None):
