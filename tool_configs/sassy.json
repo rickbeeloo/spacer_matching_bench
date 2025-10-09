@@ -5,6 +5,6 @@
     "script_name": "sassy.sh",
     "mamba_env": "benchy",
     "command": [
-        "sassy query --alphabet iupac {spacers_file} 3 {contigs_file} -o {output_dir}/sassy.tsv"
+        "sassy search --alphabet iupac --pattern-fasta {spacers_file} -k 5 --output {output_dir}/sassy.tsv --threads {threads}  {contigs_file}"
     ]
 }

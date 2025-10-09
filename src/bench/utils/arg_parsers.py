@@ -124,3 +124,10 @@ def add_tool_args(parser):
         default="vsearch",
         help="Comma-separated list of tools to skip",
     )
+    parser.add_argument(
+        "-rt",
+        "--tools_to_run",
+        type=str,
+        default=None,
+        help="Comma-separated list of tools to run (default is all tools - skip_tools, so use tools_to_run to specify a subset of tools to run)",
+    )

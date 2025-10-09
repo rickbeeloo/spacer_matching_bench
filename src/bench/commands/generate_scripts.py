@@ -55,19 +55,9 @@ def main():
     # Store file paths in args for populate_tools
     args.contigs_file = contigs_file
     args.spacers_file = spacers_file
-    
-    # Create spacer length dataframe from existing data
-    if not os.path.exists(spacers_file):
-        print(f"Error: Spacers file {spacers_file} not found")
-        return
-    
-    spacers = read_fasta(spacers_file)
-    spacer_lendf = pl.DataFrame(
-        {"spacer_id": spacers.keys(), "length": [len(seq) for seq in spacers.values()]}
-    )
-    
+
     print("Initializing tools...")
-    tools = populate_tools(args, spacer_lendf=spacer_lendf)
+    tools = populate_tools(args)
     print(f"Initialized {len(tools)} tools")
 
     if args.skip_tools:

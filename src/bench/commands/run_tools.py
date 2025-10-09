@@ -7,9 +7,6 @@ from bench.utils.functions import *
 from bench.utils.tool_commands import populate_tools
 from bench.utils.arg_parsers import add_common_args, add_tool_args
 
-
-
-
 def main():
     """Execute tools on simulated data"""
     parser = argparse.ArgumentParser(
@@ -36,7 +33,7 @@ def main():
         print(f"Error: Input directory {input_dir} does not exist")
         return
     
-    # Create necessary subdirectories
+    # Create necessary subdirectories, just in case
     os.makedirs(f"{input_dir}/raw_outputs", exist_ok=True)
     os.makedirs(f"{input_dir}/bash_scripts", exist_ok=True)
     
@@ -58,18 +55,9 @@ def main():
     args.contigs_file = contigs_file
     args.spacers_file = spacers_file
     
-    # Create spacer length dataframe from existing data
-    if not os.path.exists(spacers_file):
-        print(f"Error: Spacers file {spacers_file} not found")
-        return
-    
-    spacers = read_fasta(spacers_file)
-    spacer_lendf = pl.DataFrame(
-        {"spacer_id": spacers.keys(), "length": [len(seq) for seq in spacers.values()]}
-    )
-    
+
     print("Initializing tools...")
-    tools = populate_tools(args, spacer_lendf=spacer_lendf)
+    tools = populate_tools(args)
     print(f"Initialized {len(tools)} tools")
 
     if args.skip_tools:
@@ -77,11 +65,21 @@ def main():
         skip_tools = args.skip_tools.split(",")
         tools = {k: v for k, v in tools.items() if k not in skip_tools}
 
+    if args.tools_to_run:
+        print(f"Running user-specified tools: {args.tools_to_run}")
+        tools_to_run = args.tools_to_run.split(",")
+        tools = {k: v for k, v in tools.items() if k in tools_to_run}
+
     # Run tools and get results
     print("Running tools...")
     run_tools(tools, input_dir, max_runs=args.max_runs, warmups=args.warmups)
     print("Finished running tools")
-
+    # Create spacer length dataframe from existing data
+    spacers = read_fasta(spacers_file)
+    spacer_lendf = pl.DataFrame(
+        {"spacer_id": spacers.keys(), "length": [len(seq) for seq in spacers.values()]}
+    )
+    
     print("Reading tool results...")
     tools_results = read_results(
         tools,

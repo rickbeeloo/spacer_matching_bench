@@ -453,15 +453,15 @@ def read_fasta(filename):
     return sequences
 
 
-def run_tool(tool, results_dir, max_runs=1, warmups=1):
-    create_bash_script(tool, results_dir, max_runs=max_runs, warmups=warmups)
+def run_tool(tool, results_dir):
+    print (f"Running {tool['script_name']} in {results_dir}/bash_scripts/{tool['script_name']}")
+    # # debug - print the contents of the script
+    # with open(f"{results_dir}/bash_scripts/{tool['script_name']}", "r") as f:
+    #     print(f.read())
     subprocess.run(f"{results_dir}/bash_scripts/{tool['script_name']}", shell=True)
 
-    # time_info = {}
     with open(f"{results_dir}/raw_outputs/{tool['script_name']}.json", "r") as f:
         data = json.load(f)
-        # time_info["User time (seconds)"] = data['results'][0]['mean']
-        # time_info["system time (seconds)"] = data['results'][0]['system']
     return data
 
 
@@ -504,7 +504,7 @@ def clean_everything(results_dir):
 def clean_before_rerun(tool_name, results_dir):
     os.system(f"rm -rf {results_dir}/raw_outputs/{tool_name}*tsv")
     os.system(f"rm -rf {results_dir}/raw_outputs/{tool_name}*sam")
-    os.system(f"rm -rf {results_dir}/bash_scripts/{tool_name}*")
+    # os.system(f"rm -rf {results_dir}/bash_scripts/{tool_name}*") # generating scripts moved to generate_scripts.py
     os.system(f"rm -rf {results_dir}/raw_outputs/tmp*")
 
 
@@ -1578,11 +1578,11 @@ def read_hyperfine_results(tools, results_dir):
 def run_tools(tools, results_dir, max_runs=1, warmups=1):
     for tool in tools.values():
         try:
-            print(f"\nRunning {tool['name']}...")
+            # print(f"\nRunning {tool['name']}...")
             # extra_args = tool.get('extra_args', {})
             clean_before_rerun(tool["name"], results_dir)
             tool["time_info"] = run_tool(
-                tool, results_dir, max_runs=max_runs, warmups=warmups
+                tool, results_dir
             )
             print(f"\nSuccessfully ran tool: {tool['name']}")
         except Exception as e:

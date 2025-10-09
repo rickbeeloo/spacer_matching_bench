@@ -6,7 +6,7 @@ from pathlib import Path
 from .functions import get_parse_function
 
 
-def populate_tools(args, spacer_lendf=None):
+def populate_tools(args):
     """
     Populate tools dictionary by reading all jsons from the tool_configs dir.
     """
