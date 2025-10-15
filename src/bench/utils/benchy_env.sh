@@ -25,7 +25,7 @@ micromamba install -c conda-forge/label/rust_stable rust
 
 # build the python package with the rust module
 # assume we are in the git repo folder
-#build-rust 
+#build-rust (this is not the same as what happens in the pixi environment - where the package is actually built. this is just a convenient)
 cd src/rust_simulator
 maturin develop --release
 cd ../../
