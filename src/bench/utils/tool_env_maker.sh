@@ -1,4 +1,7 @@
 #!/bin/bash
+# this script creates micromamba environments for the tools used in the benchmark.
+# it partially assumes you already have a pixi environment created OR (ideally) a "benchy" mamba environment created which has rust cargo etc for compiling some of the tools (like sassy).
+# see the benchy_env.sh script for the "benchy" environment details.
 
 
 # Function to create environment and install tool

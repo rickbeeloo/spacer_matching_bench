@@ -234,10 +234,10 @@ def main():
     )
 
     # List tools subcommand
-    list_parser = subparsers.add_parser("list-tools", help="List all available tools")
+    subparsers.add_parser("list-tools", help="List all available tools")
 
     # Convert existing tools subcommand
-    convert_parser = subparsers.add_parser(
+    subparsers.add_parser(
         "convert-default-tools", help="Create JSON files for default tools"
     )
 

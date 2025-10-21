@@ -1,3 +1,4 @@
+# some utility functions for the benchmark.
 import glob
 
 # from needletail import reverse_complement as needletail_reverse_complement
@@ -16,8 +17,11 @@ import pysam
 # import pysam.samtools
 from needletail import parse_fastx_file  # , NeedletailError, normalize_seq
 from tqdm import tqdm
-
+from collections import Counter
+import math
+import numpy as np
 # import time
+import polars_bio as pb
 
 pl.Config.set_tbl_cols(-1)
 
@@ -42,6 +46,221 @@ def apply_mismatches(sequence, n_mismatches):
         new_base = random.choice([b for b in "ATCG" if b != original_base])
         sequence_list[pos] = new_base
     return "".join(sequence_list)
+
+def calculate_shannon_entropy(s: str) -> float:
+    if not s:
+        return 0.0  #here in case of NULLs so that applting over ovject of size n still returns a number.  TODO: think if 0.0 is the best place holder value...
+
+    # Count character frequencies
+    char_counts = Counter(s)
+    total_chars = len(s)
+
+    entropy = 0.0
+    for count in char_counts.values():
+        probability = count / total_chars
+        # entropy -= probability * math.log10(probability) # TODO: check which base other people use.
+        entropy -= probability * math.log2(probability)
+    return entropy
+
+def count_kmers_df_explicit(df: pl.DataFrame, seq_col: str = "seq",id_col: str = "seqid", k: int = 3, relative: bool = False) -> pl.DataFrame:
+    """Calculate ALL k-mers counts for all sequences in a DataFrame. all possible k-mers are counted, not just the complete ones."""
+    # Split sequences into characters
+    import itertools
+    all_kmers = [''.join(p) for p in itertools.product('ATCGN', repeat=k)]
+    count_df = df.with_columns(
+        pl.col(seq_col).str.extract_many(all_kmers, overlapping=True,ascii_case_insensitive=True).alias('kmers')
+    ).group_by(id_col).agg(
+        pl.col('kmers').explode().value_counts(normalize=relative).alias(f'kmer_{k}_relative' if relative else f'kmer_{k}_counts'),
+    )
+    return count_df
+
+
+
+def count_kmers_df(df: pl.DataFrame, seq_col: str = "seq",id_col: str = "seqid", k: int = 3, relative: bool = False) -> pl.DataFrame:
+    """Calculate k-mer counts for all sequences in a DataFrame"""
+    # Split sequences into characters
+    split_chars_expr = pl.col(seq_col).str.split('').alias('chars')
+    
+    # Create k-mers by shifting and concatenating # TODO: look if this can be down in one step or if there is some sliding window function.
+    create_kmers_expr = pl.concat_str(
+        [pl.col('chars').shift(-i).over(id_col) for i in range(k)]
+    ).alias('substrings')
+    
+    # Filter for complete k-mers only
+    filter_complete_kmers_expr = pl.col('substrings').str.len_chars() == k
+    
+    # Aggregate expressions
+    agg_exprs = [
+        pl.first(seq_col),  # Keep the original sequence
+        pl.col('substrings').value_counts(normalize=relative).alias(f'kmer_{k}_relative' if relative else f'kmer_{k}_counts'),
+        pl.exclude(seq_col, 'chars', 'substrings').first()  # Keep all other original columns
+    ]
+    
+    return (
+        df
+        .with_columns(split_chars_expr)
+        .explode('chars')
+        .with_columns(create_kmers_expr)
+        .filter(filter_complete_kmers_expr)
+        .group_by(id_col, maintain_order=True)
+        .agg(*agg_exprs)
+    )
+
+def filter_repetitive_kmers(df: pl.DataFrame, seq_col: str = "seq",id_col: str = "seqid", k: int = 5, max_count: int = 10) -> pl.DataFrame:
+    """Filter sequences that have any k-mer appearing more than max_count times"""
+    # First get k-mer counts
+    df_with_kmers = count_kmers_df(df, seq_col,id_col, k, relative=False)
+    
+    # Filter for sequences without highly repetitive k-mers
+    filter_repetitive_expr = ~pl.col('kmer_counts').list.eval(
+        pl.element().struct.field('count') > max_count
+    ).list.any()
+    
+    return df_with_kmers.filter(filter_repetitive_expr)
+
+# lcc_mult and lcc_simp are sourced from the biopython library - we don't need to depend on it here just for these two functions.
+def lcc_mult(seq, wsize):
+    """Calculate Local Composition Complexity (LCC) values over sliding window.
+    sourced from: https://github.com/biopython/biopython/blob/e451db211bdd855a5d0f1f6bba18985ffee12696/Bio/SeqUtils/lcc.py#L13
+
+    Returns a list of floats, the LCC values for a sliding window over
+    the sequence.
+
+    seq - an unambiguous DNA sequence (a string or Seq object)
+    wsize - window size, integer
+
+    The result is the same as applying lcc_simp multiple times, but this
+    version is optimized for speed. The optimization works by using the
+    value of previous window as a base to compute the next one.
+    """
+    l4 = math.log(4)
+    seq = seq.upper()
+    tamseq = len(seq)
+    compone = [0]
+    lccsal = []
+    for i in range(wsize):
+        compone.append(((i + 1) / wsize) * math.log((i + 1) / wsize) / l4)
+    window = seq[0:wsize]
+    cant_a = window.count("A")
+    cant_c = window.count("C")
+    cant_t = window.count("T")
+    cant_g = window.count("G")
+    term_a = compone[cant_a]
+    term_c = compone[cant_c]
+    term_t = compone[cant_t]
+    term_g = compone[cant_g]
+    lccsal.append(-(term_a + term_c + term_t + term_g))
+    tail = seq[0]
+    for x in range(tamseq - wsize):
+        window = seq[x + 1 : wsize + x + 1]
+        if tail == window[-1]:
+            lccsal.append(lccsal[-1])
+        elif tail == "A":
+            cant_a -= 1
+            if window.endswith("C"):
+                cant_c += 1
+                term_a = compone[cant_a]
+                term_c = compone[cant_c]
+                lccsal.append(-(term_a + term_c + term_t + term_g))
+            elif window.endswith("T"):
+                cant_t += 1
+                term_a = compone[cant_a]
+                term_t = compone[cant_t]
+                lccsal.append(-(term_a + term_c + term_t + term_g))
+            elif window.endswith("G"):
+                cant_g += 1
+                term_a = compone[cant_a]
+                term_g = compone[cant_g]
+                lccsal.append(-(term_a + term_c + term_t + term_g))
+        elif tail == "C":
+            cant_c -= 1
+            if window.endswith("A"):
+                cant_a += 1
+                term_a = compone[cant_a]
+                term_c = compone[cant_c]
+                lccsal.append(-(term_a + term_c + term_t + term_g))
+            elif window.endswith("T"):
+                cant_t += 1
+                term_c = compone[cant_c]
+                term_t = compone[cant_t]
+                lccsal.append(-(term_a + term_c + term_t + term_g))
+            elif window.endswith("G"):
+                cant_g += 1
+                term_c = compone[cant_c]
+                term_g = compone[cant_g]
+                lccsal.append(-(term_a + term_c + term_t + term_g))
+        elif tail == "T":
+            cant_t -= 1
+            if window.endswith("A"):
+                cant_a += 1
+                term_a = compone[cant_a]
+                term_t = compone[cant_t]
+                lccsal.append(-(term_a + term_c + term_t + term_g))
+            elif window.endswith("C"):
+                cant_c += 1
+                term_c = compone[cant_c]
+                term_t = compone[cant_t]
+                lccsal.append(-(term_a + term_c + term_t + term_g))
+            elif window.endswith("G"):
+                cant_g += 1
+                term_t = compone[cant_t]
+                term_g = compone[cant_g]
+                lccsal.append(-(term_a + term_c + term_t + term_g))
+        elif tail == "G":
+            cant_g -= 1
+            if window.endswith("A"):
+                cant_a += 1
+                term_a = compone[cant_a]
+                term_g = compone[cant_g]
+                lccsal.append(-(term_a + term_c + term_t + term_g))
+            elif window.endswith("C"):
+                cant_c += 1
+                term_c = compone[cant_c]
+                term_g = compone[cant_g]
+                lccsal.append(-(term_a + term_c + term_t + term_g))
+            elif window.endswith("T"):
+                cant_t += 1
+                term_t = compone[cant_t]
+                term_g = compone[cant_g]
+                lccsal.append(-(term_a + term_c + term_t + term_g))
+        tail = window[0]
+    return lccsal
+
+# lcc_mult and lcc_simp are sourced from the biopython library - we don't need to depend on it here just for these two functions.
+def lcc_simp(seq):
+    """Calculate Local Composition Complexity (LCC) for a sequence.
+    sourced from: https://github.com/biopython/biopython/blob/e451db211bdd855a5d0f1f6bba18985ffee12696/Bio/SeqUtils/lcc.py#L120
+
+    seq - an unambiguous DNA sequence (a string or Seq object)
+
+    Returns the Local Composition Complexity (LCC) value for the entire
+    sequence (as a float).
+
+    Reference:
+    Andrzej K Konopka (2005) Sequence Complexity and Composition
+    https://doi.org/10.1038/npg.els.0005260
+    """
+    wsize = len(seq)
+    seq = seq.upper()
+    l4 = math.log(4)
+    # Check to avoid calculating the log of 0.
+    if "A" not in seq:
+        term_a = 0
+    else:
+        term_a = (seq.count("A") / wsize) * math.log(seq.count("A") / wsize) / l4
+    if "C" not in seq:
+        term_c = 0
+    else:
+        term_c = (seq.count("C") / wsize) * math.log(seq.count("C") / wsize) / l4
+    if "T" not in seq:
+        term_t = 0
+    else:
+        term_t = (seq.count("T") / wsize) * math.log(seq.count("T") / wsize) / l4
+    if "G" not in seq:
+        term_g = 0
+    else:
+        term_g = (seq.count("G") / wsize) * math.log(seq.count("G") / wsize) / l4
+    return -(term_a + term_c + term_t + term_g)
 
 
 def reverse_complement(sequence):
@@ -231,7 +450,7 @@ def simulate_data(
     return contigs, spacers, ground_truth
 
 
-from rust_simulator import Simulator
+from rust_simulator import Simulator, BaseComposition, DistributionType
 
 
 def generate_simulation_id(params):
@@ -268,6 +487,15 @@ def simulate_data_rust(
     verify=True,
     results_dir=None,
     id_prefix=None,
+    # New parameters for base composition and distribution
+    contig_distribution=None,
+    spacer_distribution=None,
+    base_composition=None,
+    gc_content=None,
+    a_frac=None,
+    t_frac=None,
+    c_frac=None,
+    g_frac=None,
 ):
     if contigs is not None or spacers is not None:
         return simulate_data(
@@ -313,7 +541,26 @@ def simulate_data_rust(
         print(f"Using provided ID prefix: {id_prefix}")
 
     simulator = Simulator()
-    contigs, spacers, ground_truth, myers_ground_truth = simulator.simulate_data(
+    
+    # Handle base composition
+    composition_obj = None
+    if base_composition is not None:
+        composition_obj = base_composition
+    elif gc_content is not None:
+        composition_obj = BaseComposition.from_gc_content(gc_content)
+    elif all(x is not None for x in [a_frac, t_frac, c_frac, g_frac]):
+        composition_obj = BaseComposition.from_fractions(a_frac, t_frac, c_frac, g_frac)
+    
+    # Handle distribution types
+    contig_dist_obj = None
+    if contig_distribution is not None:
+        contig_dist_obj = DistributionType(contig_distribution)
+    
+    spacer_dist_obj = None
+    if spacer_distribution is not None:
+        spacer_dist_obj = DistributionType(spacer_distribution)
+    
+    contigs, spacers, ground_truth = simulator.simulate_data(
         tuple(contig_length_range),
         tuple(spacer_length_range),
         tuple(n_mismatch_range),
@@ -327,6 +574,9 @@ def simulate_data_rust(
         verify,
         results_dir,
         id_prefix,
+        contig_dist_obj,
+        spacer_dist_obj,
+        composition_obj,
     )
 
     if debug:
@@ -367,7 +617,7 @@ def simulate_data_rust(
             raise ValueError("Simulated data is not correct")
         else:
             print("Simulated data is correct")
-    return contigs, spacers, ground_truth_df, myers_ground_truth
+    return contigs, spacers, ground_truth_df
 
 
 def verify_simulated_data(
@@ -2436,7 +2686,7 @@ def compare_aligner(
         index = row["index"]
         spacer_id = row["spacer_id"]
         contig_id = row["contig_id"]
-        strand = row["strand"]
+        # strand = row["strand"]  # Not used in this context
         start = row["start"]
         end = row["end"]
         ground_truth_same_pair = ground_truth.filter(
@@ -2608,3 +2858,390 @@ def parse_sam(
     return parse_samVn_with_lens_pysam(
         sam_file, spacer_lendf, max_mismatches, threads, ref_file, **kwargs
     )
+
+
+def validate_intervals_with_polars_bio(planned_intervals, tool_results, max_mismatches=5):
+    """
+    Validate tool results against planned intervals using polars-bio interval operations.
+    
+    Args:
+        planned_intervals: DataFrame with planned spacer insertions (spacer_id, contig_id, start, end, strand, mismatches)
+        tool_results: DataFrame with tool results (spacer_id, contig_id, start, end, strand, mismatches)
+        max_mismatches: Maximum allowed mismatches for validation
+    
+    Returns:
+        DataFrame with validation results
+    """
+    # Filter tool results by max mismatches
+    tool_results_filtered = tool_results.filter(pl.col("mismatches") <= max_mismatches)
+    
+    # Convert to polars-bio format for interval operations
+    planned_df = planned_intervals.with_columns([
+        pl.col("start").cast(pl.UInt32),
+        pl.col("end").cast(pl.UInt32),
+        pl.col("strand").cast(pl.Utf8)
+    ])
+    
+    tool_df = tool_results_filtered.with_columns([
+        pl.col("start").cast(pl.UInt32),
+        pl.col("end").cast(pl.UInt32),
+        pl.col("strand").cast(pl.Utf8)
+    ])
+    
+    # Use polars-bio overlap operation
+    overlap_result = pb.overlap(planned_df, tool_df)
+    
+    # Calculate validation metrics
+    validation_results = overlap_result.with_columns([
+        pl.when(pl.col("start_1") <= pl.col("start_2") & pl.col("end_1") >= pl.col("end_2"))
+        .then(pl.lit("exact_match"))
+        .when(pl.col("start_1") < pl.col("start_2") & pl.col("end_1") > pl.col("start_2"))
+        .then(pl.lit("partial_overlap"))
+        .when(pl.col("start_2") < pl.col("start_1") & pl.col("end_2") > pl.col("start_1"))
+        .then(pl.lit("partial_overlap"))
+        .otherwise(pl.lit("no_overlap"))
+        .alias("overlap_type")
+    ])
+    
+    return validation_results
+
+
+def validate_intervals_fallback(planned_intervals, tool_results, max_mismatches=5):
+    """
+    Fallback interval validation without polars-bio.
+    """
+    # Filter tool results by max mismatches
+    tool_results_filtered = tool_results.filter(pl.col("mismatches") <= max_mismatches)
+    
+    # Simple overlap detection using polars operations
+    joined = planned_intervals.join(
+        tool_results_filtered,
+        on=["spacer_id", "contig_id", "strand"],
+        how="inner",
+        suffix="_tool"
+    )
+    
+    # Check for overlaps
+    overlap_conditions = (
+        (pl.col("start") <= pl.col("start_tool")) & 
+        (pl.col("end") >= pl.col("end_tool"))
+    ) | (
+        (pl.col("start_tool") <= pl.col("start")) & 
+        (pl.col("end_tool") >= pl.col("end"))
+    ) | (
+        (pl.col("start") < pl.col("end_tool")) & 
+        (pl.col("end") > pl.col("start_tool"))
+    )
+    
+    validation_results = joined.with_columns([
+        pl.when(overlap_conditions)
+        .then(pl.lit("overlap"))
+        .otherwise(pl.lit("no_overlap"))
+        .alias("overlap_type")
+    ])
+    
+    return validation_results
+
+
+def detect_spurious_alignments(contigs, spacers, planned_intervals, max_mismatches=5, 
+                              alignment_threshold=0.8):
+    """
+    Detect spurious (non-planned) alignments in contigs that match spacer sequences.
+    
+    Args:
+        contigs: Dictionary of contig_id -> sequence
+        spacers: Dictionary of spacer_id -> sequence  
+        planned_intervals: DataFrame with planned insertions
+        max_mismatches: Maximum mismatches to consider
+        alignment_threshold: Minimum alignment score threshold
+    
+    Returns:
+        DataFrame with detected spurious alignments
+    """
+    spurious_alignments = []
+    
+    # Create a set of planned positions for quick lookup
+    planned_positions = set()
+    for row in planned_intervals.iter_rows(named=True):
+        key = (row['spacer_id'], row['contig_id'], row['start'], row['end'], row['strand'])
+        planned_positions.add(key)
+    
+    # Check each spacer against each contig
+    for spacer_id, spacer_seq in spacers.items():
+        for contig_id, contig_seq in contigs.items():
+            # Perform alignment using parasail
+            result = ps.sg_qx_trace_scan_sat(
+                spacer_seq.encode('utf-8'),
+                contig_seq.encode('utf-8'),
+                2,  # match score
+                -1,  # mismatch penalty
+                -1,  # gap open penalty
+                -1   # gap extend penalty
+            )
+            
+            # Check if alignment meets criteria
+            if result.score >= len(spacer_seq) * alignment_threshold:
+                # Find all alignment positions
+                for i in range(len(contig_seq) - len(spacer_seq) + 1):
+                    region = contig_seq[i:i + len(spacer_seq)]
+                    
+                    # Calculate mismatches
+                    mismatches = sum(1 for a, b in zip(spacer_seq, region) if a != b)
+                    
+                    if mismatches <= max_mismatches:
+                        # Check if this position was planned
+                        key = (spacer_id, contig_id, i, i + len(spacer_seq), False)
+                        if key not in planned_positions:
+                            spurious_alignments.append({
+                                'spacer_id': spacer_id,
+                                'contig_id': contig_id,
+                                'start': i,
+                                'end': i + len(spacer_seq),
+                                'strand': False,
+                                'mismatches': mismatches,
+                                'type': 'spurious'
+                            })
+    
+    return pl.DataFrame(spurious_alignments) if spurious_alignments else pl.DataFrame()
+
+
+def estimate_expected_spurious_alignments(contigs, spacers, num_random_samples=1000, 
+                                        max_mismatches=5, alignment_threshold=0.8):
+    """
+    Estimate expected number of spurious alignments by testing against random sequences.
+    
+    Args:
+        contigs: Dictionary of contig_id -> sequence
+        spacers: Dictionary of spacer_id -> sequence
+        num_random_samples: Number of random sequences to test
+        max_mismatches: Maximum mismatches to consider
+        alignment_threshold: Minimum alignment score threshold
+    
+    Returns:
+        Dictionary with spurious alignment statistics
+    """
+    spurious_counts = []
+    
+    # Generate random sequences with similar characteristics to contigs
+    contig_lengths = [len(seq) for seq in contigs.values()]
+    avg_length = sum(contig_lengths) / len(contig_lengths)
+    
+    for _ in range(num_random_samples):
+        # Generate random sequence
+        random_seq = ''.join(random.choices('ATCG', k=int(avg_length)))
+        
+        # Test against all spacers
+        spurious_count = 0
+        for spacer_id, spacer_seq in spacers.items():
+            result = ps.sg_qx_trace_scan_sat(
+                spacer_seq.encode('utf-8'),
+                random_seq.encode('utf-8'),
+                2, -1, -1, -1
+            )
+            
+            if result.score >= len(spacer_seq) * alignment_threshold:
+                # Check for alignments with acceptable mismatches
+                for i in range(len(random_seq) - len(spacer_seq) + 1):
+                    region = random_seq[i:i + len(spacer_seq)]
+                    mismatches = sum(1 for a, b in zip(spacer_seq, region) if a != b)
+                    
+                    if mismatches <= max_mismatches:
+                        spurious_count += 1
+        
+        spurious_counts.append(spurious_count)
+    
+    return {
+        'mean_spurious': np.mean(spurious_counts),
+        'std_spurious': np.std(spurious_counts),
+        'max_spurious': max(spurious_counts),
+        'min_spurious': min(spurious_counts),
+        'samples': spurious_counts
+    }
+
+
+def compare_tool_results_with_intervals(planned_intervals, tool_results, max_mismatches=5):
+    """
+    Compare tool results against planned intervals using interval-based validation.
+    
+    Args:
+        planned_intervals: DataFrame with planned spacer insertions
+        tool_results: DataFrame with tool results
+        max_mismatches: Maximum allowed mismatches
+    
+    Returns:
+        Dictionary with comparison metrics
+    """
+    # Validate intervals
+    validation_results = validate_intervals_with_polars_bio(
+        planned_intervals, tool_results, max_mismatches
+    )
+    
+    # Calculate metrics
+    total_planned = planned_intervals.height
+    total_tool_results = tool_results.height
+    overlapping_results = validation_results.filter(pl.col("overlap_type") != "no_overlap").height
+    
+    # Calculate precision and recall
+    precision = overlapping_results / total_tool_results if total_tool_results > 0 else 0
+    recall = overlapping_results / total_planned if total_planned > 0 else 0
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    
+    return {
+        'total_planned': total_planned,
+        'total_tool_results': total_tool_results,
+        'overlapping_results': overlapping_results,
+        'precision': precision,
+        'recall': recall,
+        'f1_score': f1_score,
+        'validation_results': validation_results
+    }
+
+
+def comprehensive_interval_validation(planned_intervals, tool_results, contigs, spacers, 
+                                    max_mismatches=5, alignment_threshold=0.8, 
+                                    num_random_samples=1000):
+    """
+    Comprehensive interval-based validation that includes:
+    1. Interval overlap validation
+    2. Spurious alignment detection
+    3. Expected spurious alignment estimation
+    
+    Args:
+        planned_intervals: DataFrame with planned spacer insertions
+        tool_results: DataFrame with tool results
+        contigs: Dictionary of contig_id -> sequence
+        spacers: Dictionary of spacer_id -> sequence
+        max_mismatches: Maximum allowed mismatches
+        alignment_threshold: Minimum alignment score threshold
+        num_random_samples: Number of random samples for spurious estimation
+    
+    Returns:
+        Dictionary with comprehensive validation results
+    """
+    print("Starting comprehensive interval validation...")
+    
+    # 1. Validate intervals using polars-bio
+    print("1. Validating intervals with polars-bio...")
+    validation_results = validate_intervals_with_polars_bio(
+        planned_intervals, tool_results, max_mismatches
+    )
+    
+    # 2. Compare tool results with planned intervals
+    print("2. Comparing tool results with planned intervals...")
+    comparison_metrics = compare_tool_results_with_intervals(
+        planned_intervals, tool_results, max_mismatches
+    )
+    
+    # 3. Detect spurious alignments
+    print("3. Detecting spurious alignments...")
+    spurious_alignments = detect_spurious_alignments(
+        contigs, spacers, planned_intervals, max_mismatches, alignment_threshold
+    )
+    
+    # 4. Estimate expected spurious alignments
+    print("4. Estimating expected spurious alignments...")
+    spurious_estimation = estimate_expected_spurious_alignments(
+        contigs, spacers, num_random_samples, max_mismatches, alignment_threshold
+    )
+    
+    # 5. Calculate additional metrics
+    print("5. Calculating additional metrics...")
+    
+    # False positive rate
+    total_spurious_detected = spurious_alignments.height
+    expected_spurious = spurious_estimation['mean_spurious']
+    false_positive_rate = total_spurious_detected / comparison_metrics['total_tool_results'] if comparison_metrics['total_tool_results'] > 0 else 0
+    
+    # Spurious detection rate
+    spurious_detection_rate = total_spurious_detected / expected_spurious if expected_spurious > 0 else 0
+    
+    # Overlap type distribution
+    overlap_type_counts = validation_results.group_by("overlap_type").agg([
+        pl.count().alias("count")
+    ]).sort("count", descending=True)
+    
+    results = {
+        'validation_results': validation_results,
+        'comparison_metrics': comparison_metrics,
+        'spurious_alignments': spurious_alignments,
+        'spurious_estimation': spurious_estimation,
+        'overlap_type_counts': overlap_type_counts,
+        'false_positive_rate': false_positive_rate,
+        'spurious_detection_rate': spurious_detection_rate,
+        'total_spurious_detected': total_spurious_detected,
+        'expected_spurious': expected_spurious
+    }
+    
+    print("Validation complete!")
+    print(f"Total planned intervals: {comparison_metrics['total_planned']}")
+    print(f"Total tool results: {comparison_metrics['total_tool_results']}")
+    print(f"Overlapping results: {comparison_metrics['overlapping_results']}")
+    print(f"Precision: {comparison_metrics['precision']:.3f}")
+    print(f"Recall: {comparison_metrics['recall']:.3f}")
+    print(f"F1 Score: {comparison_metrics['f1_score']:.3f}")
+    print(f"Spurious alignments detected: {total_spurious_detected}")
+    print(f"Expected spurious alignments: {expected_spurious:.1f} ± {spurious_estimation['std_spurious']:.1f}")
+    print(f"False positive rate: {false_positive_rate:.3f}")
+    
+    return results
+
+
+def create_interval_validation_report(results, output_file=None):
+    """
+    Create a comprehensive report of interval validation results.
+    
+    Args:
+        results: Results from comprehensive_interval_validation
+        output_file: Optional file path to save report
+    
+    Returns:
+        String containing the report
+    """
+    report = []
+    report.append("=" * 80)
+    report.append("INTERVAL-BASED VALIDATION REPORT")
+    report.append("=" * 80)
+    report.append("")
+    
+    # Basic metrics
+    metrics = results['comparison_metrics']
+    report.append("BASIC METRICS:")
+    report.append(f"  Total planned intervals: {metrics['total_planned']}")
+    report.append(f"  Total tool results: {metrics['total_tool_results']}")
+    report.append(f"  Overlapping results: {metrics['overlapping_results']}")
+    report.append(f"  Precision: {metrics['precision']:.3f}")
+    report.append(f"  Recall: {metrics['recall']:.3f}")
+    report.append(f"  F1 Score: {metrics['f1_score']:.3f}")
+    report.append("")
+    
+    # Spurious alignment analysis
+    report.append("SPURIOUS ALIGNMENT ANALYSIS:")
+    report.append(f"  Spurious alignments detected: {results['total_spurious_detected']}")
+    report.append(f"  Expected spurious alignments: {results['expected_spurious']:.1f} ± {results['spurious_estimation']['std_spurious']:.1f}")
+    report.append(f"  False positive rate: {results['false_positive_rate']:.3f}")
+    report.append(f"  Spurious detection rate: {results['spurious_detection_rate']:.3f}")
+    report.append("")
+    
+    # Overlap type distribution
+    report.append("OVERLAP TYPE DISTRIBUTION:")
+    for row in results['overlap_type_counts'].iter_rows(named=True):
+        report.append(f"  {row['overlap_type']}: {row['count']}")
+    report.append("")
+    
+    # Spurious estimation details
+    estimation = results['spurious_estimation']
+    report.append("SPURIOUS ESTIMATION DETAILS:")
+    report.append(f"  Mean: {estimation['mean_spurious']:.1f}")
+    report.append(f"  Standard deviation: {estimation['std_spurious']:.1f}")
+    report.append(f"  Min: {estimation['min_spurious']}")
+    report.append(f"  Max: {estimation['max_spurious']}")
+    report.append("")
+    
+    report_text = "\n".join(report)
+    
+    if output_file:
+        with open(output_file, 'w') as f:
+            f.write(report_text)
+        print(f"Report saved to: {output_file}")
+    
+    return report_text

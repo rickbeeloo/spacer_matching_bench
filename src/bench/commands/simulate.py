@@ -1,7 +1,6 @@
 import argparse
 import os
 
-import polars as pl
 
 from bench.utils.functions import *
 from bench.utils.arg_parsers import add_common_args
@@ -57,6 +56,14 @@ def main():
         threads=args.threads,
         results_dir=output_dir,
         id_prefix=args.id_prefix,
+        # New parameters
+        contig_distribution=args.contig_distribution,
+        spacer_distribution=args.spacer_distribution,
+        gc_content=args.gc_content,
+        a_frac=args.a_frac,
+        t_frac=args.t_frac,
+        c_frac=args.c_frac,
+        g_frac=args.g_frac,
     )
     print(f"Generated {len(contigs)} contigs and {len(spacers)} spacers")
     print(f"Simulation completed successfully. Data saved to {output_dir}")

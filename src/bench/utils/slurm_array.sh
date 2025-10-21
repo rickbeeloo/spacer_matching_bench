@@ -18,14 +18,14 @@
 ## specify job name
 #SBATCH -J spacer_matching_bench
 ## specify output and error file
-#SBATCH -o /clusterfs/jgi/scratch/science/metagen/neri/code/blits/spacer_matching_bench/slurmsout/Slurmout-%A_%a.out
-#SBATCH -e /clusterfs/jgi/scratch/science/metagen/neri/code/blits/spacer_matching_bench/slurmsout/Slurmout-%A_%a.err
+#SBATCH -o /clusterfs/jgi/scratch/science/metagen/neri/code/blits/spacer_bench/slurmsout/Slurmout-%A_%a.out
+#SBATCH -e /clusterfs/jgi/scratch/science/metagen/neri/code/blits/spacer_bench/slurmsout/Slurmout-%A_%a.err
 
 ## specify that we never run more than XX jobs at a time (using "%", e.g. --array=0-5%2)
 #SBATCH --array=0-5%1
 
 
-cd /clusterfs/jgi/scratch/science/metagen/neri/code/blits/spacer_matching_bench/
+cd /clusterfs/jgi/scratch/science/metagen/neri/code/blits/spacer_bench/
 eval "$(mamba shell hook --shell bash)"
 mamba activate base_env
 # echo $SLURM_MEM_PER_NODE

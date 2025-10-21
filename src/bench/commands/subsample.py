@@ -2,7 +2,7 @@ import argparse
 import os
 import random
 import logging
-from typing import Union, List, Dict, Tuple, Optional
+from typing import Union, List, Tuple, Optional
 
 import polars as pl
 
@@ -28,7 +28,7 @@ def parse_reduction_factor(reduce_val: str) -> Tuple[float, bool]:
             return int(reduce_val), False
         else:
             raise ValueError("Reduction factor must be > 0")
-    except ValueError as e:
+    except ValueError:
         raise ValueError(f"Invalid reduction factor: {reduce_val}. Must be fraction (0-1) or absolute number (>1)")
 
 
@@ -55,8 +55,8 @@ def perform_stratified_sampling(
     selected_contigs = []
     
     # Create bins for GC content and length
-    gc_min, gc_max = metadata['gc'].min(), metadata['gc'].max()
-    length_min, length_max = metadata['length'].min(), metadata['length'].max()
+    # Note: gc_min, gc_max, length_min, length_max are calculated but not used
+    # as qcut automatically determines the bins from the data
     
     # Add bin columns
     metadata = metadata.with_columns([
@@ -333,7 +333,7 @@ def subsample_dataset(
     logger.info(f"Using metadata for {contig_count} contigs")
     
     # Filter by quality if specified
-    hq_contigs = metadata.filter(pl.col('hq') == True)
+    hq_contigs = metadata.filter(pl.col('hq'))
     hq_contigs = hq_contigs.sample(fraction=hq_fraction)
 
     logger.info(f"Selected {hq_contigs.height} high-quality contigs")
@@ -371,7 +371,7 @@ def subsample_dataset(
     logger.info(f"Writing subsampled metadata to {metadata_output}")
     subsampled_metadata.write_csv(metadata_output, separator="\t")
     
-    logger.info(f"Subsampling completed successfully!")
+    logger.info("Subsampling completed successfully!")
     logger.info(f"Results saved to: {output_dir}")
     logger.info(f"Original contigs: {contig_count}")
     logger.info(f"Subsampled contigs: {subsampled_metadata.height}")
@@ -381,7 +381,7 @@ def subsample_dataset(
     logger.info(f"Original contigs: {metadata.height}")
     logger.info(f"Subsampled contigs: {subsampled_metadata.height}")
     logger.info(f"Reduction factor: {(metadata.height) / subsampled_metadata.height:.3f}")
-    logger.info(f"Sampled contigs stats:")
+    logger.info("Sampled contigs stats:")
     for col in ["length", "gc"]:
         logger.info(f"{col} range: {subsampled_metadata[col].min()} - {subsampled_metadata[col].max()}")
     logger.info(f"{taxonomic_rank} value  counts: {subsampled_metadata[taxonomic_rank].value_counts(sort=True)}")

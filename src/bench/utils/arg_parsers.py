@@ -1,6 +1,5 @@
 """Shared argument parser functions for bench commands."""
 
-import argparse
 
 
 def add_common_args(parser):
@@ -95,6 +94,54 @@ def add_common_args(parser):
         type=str,
         default=None,
         help="Prefix for sequence IDs (default is hash of parameters)",
+    )
+    
+    # Base composition arguments
+    parser.add_argument(
+        "--gc_content",
+        type=float,
+        default=None,
+        help="GC content percentage (0-100). Mutually exclusive with individual base fractions.",
+    )
+    parser.add_argument(
+        "--a_frac",
+        type=float,
+        default=None,
+        help="A fraction (0-1). Requires t_frac, c_frac, g_frac to be specified.",
+    )
+    parser.add_argument(
+        "--t_frac",
+        type=float,
+        default=None,
+        help="T fraction (0-1). Requires a_frac, c_frac, g_frac to be specified.",
+    )
+    parser.add_argument(
+        "--c_frac",
+        type=float,
+        default=None,
+        help="C fraction (0-1). Requires a_frac, t_frac, g_frac to be specified.",
+    )
+    parser.add_argument(
+        "--g_frac",
+        type=float,
+        default=None,
+        help="G fraction (0-1). Requires a_frac, t_frac, c_frac to be specified.",
+    )
+    
+    # Distribution type arguments
+    parser.add_argument(
+        "--contig_distribution",
+        type=str,
+        choices=["uniform", "normal", "bell"],
+        default=None,
+        help="Distribution type for contig lengths (default: uniform)",
+    )
+    parser.add_argument(
+        "--spacer_distribution",
+        type=str,
+        choices=["uniform", "normal", "bell"],
+        default=None,
+        help="Distribution type for spacer lengths (default: uniform)",
     )
 
 

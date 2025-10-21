@@ -1,7 +1,6 @@
 import argparse
 import os
 
-import polars as pl
 
 from bench.utils.functions import *
 from bench.utils.tool_commands import populate_tools

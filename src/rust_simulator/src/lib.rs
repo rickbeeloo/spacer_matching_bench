@@ -8,12 +8,97 @@ use std::io::{BufWriter, Write};
 use bio::io::fasta;
 use std::cmp::max;
 use std::sync::Arc;
-use bio::pattern_matching::myers::Myers;
+use rand_distr::{Normal, Distribution, Beta};
+
+#[derive(Debug, Clone)]
+#[pyclass]
+pub enum DistributionType {
+    Uniform,
+    Normal,
+    Bell, // Beta distribution for bell curve
+}
+
+#[pymethods]
+impl DistributionType {
+    #[new]
+    fn new(dist_type: &str) -> PyResult<Self> {
+        match dist_type.to_lowercase().as_str() {
+            "uniform" => Ok(DistributionType::Uniform),
+            "normal" => Ok(DistributionType::Normal),
+            "bell" => Ok(DistributionType::Bell),
+            _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "Distribution type must be 'uniform', 'normal', or 'bell'"
+            ))
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+#[pyclass]
+pub struct BaseComposition {
+    pub a_frac: f64,
+    pub t_frac: f64,
+    pub c_frac: f64,
+    pub g_frac: f64,
+}
+
+impl Default for BaseComposition {
+    fn default() -> Self {
+        BaseComposition {
+            a_frac: 0.25,
+            t_frac: 0.25,
+            c_frac: 0.25,
+            g_frac: 0.25,
+        }
+    }
+}
+
+#[pymethods]
+impl BaseComposition {
+    #[new]
+    fn new(a_frac: f64, t_frac: f64, c_frac: f64, g_frac: f64) -> Self {
+        let total = a_frac + t_frac + c_frac + g_frac;
+        BaseComposition {
+            a_frac: a_frac / total,
+            t_frac: t_frac / total,
+            c_frac: c_frac / total,
+            g_frac: g_frac / total,
+        }
+    }
+    
+    #[staticmethod]
+    fn from_gc_content(gc_content: f64) -> Self {
+        let gc_frac = gc_content / 100.0;
+        let at_frac = (1.0 - gc_frac) / 2.0;
+        BaseComposition {
+            a_frac: at_frac,
+            t_frac: at_frac,
+            c_frac: gc_frac / 2.0,
+            g_frac: gc_frac / 2.0,
+        }
+    }
+    
+    #[staticmethod]
+    fn from_fractions(a: f64, t: f64, c: f64, g: f64) -> Self {
+        let total = a + t + c + g;
+        BaseComposition {
+            a_frac: a / total,
+            t_frac: t / total,
+            c_frac: c / total,
+            g_frac: g / total,
+        }
+    }
+    
+    fn get_weights(&self) -> Vec<f64> {
+        vec![self.a_frac, self.t_frac, self.c_frac, self.g_frac]
+    }
+}
 
 
 #[pyclass]
 struct Simulator {
     nucleotides: Vec<char>,
+    base_composition: BaseComposition,
 }
 
 #[pymethods]
@@ -22,23 +107,119 @@ impl Simulator {
     fn new() -> Self {
         Simulator {
             nucleotides: vec!['A', 'T', 'C', 'G'],
+            base_composition: BaseComposition::default(),
         }
     }
+    
+    // Added method to set base composition (Uri Neri @ 20.10.2025)
+    fn set_base_composition(&mut self, composition: BaseComposition) {
+        self.base_composition = composition;
+    }
+    
+    // Added method to set base composition from GC content
+    fn set_gc_content(&mut self, gc_content: f64) {
+        self.base_composition = BaseComposition::from_gc_content(gc_content);
+    }
+    
+    // Added methods to set base composition from fractions and GC content
+    fn set_base_fractions(&mut self, a: f64, t: f64, c: f64, g: f64) {
+        self.base_composition = BaseComposition::from_fractions(a, t, c, g);
+    }
 
+    // modified
     fn generate_random_sequence(&self, length: usize) -> String {
-        let mut rng = rand::thread_rng();
+        self.generate_random_sequence_with_composition(length, &self.base_composition)
+    }
+    
+    fn generate_random_sequence_with_composition(&self, length: usize, composition: &BaseComposition) -> String {
+        let mut rng = rand::rng();
+        let weights = composition.get_weights();
+        
         (0..length)
-            .map(|_| self.nucleotides[rng.random_range(0..4)])
+            .map(|_| {
+                let r: f64 = rng.random();
+                let mut cumulative = 0.0;
+                for (i, &weight) in weights.iter().enumerate() {
+                    cumulative += weight;
+                    if r <= cumulative {
+                        return self.nucleotides[i];
+                    }
+                }
+                // Fallback (shouldn't happen with proper weights)
+                self.nucleotides[0]
+            })
             .collect()
     }
 
+    // Added to allow using non-uniform distributions for contig and / or spacer lengths (default set to uniform for backward consistency)
+    fn generate_length_from_distribution(
+        &self,
+        range: (usize, usize),
+        distribution_type: &DistributionType,
+    ) -> usize {
+        let min_len = range.0;
+        let max_len = range.1;
+        
+        match distribution_type {
+            DistributionType::Uniform => {
+                let mut rng = rand::rng();
+                rng.random_range(min_len..=max_len)
+            }
+            DistributionType::Normal => {
+                let mean = (min_len + max_len) as f64 / 2.0;
+                let std_dev = (max_len - min_len) as f64 / 6.0; // 99.7% within range
+                let normal = Normal::new(mean, std_dev).unwrap();
+                
+                loop {
+                    let mut rng = rand::rng();
+                    let sample = normal.sample(&mut rng) as usize;
+                    if sample >= min_len && sample <= max_len {
+                        return sample;
+                    }
+                }
+            }
+            DistributionType::Bell => {
+                // Use Beta distribution for bell curve
+                let alpha = 2.0;
+                let beta = 2.0;
+                let beta_dist = Beta::new(alpha, beta).unwrap();
+                let mut rng = rand::rng();
+                let sample = beta_dist.sample(&mut rng);
+                min_len + ((sample * (max_len - min_len) as f64) as usize)
+            }
+        }
+    }
+
+        // Add these methods to the Simulator impl
+    fn set_contig_distribution(&mut self, dist_type: &str) -> PyResult<()> {
+        match dist_type.to_lowercase().as_str() {
+            "uniform" => Ok(()),
+            "normal" => Ok(()),
+            "bell" => Ok(()),
+            _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "Distribution type must be 'uniform', 'normal', or 'bell'"
+            ))
+        }
+    }
+
+    fn set_spacer_distribution(&mut self, dist_type: &str) -> PyResult<()> {
+        match dist_type.to_lowercase().as_str() {
+            "uniform" => Ok(()),
+            "normal" => Ok(()),
+            "bell" => Ok(()),
+            _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "Distribution type must be 'uniform', 'normal', or 'bell'"
+            ))
+        }
+    }
+
     fn apply_mutations(&self, sequence: &str, n_mismatches: usize, n_insertions: usize, n_deletions: usize) -> String {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut sequence: Vec<char> = sequence.chars().collect();
         
         // Apply insertions first (before mismatches and deletions)
         for _ in 0..n_insertions {
-            let insert_pos = rng.gen_range(0..=sequence.len());
+            let insert_pos = rng.random_range(0..=sequence.len());
             let new_base = *self.nucleotides.choose(&mut rng).unwrap();
             sequence.insert(insert_pos, new_base);
         }
@@ -46,7 +227,7 @@ impl Simulator {
         // Apply deletions after insertions
         for _ in 0..n_deletions {
             if !sequence.is_empty() {
-                let delete_pos = rng.gen_range(0..sequence.len());
+                let delete_pos = rng.random_range(0..sequence.len());
                 sequence.remove(delete_pos);
             }
         }
@@ -191,7 +372,12 @@ impl Simulator {
         verify: bool,
         output_dir: String,
         id_prefix: Option<String>,
-    ) -> PyResult<(HashMap<String, String>, HashMap<String, String>, Vec<Vec<String>>, Vec<Vec<String>>)> {
+        // New optional parameters with defaults
+        contig_distribution: Option<DistributionType>,
+        spacer_distribution: Option<DistributionType>,
+        base_composition: Option<BaseComposition>,
+    ) -> PyResult<(HashMap<String, String>, HashMap<String, String>, Vec<Vec<String>>)> {
+        
         // Estimate required contig space
         let avg_spacer_length = (spacer_length_range.0 + spacer_length_range.1) / 2;
         // For a more conservative estimate, use max insertions if the range is wide
@@ -242,9 +428,17 @@ impl Simulator {
             let contigs: HashMap<String, String> = (0..sample_size_contigs)
                 .into_par_iter()
                 .map(|i| {
-                    let mut rng = rand::thread_rng();
-                    let length = rng.random_range(contig_length_range.0..=contig_length_range.1);
-                    let sequence = self.generate_random_sequence(length);
+                    let mut rng = rand::rng();
+                    let length = if let Some(ref dist) = contig_distribution {
+                        self.generate_length_from_distribution(contig_length_range, dist)
+                    } else {
+                        rng.random_range(contig_length_range.0..=contig_length_range.1)
+                    };
+                    let sequence = if let Some(ref comp) = base_composition {
+                        self.generate_random_sequence_with_composition(length, comp)
+                    } else {
+                        self.generate_random_sequence(length)
+                    };
                     pb.inc(1);
                     
                     // Apply prefix if provided
@@ -268,9 +462,17 @@ impl Simulator {
             let spacers: HashMap<String, String> = (0..sample_size_spacers)
                 .into_par_iter()
                 .map(|i| {
-                    let mut rng = rand::thread_rng();
-                    let length = rng.random_range(spacer_length_range.0..=spacer_length_range.1);
-                    let sequence = self.generate_random_sequence(length);
+                    let mut rng = rand::rng();
+                    let length = if let Some(ref dist) = spacer_distribution {
+                        self.generate_length_from_distribution(spacer_length_range, dist)
+                    } else {
+                        rng.random_range(spacer_length_range.0..=spacer_length_range.1)
+                    };
+                    let sequence = if let Some(ref comp) = base_composition {
+                        self.generate_random_sequence_with_composition(length, comp)
+                    } else {
+                        self.generate_random_sequence(length)
+                    };
                     pb.inc(1);
                     
                     // Apply prefix if provided
@@ -291,7 +493,6 @@ impl Simulator {
             #[derive(Debug, Clone)]
             struct SpacerInsertionPlan {
                 spacer_id: String,
-                spacer_length: usize,
                 n_insertions: usize,
                 total_length: usize,
                 insertion_plans: Vec<(bool, usize, usize, usize)>, // (is_rc, n_mismatches, n_insertions, n_deletions) tuples
@@ -299,7 +500,7 @@ impl Simulator {
             
             let mut insertion_plans: Vec<SpacerInsertionPlan> = Vec::with_capacity(spacers.len());
             let mut total_insertion_length = 0;
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             
             for (id, seq) in &spacers {
                 // Determine number of insertions for this spacer
@@ -320,7 +521,6 @@ impl Simulator {
                 
                 insertion_plans.push(SpacerInsertionPlan {
                     spacer_id: id.clone(),
-                    spacer_length: seq.len(),
                     n_insertions,
                     total_length,
                     insertion_plans: plans,
@@ -480,7 +680,7 @@ impl Simulator {
                         .sum::<usize>() as u64;
 
                     // Create progress bar with correct count
-                    let pb = ProgressBar::new(total_insertions);
+                    let _pb = ProgressBar::new(total_insertions);
                     
                     for plan in thread_plans {
                         let spacer_id = &plan.spacer_id;
@@ -523,7 +723,7 @@ impl Simulator {
                             }
 
                             // Choose a random range weighted by the number of possible insertion points
-                            let mut rng = rand::thread_rng();
+                            let mut rng = rand::rng();
                             let r = rng.random_range(0..total_range_length);
                             let mut cumulative_length = 0;
                             let mut selected_range = None;
@@ -652,99 +852,30 @@ impl Simulator {
                 }
             }
 
-            // Fix the Myers ground truth generation
-            println!("Building Myers ground truth with reverse complement search...");
-            
-            // Create progress bar for Myers search
-            let total_searches = spacers.len() * final_contigs.len() * 2; // *2 for forward and reverse complement
-            let pb = ProgressBar::new(total_searches as u64);
-            pb.set_style(ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-                .unwrap());
-
-            // Convert max_mismatches to u8
-            let max_mismatches_u8: u8 = n_mismatch_range.1.try_into().unwrap_or(255);
-
-            // Convert to vectors for parallel processing
-            let spacers_vec: Vec<_> = spacers.iter().collect();
-            let contigs_vec: Vec<_> = final_contigs.iter().collect();
-
-            // Process spacers in parallel
-            let myers_results: Vec<Vec<Vec<String>>> = spacers_vec.into_par_iter().map(|(spacer_id, spacer)| {
-                let mut local_results = Vec::new();
-                
-                for (contig_id, contig) in &contigs_vec {
-                    let contig_bytes = contig.as_bytes();
-
-                    // Forward strand search
-                    let mut myers = Myers::<u64>::new(spacer.as_bytes());
-                    let occ: Vec<_> = myers.find_all(contig_bytes, max_mismatches_u8).collect();
-                    for match_info in occ {
-                        let (start, end, cost) = match_info;
-                        local_results.push(vec![
-                            spacer_id.to_string(),
-                            contig_id.to_string(),
-                            start.to_string(),
-                            end.to_string(),
-                            "false".to_string(),
-                            cost.to_string()
-                        ]);
-                    }
-
-                    // Reverse complement search
-                    let rc_spacer = self.reverse_complement(spacer);
-                    let mut myers_rc = Myers::<u64>::new(rc_spacer.as_bytes());
-                    let occ_rc: Vec<_> = myers_rc.find_all(contig_bytes, max_mismatches_u8).collect();
-                    for match_info in occ_rc {
-                        let (start, end, cost) = match_info;
-                        local_results.push(vec![
-                            spacer_id.to_string(),
-                            contig_id.to_string(),
-                            start.to_string(),
-                            end.to_string(),
-                            "true".to_string(),
-                            cost.to_string()
-                        ]);
-                    }
-                }
-                
-                // Update progress bar (2 searches per spacer: forward and reverse complement)
-                pb.inc(2 * contigs_vec.len() as u64);
-                
-                local_results
-            }).collect();
-
-            // Merge all results
-            let myers_ground_truth: Vec<Vec<String>> = myers_results.into_iter().flatten().collect();
-
-            pb.finish_with_message("Myers ground truth search completed");
-
-            println!("Found {} total matches using Myers algorithm", myers_ground_truth.len());
-
-            // Write Myers ground truth to TSV file
-            println!("Writing Myers ground truth to TSV file...");
-            let myers_ground_truth_path = format!("{}/simulated_data/myers_ground_truth.tsv", output_dir);
-            let myers_ground_truth_file = match File::create(&myers_ground_truth_path) {
+            // Write planned ground truth to TSV file
+            println!("Writing planned ground truth to TSV file...");
+            let planned_ground_truth_path = format!("{}/simulated_data/planned_ground_truth.tsv", output_dir);
+            let planned_ground_truth_file = match File::create(&planned_ground_truth_path) {
                 Ok(file) => file,
                 Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-                    format!("Could not create Myers ground truth file: {}", e)
+                    format!("Could not create planned ground truth file: {}", e)
                 )),
             };
             
-            let mut myers_ground_truth_writer = BufWriter::new(myers_ground_truth_file);
+            let mut planned_ground_truth_writer = BufWriter::new(planned_ground_truth_file);
             
             // Write header
-            if let Err(e) = writeln!(myers_ground_truth_writer, "spacer_id\tcontig_id\tstart\tend\tstrand\tmismatches") {
+            if let Err(e) = writeln!(planned_ground_truth_writer, "spacer_id\tcontig_id\tstart\tend\tstrand\tmismatches") {
                 return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-                    format!("Error writing Myers ground truth header: {}", e)
+                    format!("Error writing planned ground truth header: {}", e)
                 ));
             }
             
             // Write data rows
-            for row in &myers_ground_truth {
+            for row in &final_ground_truth {
                 if row.len() != 6 {
                     return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                        format!("Invalid Myers ground truth row length: {}", row.len())
+                        format!("Invalid planned ground truth row length: {}", row.len())
                     ));
                 }
                 
@@ -752,9 +883,9 @@ impl Simulator {
                     row[0], row[1], row[2], row[3], 
                     row[4].to_lowercase(), row[5]);
                     
-                if let Err(e) = write!(myers_ground_truth_writer, "{}", line) {
+                if let Err(e) = write!(planned_ground_truth_writer, "{}", line) {
                     return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-                        format!("Error writing Myers ground truth line: {}", e)
+                        format!("Error writing planned ground truth line: {}", e)
                     ));
                 }
             }
@@ -770,7 +901,7 @@ impl Simulator {
                 println!("Simulation verification passed");
             }
 
-            Ok((final_contigs, spacers, final_ground_truth, myers_ground_truth))
+            Ok((final_contigs, spacers, final_ground_truth))
         })
     }
 }
@@ -778,5 +909,7 @@ impl Simulator {
 #[pymodule]
 fn rust_simulator(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Simulator>()?;
+    m.add_class::<BaseComposition>()?;
+    m.add_class::<DistributionType>()?;
     Ok(())
 }

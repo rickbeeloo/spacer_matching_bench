@@ -59,7 +59,7 @@ dependencies = [
  "num-traits",
  "ordered-float",
  "petgraph",
- "rand 0.8.5",
+ "rand 0.9.1",
  "regex",
  "serde",
  "serde_derive",
@@ -461,7 +461,7 @@ dependencies = [
  "num-rational",
  "num-traits",
  "rand 0.8.5",
- "rand_distr",
+ "rand_distr 0.4.3",
  "simba",
  "typenum",
 ]
@@ -746,6 +746,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_distr"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8615d50dcf34fa31f7ab52692afec947c4dd0ab803cc87cb3b0b4570ff7463"
+dependencies = [
+ "num-traits",
+ "rand 0.9.1",
+]
+
+[[package]]
 name = "rawpointer"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -808,6 +818,7 @@ dependencies = [
  "indicatif",
  "pyo3",
  "rand 0.9.1",
+ "rand_distr 0.5.1",
  "rayon",
 ]
 

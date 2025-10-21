@@ -2,7 +2,13 @@
 name = "rust_simulator"
 version = "0.1.0"
 edition = "2021"
-authors = ["Uri Neri <uri.neri@gmail.com>", "Antonio Pedro Camargo <antonio.camargo@gmail.com>", "Simon Roux <simon.roux@gmail.com>", "Brian Bushnell <brian.bushnell@gmail.com>"]
+authors = [
+    "Uri Neri <uri.neri@gmail.com>",
+    "Antonio Pedro Camargo <antonio.camargo@gmail.com>",
+    "Simon Roux <simon.roux@gmail.com>",
+    "Brian Bushnell <brian.bushnell@gmail.com>",
+    "Rick Beeloo <biobeeloo@gmail.com>",
+]
 description = "misc sequence simulator"
 
 [lib]
@@ -15,3 +21,4 @@ rand = "0.9"
 rayon = "1.7"
 indicatif = "0.17"
 bio = "2.0"
+rand_distr = "0.5.1"
