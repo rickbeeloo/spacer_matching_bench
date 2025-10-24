@@ -1,0 +1,456 @@
+"""
+Click entry point for the spacer_bencher tool.
+"""
+import click
+import logging
+import sys
+from pathlib import Path
+
+# Configure global logger
+logger = logging.getLogger('spacer_bencher')
+
+
+def setup_logging(verbose: bool = False):
+    """
+    Configure global logging for the application.
+    
+    Args:
+        verbose: If True, set logging level to DEBUG, otherwise INFO
+    """
+    level = logging.DEBUG if verbose else logging.INFO
+    
+    # Get the root logger
+    root_logger = logging.getLogger()
+    
+    # Remove any existing handlers to avoid duplicates
+    root_logger.handlers.clear()
+    
+    # Configure format
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    
+    # Configure root logger (all loggers inherit from this)
+    root_logger.setLevel(level)
+    root_logger.addHandler(console_handler)
+
+
+@click.group()
+@click.option('--verbose', '-v', is_flag=True, help='Enable verbose (DEBUG) logging')
+@click.version_option(version='1.0.0', prog_name='spacer_bencher')
+def cli(verbose):
+    """
+    Spacer Bencher -  benchmarking spacer-protospacer identification tools.
+    
+    This tool provides a complete pipeline for:
+    
+    \b
+    1. Generating simulated CRISPR spacer and contig sequences
+    2. Creating execution scripts for various alignment tools
+    3. Running alignment tools and collecting results
+    4. Comparing and validating tool performance
+    
+    Use 'spacer_bencher COMMAND --help' for detailed information on each command.
+    """
+    setup_logging(verbose)
+    logger.debug("CLI initialized in verbose mode")
+
+
+@cli.command()
+@click.option('--num-contigs', '-nc', type=int, default=100,
+              help='Number of contigs to generate')
+@click.option('--num-spacers', '-ns', type=int, default=50,
+              help='Number of spacers to generate')
+@click.option('--contig-length', '-cl', type=(int, int), default=(2000, 5000),
+              help='Range of contig lengths (min max)')
+@click.option('--spacer-length', '-ls', type=(int, int), default=(20, 60),
+              help='Range of spacer lengths (min max)')
+@click.option('--mismatch-range', '-lm', type=(int, int), default=(0, 0),
+              help='Range of substitution mismatches per spacer (min max)')
+@click.option('--spacer-insertions', '-ir', type=(int, int), default=(1, 1),
+              help='Number of times to insert each spacer into contigs (min max)')
+@click.option('--indel-insertions', '-nir', type=(int, int), default=(0, 0),
+              help='Number of insertion mutations (indels) to add within each spacer (min max)')
+@click.option('--indel-deletions', '-ndr', type=(int, int), default=(0, 0),
+              help='Number of deletion mutations (indels) to add within each spacer (min max)')
+@click.option('--reverse-complement', '-prc', type=float, default=0.5,
+              help='Proportion of spacers to reverse complement (0.0-1.0)')
+@click.option('--threads', '-t', type=int, default=4,
+              help='Number of threads for parallel processing')
+@click.option('--output-dir', '-o', type=click.Path(), required=True,
+              help='Output directory for simulated data')
+@click.option('--id-prefix', '-id', type=str, default=None,
+              help='Prefix for sequence IDs (default: auto-generated)')
+@click.option('--gc-content', type=float, default=None,
+              help='GC content percentage (0-100)')
+@click.option('--contig-distribution', type=click.Choice(['uniform', 'normal', 'bell']),
+              default='uniform', help='Distribution for contig lengths')
+@click.option('--spacer-distribution', type=click.Choice(['uniform', 'normal', 'bell']),
+              default='uniform', help='Distribution for spacer lengths')
+@click.option('--verify', is_flag=True,
+              help='Verify simulation after generation')
+def simulate(num_contigs, num_spacers, contig_length, spacer_length,
+             mismatch_range, spacer_insertions, indel_insertions, indel_deletions,
+             reverse_complement, threads, output_dir, id_prefix, gc_content,
+             contig_distribution, spacer_distribution, verify):
+    """
+    Generate simulated CRISPR spacer and contig sequences.
+    
+    This command creates synthetic test data by:
+    
+    \b
+    1. Generating random contig sequences
+    2. Generating random spacer sequences  
+    3. Inserting spacers into contigs with optional mutations
+    4. Recording ground truth positions and mutations
+    
+    \b
+    Key Parameters Explained:
+    
+    --spacer-insertions (-ir): Controls how many TIMES each spacer is inserted
+                                into the contigs. Example: -ir 1 2 means each
+                                spacer will be inserted 1 or 2 times.
+    
+    --indel-insertions (-nir): Controls how many INSERTION MUTATIONS (adding
+                                bases) are applied to the spacer sequence.
+                                Example: -nir 0 2 means 0-2 insertion indels.
+    
+    --indel-deletions (-ndr): Controls how many DELETION MUTATIONS (removing
+                               bases) are applied to the spacer sequence.
+                               Example: -ndr 0 1 means 0-1 deletion indels.
+    
+    \b
+    Perfect Match Example:
+      spacer_bencher simulate -nc 100 -ns 50 -lm 0 0 -ir 1 1 -nir 0 0 -ndr 0 0
+      This creates spacers with NO mutations inserted exactly ONCE.
+    
+    \b
+    Output Files:
+      - simulated_contigs.fa: FASTA file with contig sequences
+      - simulated_spacers.fa: FASTA file with spacer sequences
+      - planned_ground_truth.tsv: Tab-separated ground truth annotations
+    """
+    from bench.commands.simulate import run_simulate
+    
+    logger.info(f"Starting simulation with {num_spacers} spacers and {num_contigs} contigs")
+    logger.debug(f"Output directory: {output_dir}")
+    
+    try:
+        run_simulate(
+            num_contigs=num_contigs,
+            num_spacers=num_spacers,
+            contig_length_range=contig_length,
+            spacer_length_range=spacer_length,
+            mismatch_range=mismatch_range,
+            spacer_insertions=spacer_insertions,
+            indel_insertions=indel_insertions,
+            indel_deletions=indel_deletions,
+            reverse_complement=reverse_complement,
+            threads=threads,
+            output_dir=output_dir,
+            id_prefix=id_prefix,
+            gc_content=gc_content,
+            contig_distribution=contig_distribution,
+            spacer_distribution=spacer_distribution,
+            verify=verify
+        )
+        logger.info("Simulation completed successfully")
+        click.echo(click.style("✓ Simulation completed successfully", fg='green'))
+    except Exception as e:
+        logger.exception(f"Simulation failed: {e}")
+        click.echo(click.style(f"✗ Simulation failed: {e}", fg='red'), err=True)
+        sys.exit(1)
+
+
+@cli.command('generate-scripts')
+@click.option('--input-dir', '-i', type=click.Path(exists=True), required=True,
+              help='Input directory containing simulated data')
+@click.option('--threads', '-t', type=int, default=4,
+              help='Number of threads for tool execution')
+@click.option('--max-runs', '-mr', type=int, default=1,
+              help='Maximum number of benchmark runs (hyperfine)')
+@click.option('--warmups', '-w', type=int, default=0,
+              help='Number of warmup runs (hyperfine)')
+@click.option('--skip-tools', '-st', type=str, default='',
+              help='Comma-separated list of tools to skip')
+@click.option('--only-tools', '-rt', type=str, default=None,
+              help='Comma-separated list of tools to run (overrides skip-tools)')
+def generate_scripts(input_dir, threads, max_runs, warmups, skip_tools, only_tools):
+    """
+    Generate execution scripts for alignment tools.
+    
+    This command creates bash scripts that run various alignment tools
+    on the simulated (or real) data. Scripts are generated using tool
+    configuration files and include proper parameters for benchmarking.
+    
+    \b
+    Generated Files:
+      - bash_scripts/TOOL_NAME.sh: Individual tool execution scripts
+      - Each script uses hyperfine for benchmarking if max-runs > 1
+    
+    \b
+    Example:
+      spacer_bencher generate-scripts -i tests/validation -t 4 -mr 1
+    """
+    from bench.commands.generate_scripts import run_generate_scripts
+    
+    logger.info(f"Generating scripts for tools in {input_dir}")
+    
+    try:
+        run_generate_scripts(
+            input_dir=input_dir,
+            threads=threads,
+            max_runs=max_runs,
+            warmups=warmups,
+            skip_tools=skip_tools,
+            only_tools=only_tools
+        )
+        logger.info("Script generation completed successfully")
+        click.echo(click.style("✓ Scripts generated successfully", fg='green'))
+    except Exception as e:
+        logger.exception(f"Script generation failed: {e}")
+        click.echo(click.style(f"✗ Script generation failed: {e}", fg='red'), err=True)
+        sys.exit(1)
+
+
+@cli.command('execute-tools')
+@click.option('--input-dir', '-i', type=click.Path(exists=True), required=True,
+              help='Input directory containing scripts and data')
+@click.option('--skip-tools', '-st', type=str, default='',
+              help='Comma-separated list of tools to skip')
+@click.option('--only-tools', '-rt', type=str, default=None,
+              help='Comma-separated list of tools to run')
+@click.option('--debug', is_flag=True,
+              help='Run commands directly without hyperfine for better error messages')
+def execute_tools(input_dir, skip_tools, only_tools, debug):
+    """
+    Execute alignment tools using generated bash scripts.
+    
+    This command runs the bash scripts generated by 'generate-scripts',
+    executing each alignment tool and collecting their output files.
+    
+    Note: Thread counts and benchmark settings are already baked into the
+    generated scripts, so you don't need to specify them here.
+    
+    \b
+    Output Files:
+      - raw_outputs/TOOL_NAME_output.sam: Tool alignment results
+      - raw_outputs/TOOL_NAME.json: Benchmarking results (if max-runs > 1)
+    
+    \b
+    Example:
+      spacer_bencher execute-tools -i tests/validation
+    """
+    from bench.commands.run_tools import run_execute_tools
+    
+    logger.info(f"Executing tools from {input_dir}")
+    
+    try:
+        run_execute_tools(
+            input_dir=input_dir,
+            skip_tools=skip_tools,
+            only_tools=only_tools,
+            debug=debug
+        )
+        logger.info("Tool execution completed successfully")
+        click.echo(click.style("✓ Tools executed successfully", fg='green'))
+    except Exception as e:
+        logger.exception(f"Tool execution failed: {e}")
+        click.echo(click.style(f"✗ Tool execution failed: {e}", fg='red'), err=True)
+        sys.exit(1)
+
+
+@cli.command('full-run')
+@click.option('--output-dir', '-o', type=click.Path(), required=True,
+              help='Output directory for the entire pipeline')
+@click.option('--num-contigs', '-nc', type=int, default=100,
+              help='Number of contigs to generate')
+@click.option('--num-spacers', '-ns', type=int, default=50,
+              help='Number of spacers to generate')
+@click.option('--contig-length', '-cl', type=(int, int), default=(2000, 5000),
+              help='Range of contig lengths (min max)')
+@click.option('--spacer-length', '-ls', type=(int, int), default=(20, 60),
+              help='Range of spacer lengths (min max)')
+@click.option('--mismatch-range', '-lm', type=(int, int), default=(0, 0),
+              help='Range of substitution mismatches per spacer (min max)')
+@click.option('--spacer-insertions', '-ir', type=(int, int), default=(1, 1),
+              help='Number of times to insert each spacer into contigs (min max)')
+@click.option('--indel-insertions', '-nir', type=(int, int), default=(0, 0),
+              help='Number of insertion mutations per spacer (min max)')
+@click.option('--indel-deletions', '-ndr', type=(int, int), default=(0, 0),
+              help='Number of deletion mutations per spacer (min max)')
+@click.option('--reverse-complement', '-prc', type=float, default=0.5,
+              help='Proportion of spacers to reverse complement (0.0-1.0)')
+@click.option('--threads', '-t', type=int, default=4,
+              help='Number of threads for tool execution')
+@click.option('--max-runs', '-mr', type=int, default=1,
+              help='Maximum number of benchmark runs')
+@click.option('--warmups', '-w', type=int, default=0,
+              help='Number of warmup runs')
+@click.option('--skip-tools', '-st', type=str, default='',
+              help='Comma-separated list of tools to skip')
+@click.option('--only-tools', '-rt', type=str, default=None,
+              help='Comma-separated list of tools to run')
+@click.option('--max-mismatches', '-mm', type=int, default=5,
+              help='Maximum number of mismatches for comparison')
+def full_run(output_dir, num_contigs, num_spacers, contig_length, spacer_length,
+             mismatch_range, spacer_insertions, indel_insertions, indel_deletions,
+             reverse_complement, threads, max_runs, warmups, skip_tools, only_tools,
+             max_mismatches):
+    """
+    Run the complete benchmarking pipeline.
+    
+    This command orchestrates all steps:
+    1. Simulate data
+    2. Generate scripts
+    3. Execute tools
+    4. Compare results
+    
+    \b
+    Example:
+      spacer_bencher full-run -o results/benchmark_run -nc 100 -ns 50 -t 4
+    """
+    from bench.commands.simulate import run_simulate
+    from bench.commands.generate_scripts import run_generate_scripts
+    from bench.commands.run_tools import run_execute_tools
+    from bench.commands.compare_results import run_compare_results
+    
+    logger.info("=" * 70)
+    logger.info("STARTING FULL PIPELINE RUN")
+    logger.info("=" * 70)
+    
+    try:
+        # Step 1: Simulate data
+        logger.info("\n[1/4] SIMULATING DATA")
+        logger.info("-" * 70)
+        run_simulate(
+            num_contigs=num_contigs,
+            num_spacers=num_spacers,
+            contig_length_range=contig_length,
+            spacer_length_range=spacer_length,
+            mismatch_range=mismatch_range,
+            spacer_insertions=spacer_insertions,
+            indel_insertions=indel_insertions,
+            indel_deletions=indel_deletions,
+            reverse_complement=reverse_complement,
+            threads=threads,
+            output_dir=output_dir
+        )
+        click.echo(click.style("✓ Step 1/4: Data simulation completed", fg='green'))
+        
+        # Step 2: Generate scripts
+        logger.info("\n[2/4] GENERATING TOOL SCRIPTS")
+        logger.info("-" * 70)
+        run_generate_scripts(
+            input_dir=output_dir,
+            threads=threads,
+            max_runs=max_runs,
+            warmups=warmups,
+            skip_tools=skip_tools,
+            only_tools=only_tools
+        )
+        click.echo(click.style("✓ Step 2/4: Script generation completed", fg='green'))
+        
+        # Step 3: Execute tools
+        logger.info("\n[3/4] EXECUTING TOOLS")
+        logger.info("-" * 70)
+        run_execute_tools(
+            input_dir=output_dir,
+            skip_tools=skip_tools,
+            only_tools=only_tools
+        )
+        click.echo(click.style("✓ Step 3/4: Tool execution completed", fg='green'))
+        
+        # Step 4: Compare results
+        logger.info("\n[4/4] COMPARING RESULTS")
+        logger.info("-" * 70)
+        run_compare_results(
+            input_dir=output_dir,
+            max_mismatches=max_mismatches,
+            output_file=f"{output_dir}/comparison_results.tsv",
+            threads=threads,
+            skip_tools=skip_tools,
+            only_tools=only_tools
+        )
+        click.echo(click.style("✓ Step 4/4: Results comparison completed", fg='green'))
+        
+        # Success summary
+        logger.info("\n" + "=" * 70)
+        logger.info("PIPELINE COMPLETED SUCCESSFULLY")
+        logger.info("=" * 70)
+        logger.info(f"All results saved to: {output_dir}")
+        logger.info(f"  - Simulated data: {output_dir}/simulated_data/")
+        logger.info(f"  - Tool outputs: {output_dir}/raw_outputs/")
+        logger.info(f"  - Comparison results: {output_dir}/comparison_results.tsv")
+        logger.info("=" * 70)
+        
+        click.echo(click.style(f"\n✓ Full pipeline completed! Results in: {output_dir}", fg='green', bold=True))
+        
+    except Exception as e:
+        logger.exception(f"Pipeline failed: {e}")
+        click.echo(click.style(f"✗ Pipeline failed at current step: {e}", fg='red'), err=True)
+        sys.exit(1)
+
+
+@cli.command('compare-results')
+@click.option('--input-dir', '-i', type=click.Path(exists=True), required=True,
+              help='Input directory containing tool outputs and ground truth')
+@click.option('--max-mismatches', '-mm', type=int, default=5,
+              help='Maximum number of mismatches to consider')
+@click.option('--output-file', '-o', type=click.Path(), default=None,
+              help='Output file for comparison results (default: stdout)')
+@click.option('--threads', '-t', type=int, default=4,
+              help='Number of threads for processing')
+def compare_results(input_dir, max_mismatches, output_file, threads):
+    """
+    Compare and validate alignment tool results.
+    
+    This command analyzes the output from alignment tools, compares them
+    against ground truth data, and generates performance metrics including
+    precision, recall, and F1 scores.
+    
+    \b
+    Metrics Calculated:
+      - True Positives: Correctly identified spacer locations
+      - False Positives: Incorrectly reported locations
+      - False Negatives: Missed spacer locations
+      - Precision: TP / (TP + FP)
+      - Recall: TP / (TP + FN)
+      - F1 Score: Harmonic mean of precision and recall
+    
+    \b
+    Example:
+      spacer_bencher compare-results -i tests/validation -mm 3 -o results.tsv
+    """
+    from bench.commands.compare_results import run_compare_results
+    
+    logger.info(f"Comparing tool results in {input_dir}")
+    
+    try:
+        run_compare_results(
+            input_dir=input_dir,
+            max_mismatches=max_mismatches,
+            output_file=output_file,
+            threads=threads
+        )
+        logger.info("Results comparison completed successfully")
+        click.echo(click.style("✓ Results compared successfully", fg='green'))
+    except Exception as e:
+        logger.exception(f"Results comparison failed: {e}")
+        click.echo(click.style(f"✗ Results comparison failed: {e}", fg='red'), err=True)
+        sys.exit(1)
+
+
+def main():
+    """Entry point for the CLI"""
+    cli()
+
+
+if __name__ == '__main__':
+    main()
+

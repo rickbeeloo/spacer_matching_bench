@@ -215,3 +215,4 @@ IMGVR4_SEQUENCES.fna.zst
 # temporary - will comment this once done
 draft/
 src/tests/
+tests/

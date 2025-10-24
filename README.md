@@ -71,280 +71,368 @@ pixi run build-all
 bash ./src/bench/utils/tool_env_maker.sh
 ```
 
-If you don't want to use pixi, you can use `benchy_env.sh` to create a base environment with the general dependencies:
-```bash
-bash ./src/bench/utils/benchy_env.sh
-# create the tool specific mamba envs
-bash ./src/bench/utils/tool_env_maker.sh
-```
+If you don't want to use pixi, you can use `benchy_env.sh` to create a base environment with the general dependencies.
 
-## Usage
+## Quick Start / Usage
 
-After installation, you can run the benchmarking tool using either:
+The tool provides a `full-run` command that executes the entire pipeline, or you can run individual steps:
 
-```bash
-spacer_bencher [command] [options]
-```
+### One-Command Pipeline
 
-or directly via Python:
+Run the complete benchmarking pipeline in a single command:
 
 ```bash
-python -m bench.bench [command] [options]
+spacer_bencher full-run \
+  -o results/my_benchmark \  # Output directory
+  -nc 100 \                  # 100 contigs
+  -ns 50 \                   # 50 spacers
+  -lm 0 2 \                  # 0-2 mismatches
+  -t 4                       # 4 threads
 ```
 
-### Available Commands:
+This internally runs all four pipeline steps (simulate, generate-scripts, execute-tools, compare-results).
 
-#### `full_run` - Complete benchmarking pipeline (original functionality)
+### Individual Pipeline Steps
+
+For more control, run each step separately:
+
+#### Step 1: Generate Simulated Data
+
 ```bash
-spacer_bencher full_run --contig_length_range 1000 32000 --spacer_length_range 20 60 --n_mismatch_range 0 5 --sample_size_contigs 1500 --sample_size_spacers 50 --insertion_range 1 5 --threads 1 --prop_rc 0.5
+spacer_bencher simulate \
+  -nc 100 \              # Number of contigs
+  -ns 50 \               # Number of spacers
+  -ir 1 1 \              # Insert each spacer 1 time
+  -lm 0 0 \              # 0 mismatches
+  -nir 0 0 \             # 0 insertion indels
+  -ndr 0 0 \             # 0 deletion indels
+  -o tests/validation    # Output directory
 ```
 
-#### `simulate` - Generate simulated sequences only
+#### Step 2: Generate Tool Execution Scripts
+
 ```bash
-spacer_bencher simulate --sample_size_contigs 1500 --sample_size_spacers 50 --output_dir results/my_simulation
+spacer_bencher generate-scripts \
+  -i tests/validation \  # Input directory with simulated data
+  -t 4                   # Number of threads
 ```
 
-#### `generate_scripts` - Generate tool execution scripts
+#### Step 3: Execute Alignment Tools
+
 ```bash
-spacer_bencher generate_scripts --input_dir results/my_simulation --threads 1 --skip_tools "vsearch"
+spacer_bencher execute-tools \
+  -i tests/validation    # Input directory (scripts already have settings)
 ```
 
-#### `run_tools` - Execute tools on simulated data
+#### Step 4: Compare Results
+
 ```bash
-spacer_bencher run_tools --input_dir results/my_simulation --threads 1 --max_runs 5
+spacer_bencher compare-results \
+  -i tests/validation \      # Input directory
+  -mm 3 \                    # Max mismatches to consider
+  -o results.tsv             # Output file
 ```
 
-#### `subsample` - Intelligently subsample real dataset
+## Command Reference
+
+### `full-run` - Complete Pipeline
+
+Execute the entire benchmarking pipeline in a single command.
+
 ```bash
-spacer_bencher subsample \
-    --contigs /path/to/contigs.fa \
-    --spacers /path/to/spacers.fa \
-    --metadata /path/to/metadata.tsv \
-    --reduce 0.1 \
-    --hq 0.8 \
-    --output_dir results/subsampled \
-    --taxonomic_rank p \
-    --gc_bins 10 \
-    --length_bins 10
+spacer_bencher full-run [OPTIONS]
+
+# Example
+spacer_bencher full-run -o results/benchmark -nc 100 -ns 50 -lm 0 2 -t 4
+
+# Get detailed help
+spacer_bencher full-run --help
 ```
 
-### Common Options (shared across all commands):
-- `--contig_length_range`, `-cl`: Range of contig lengths [default: 1000 32000]
-- `--sample_size_contigs`, `-nc`: Number of contigs to generate [default: 1500]
-- `--sample_size_spacers`, `-ns`: Number of spacers to generate [default: 50]
-- `--spacer_length_range`, `-ls`: Range of spacer lengths [default: 20 60]
-- `--n_mismatch_range`, `-lm`: Range of number of mismatches [default: 0 5]
-- `--insertion_range`, `-ir`: Range of number of insertions per contig [default: 1 5]
-- `--prop_rc`, `-prc`: Proportion of spacers to reverse complement [default: 0.5]
-- `--threads`, `-t`: Number of threads [default: 1]
-- `--contigs`, `-c`: Path to contigs file (optional)
-- `--spacers`, `-s`: Path to spacers file (optional)
-- `--id_prefix`, `-id`: Prefix for sequence IDs (optional)
+#### Key Parameters
 
-### Tool-specific Options (for `generate_scripts` and `run_tools`):
-- `--max_mismatches`, `-mm`: Maximum number of mismatches to allow [default: 5]
-- `--max_runs`, `-mr`: Maximum number of hyperfine runs [default: 5]
-- `--warmups`, `-w`: Number of hyperfine warmups [default: 0]
-- `--skip_tools`, `-st`: Comma-separated list of tools to skip [default: "vsearch"]
+| Parameter | Short | Description | Default |
+|-----------|-------|-------------|---------|
+| `-o` | `--output-dir` | Output directory for all pipeline results | **required** |
+| `-nc` | `--num-contigs` | Number of contigs to generate | 100 |
+| `-ns` | `--num-spacers` | Number of spacers to generate | 50 |
+| `-cl` | `--contig-length` | Contig length range (min max) | 2000 5000 |
+| `-ls` | `--spacer-length` | Spacer length range (min max) | 20 60 |
+| `-ir` | `--spacer-insertions` | Number of times to insert each spacer | 1 1 |
+| `-nir` | `--indel-insertions` | Number of insertion mutations per spacer | 0 0 |
+| `-ndr` | `--indel-deletions` | Number of deletion mutations per spacer | 0 0 |
+| `-lm` | `--mismatch-range` | Substitution mismatches per spacer | 0 0 |
+| `-prc` | `--reverse-complement` | Proportion of reverse complement (0-1) | 0.5 |
+| `-t` | `--threads` | Number of threads | 4 |
+| `-mr` | `--max-runs` | Benchmark runs (hyperfine) | 1 |
+| `-w` | `--warmups` | Warmup runs (hyperfine) | 0 |
+| `-st` | `--skip-tools` | Comma-separated tools to skip | "" |
+| `-rt` | `--only-tools` | Only run these tools | None |
+| `-mm` | `--max-mismatches` | Max mismatches for comparison | 5 |
 
-### Results
-By default, the results will be saved in a directory under `results/` with a name that reflects the parameters used, following the pattern:
-results/run_t_{threads}_nc_{n_contigs}_ns_{n_spacers}_ir_{insertion_min}_{insertion_max}_lm_{mismatch_min}_{mismatch_max}_prc_{prop_rc}  
-Note that the performance metrics for the simulation are ok, but approximate. For in-depth analysis, the jupyter notebooks are preferable (less heuristics, more detailed, and runs additional tests to verify the different tool reported alignments (so more consistent approach)).
+#### Pipeline Steps
+
+The `full-run` command internally executes:
+1. **Simulate** - Generates synthetic data with ground truth
+2. **Generate-scripts** - Creates bash scripts for each tool
+3. **Execute-tools** - Runs all alignment tools
+4. **Compare-results** - Validates and compares tool outputs
+
+#### Output Structure
+
+```
+results/benchmark/
+├── simulated_data/
+│   ├── simulated_contigs.fa
+│   ├── simulated_spacers.fa
+│   └── planned_ground_truth.tsv
+├── raw_outputs/
+│   ├── bowtie1_output.sam
+│   ├── minimap2_output.sam
+│   └── ...
+└── comparison_results.tsv
+```
+
+### `simulate` - Generate Simulated Data
+
+Generate synthetic CRISPR spacer and contig sequences with configurable mutations.
+
+```bash
+spacer_bencher simulate [OPTIONS]
+
+# Get detailed help
+spacer_bencher simulate --help
+```
+
+#### Key Parameters
+
+| Parameter | Short | Description | Default |
+|-----------|-------|-------------|---------|
+| `-nc` | `--num-contigs` | Number of contigs to generate | 100 |
+| `-ns` | `--num-spacers` | Number of spacers to generate | 50 |
+| `-cl` | `--contig-length` | Contig length range (min max) | 2000 5000 |
+| `-ls` | `--spacer-length` | Spacer length range (min max) | 20 60 |
+| `-ir` | `--spacer-insertions` | **Number of times to insert each spacer** | 1 1 |
+| `-nir` | `--indel-insertions` | **Number of insertion mutations per spacer** | 0 0 |
+| `-ndr` | `--indel-deletions` | **Number of deletion mutations per spacer** | 0 0 |
+| `-lm` | `--mismatch-range` | Substitution mismatches per spacer | 0 0 |
+| `-prc` | `--reverse-complement` | Proportion of reverse complement (0-1) | 0.5 |
+| `-o` | `--output-dir` | Output directory | **required** |
+| `-t` | `--threads` | Number of threads | 4 |
+
+#### Understanding the Parameters
+
+**CRITICAL: Insertion Terminology**
+
+There are TWO different meanings of "insertion" in this tool:
+
+1. **`--spacer-insertions` (-ir)**: How many TIMES each spacer is placed into contigs
+   - Example: `-ir 1 2` means each spacer will be inserted 1 or 2 times
+   - This creates the ground truth data
+
+2. **`--indel-insertions` (-nir)**: How many INSERTION MUTATIONS (adding bases) to apply
+   - Example: `-nir 0 2` means 0-2 insertion indel events within the spacer sequence
+   - This creates sequence-level mutations (like biological indels)
+
+3. **`--indel-deletions` (-ndr)**: How many DELETION MUTATIONS (removing bases) to apply
+   - Example: `-ndr 0 1` means 0-1 deletion indel events within the spacer sequence
+
+#### Example Use Cases
+
+**Perfect matches (validation baseline)**:
+```bash
+spacer_bencher simulate \
+  -nc 100 -ns 50 \
+  -ir 1 1 \          # Insert each spacer exactly once
+  -lm 0 0 \          # No mismatches
+  -nir 0 0 \         # No insertion indels
+  -ndr 0 0 \         # No deletion indels
+  -o tests/perfect_matches
+```
+
+**multiple variantion data**:
+```bash
+spacer_bencher simulate \
+  -nc 500 -ns 100 \
+  -ir 1 3 \          # Each spacer inserted 1-3 times
+  -lm 0 2 \          # 0-2 substitution mutations
+  -nir 0 1 \         # 0-1 insertion indels
+  -ndr 0 1 \         # 0-1 deletion indels
+  -prc 0.5 \         # 50% reverse complement
+  -o tests/realistic
+```
+
+**Custom GC content**:
+```bash
+spacer_bencher simulate \
+  -nc 100 -ns 50 \
+  --gc-content 60 \  # 60% GC content
+  -o tests/high_gc
+```
+
+#### Output Files
+
+The simulation creates a `simulated_data` subdirectory containing:
+
+- **`simulated_contigs.fa`**: FASTA file with contig sequences
+- **`simulated_spacers.fa`**: FASTA file with spacer sequences  
+- **`planned_ground_truth.tsv`**: Ground truth annotations with columns:
+  - `spacer_id`: Spacer identifier
+  - `contig_id`: Contig identifier
+  - `start`: Start position (0-based)
+  - `end`: End position (0-based, exclusive)
+  - `strand`: Boolean (true=reverse complement, false=forward)
+  - `mismatches`: Number of substitution mismatches
+
+### `generate-scripts` - Create Tool Execution Scripts
+
+Generate bash scripts for running alignment tools.
+
+```bash
+spacer_bencher generate-scripts [OPTIONS]
+
+# Example
+spacer_bencher generate-scripts -i tests/validation -t 4 -mr 1
+
+# Get detailed help
+spacer_bencher generate-scripts --help
+```
+
+| Parameter | Long Option | Description | Default |
+|-----------|-------------|-------------|---------|
+| `-i` | `--input-dir` | Directory with simulated data | **required** |
+| `-t` | `--threads` | Threads for tool execution | 4 |
+| `-mr` | `--max-runs` | Benchmark runs (hyperfine) | 1 |
+| `-w` | `--warmups` | Warmup runs (hyperfine) | 0 |
+| `-st` | `--skip-tools` | Comma-separated tools to skip | "" |
+| `-rt` | `--only-tools` | Only run these tools | None |
+
+### `execute-tools` - Run Alignment Tools
+
+Execute the generated bash scripts and collect results.
+
+```bash
+spacer_bencher execute-tools [OPTIONS]
+
+# Example
+spacer_bencher execute-tools -i tests/validation
+
+# Get detailed help
+spacer_bencher execute-tools --help
+```
+
+| Parameter | Long Option | Description | Default |
+|-----------|-------------|-------------|---------|
+| `-i` | `--input-dir` | Directory with generated scripts | **required** |
+| `-st` | `--skip-tools` | Comma-separated tools to skip | "" |
+| `-rt` | `--only-tools` | Only run these tools | None |
+| `--debug` | | Run commands directly (no hyperfine) for better error messages | False |
+
+**Note:** Thread counts and benchmark settings are already baked into the generated scripts from `generate-scripts`, so you don't need to specify them here.
+
+**Debug Mode:** Use `--debug` flag to run tools directly without hyperfine wrapper, which provides full stdout/stderr output for troubleshooting failures:
+```bash
+spacer_bencher execute-tools -i tests/validation -rt lexicmap --debug
+```
+
+**Output Files** (saved to `raw_outputs/` subdirectory):
+- `TOOL_NAME_output.sam` - Alignment results in SAM format
+- `TOOL_NAME.json` - Benchmarking results (if max-runs > 1)
+
+### `compare-results` - Validate and Compare Results
+
+Compare tool results against ground truth and calculate performance metrics.
+
+```bash
+spacer_bencher compare-results [OPTIONS]
+
+# Example
+spacer_bencher compare-results -i tests/validation -mm 3 -o results.tsv
+
+# Get detailed help
+spacer_bencher compare-results --help
+```
+
+| Parameter | Long Option | Description | Default |
+|-----------|-------------|-------------|---------|
+| `-i` | `--input-dir` | Directory with tool outputs | **required** |
+| `-mm` | `--max-mismatches` | Max mismatches to consider | 5 |
+| `-o` | `--output-file` | Output file for results | stdout |
+| `-t` | `--threads` | Threads for processing | 4 |
+
+**Metrics Calculated:**
+- **True Positives (TP)** - Correctly identified spacer locations
+- **False Positives (FP)** - Incorrectly reported locations  
+- **False Negatives (FN)** - Missed spacer locations
+- **Precision** - TP / (TP + FP)
+- **Recall** - TP / (TP + FN)
+- **F1 Score** - Harmonic mean of precision and recall
+
+## Complete Workflow Example
+
+### Option 1: Single Command (Recommended for Quick Runs)
+
+```bash
+# Run the complete pipeline with one command
+spacer_bencher full-run \
+  -o tests/my_validation \
+  -nc 100 -ns 50 \
+  -lm 0 1 \
+  -ir 1 1 \
+  -nir 0 0 -ndr 0 0 \
+  -t 4 \
+  -mm 3
+```
+
+### Option 2: Step-by-Step (More Control)
+
+```bash
+# 1. Create test data with 0-1 mismatches
+spacer_bencher simulate \
+  -nc 100 -ns 50 \
+  -lm 0 1 \
+  -ir 1 1 \
+  -nir 0 0 -ndr 0 0 \
+  -t 4 \
+  -o tests/my_validation
+
+# 2. Generate execution scripts
+spacer_bencher generate-scripts -i tests/my_validation -t 4
+
+# 3. Run alignment tools (no parameters needed - uses generated scripts)
+spacer_bencher execute-tools -i tests/my_validation
+
+# 4. Compare and validate results
+spacer_bencher compare-results -i tests/my_validation -mm 3 -o results.tsv
+```
+
+## Additional Features
+
+### Logging and Debugging
+
+Enable verbose logging with timestamps and detailed tracebacks:
+
+```bash
+spacer_bencher --verbose simulate -nc 100 -ns 50 -o tests/debug
+```
 
 ### Tool Configuration
-Tools are configured via JSON in `tool_configs/`, for example:
-```json
-{
-  "name": "bowtie1",
-  "output_file": "{output_dir}/bowtie1_output.sam",
-  "parse_function_name": "parse_sam",
-  "script_name": "bowtie1.sh",
-  "mamba_env": "bowtie1_env",
-  "command": [
-    "bowtie-build --threads {threads} {contigs_file} {results_dir}/simulated_data/bt1_contigs_index && bowtie --threads {threads} -f --all -v 3 -x {results_dir}/simulated_data/bt1_contigs_index {spacers_file} -S {output_dir}/bowtie1_output.sam"
-  ]
-}
-```
-Tool configs can be added manually or using the following command:
-```bash
-python -m bench.utils.tool_commands add-tool
-```
-The `parse_function_name` field should be set to an real function in `src/bench/utils/functions.py` (you add your own parser function there, or use one of the existing ones).  
-The json can use these placeholders:
-- `{threads}`: Number of threads to use
-- `{contigs_file}`: Path to contig sequences
-- `{spacers_file}`: Path to spacer sequences
-- `{output_dir}`: Directory for tool outputs
-- `{results_dir}`: Root results directory
 
+Tool configurations are stored as JSON files in `tool_configs/` directory. Each tool has:
+- Command template with parameter placeholders
+- Environment name (micromamba environment)
+- Output file format
+- Parser function name
 
-#### Dependencies
-- [micromamba](https://mamba.readthedocs.io/en/latest/user_guide/micromamba.html)
-- [hyperfine](https://github.com/sharkdp/hyperfine)
-- [pysam](https://pysam.readthedocs.io/en/latest/index.html)
-- Python libraries: `polars`, `json`, `argparse`,  `subprocess`, `os`, `needletail`, `pyfastx`, `parasail`, `altair`, `seaborn`,`matplotlib` and probably more.  
-- Rust libraries:  
-    - sequence simulation: `rayon`, `pyo3`, `rand`, `indicatif`, `bio` and `maturin` for building with the python package.
-    - `spacer-containment`, which is a naive implementation of the substring containment problem in Rust. and uses:
-    - `needletail` quick fasta/fastq parsing.
-    - `rayon` multithreading.
-    - `memchr` string matching.
+See existing tool configs for examples when adding new tools.
 
+### Documentation
+
+- **[src/rust_simulator/README.md](src/rust_simulator/README.md)** - Detailed simulator documentation
 
 ## Citation
-If you use this software or data in your research, please cite accordingly:  
-1. The software repository:
-```
-@software{spacer_matching_bench,
-  author = {Uri Neri, Rick Beeloo,  Antonio Pedro Camargo, Brian Bushnell, Simon Roux},
-  title = {spacer_matching_bench: Benchmarking protospacer identification tools},
-  year = {2025},
-  publisher = {gitlab},
-  journal = {gitlab repository},
-  howpublished = {\url{https://code.jgi.doe.gov/spacersdb/spacer_matching_bench}}
-}
-```
 
-2. The Zenodo data deposit:
-```
-@dataset{neri_2025_15171878,
-  author       = {Neri, Uri and Camargo, Antonio Pedro and Roux, Simon and Bushnell, Brian},
-  title        = {Supplementary data for CRISPR spacer-protospacer matching benchmarks},
-  year         = 2025,
-  publisher    = {Zenodo},
-  doi          = {10.5281/zenodo.15171878},
-  url          = {https://doi.org/10.5281/zenodo.15171878},
-}
-```
-
-3. The manuscript (preprint coming soon):
-```bibtex
-@article{spacer_matching_bench_manuscript,
-  author = {Uri Neri, Antonio Pedro Camargo, Brian Bushnell, Simon Roux},
-  title = {Tool Choice drastically Impacts CRISPR Spacer-Protospacer Detection},
-  journal = {bioRxiv},
-  year = {2025},
-  doi = {TBD},
-  publisher = {Cold Spring Harbor Laboratory}
-}
-```
-
-```mermaid
-flowchart TD
-    subgraph subGraph0["<b>Data Generation</b>"]
-        B["<i>simulate_data_rust</i>:<br>
-            • Contig Lengths [default: 1000-32000]<br>
-            • Spacer length [default: 20-60]<br>
-            • Number of contigs [default: 1500]<br>
-            • Number of spacers [default: 50]<br>
-            • Insertions per spacer [default: 1-5]<br>
-            • Mismatches [default: 0-5]<br>
-            • Threads [default: 1]<br>
-            • RC frequency [default: 0.5]"]
-        C["Output Files:<br>
-            • simulated_contigs.fa<br>
-            • simulated_spacers.fa<br>
-            • ground_truth.tsv"]
-        V["<i>verify_simulated_data</i><br>
-            Validates simulation accuracy"]
-    end
-
-    subgraph subGraph1["<b>Tool Configuration</b>"]
-        T1["<i>populate_tools</i><br>
-            Load tool configs from JSON"]
-        T2["Tool Parameters:<br>
-            • name<br>
-            • output_file<br>
-            • parse_function<br>
-            • script_name<br>
-            • mamba_env<br>
-            • command"]
-    end
-
-    subgraph subGraph2["<b>Tool Execution</b>"]
-        E1["<i>create_bash_script</i><br>
-            Generate tool-specific scripts"]
-        E2["<i>run_tool</i><br>
-            Execute via hyperfine"]
-        E3["Hyperfine Settings:<br>
-            • warmup runs<br>
-            • max runs<br>
-            • cleanup command<br>
-            • JSON output"]
-    end
-
-    subgraph subGraph3["<b>Results Processing</b>"]
-        P1["<i>read_results</i><br>
-            Parse tool outputs"]
-        P2["Parse Functions:<br>
-            • parse_samVn_with_lens_pysam<br>
-            • parse_blastn_custom<br>
-            • parse_lexicmap<br>
-            • parse_tab"]
-        P3["<i>read_hyperfine_results</i><br>
-            Parse performance metrics"]
-    end
-
-    subgraph subGraph4["<b>Analysis & Output</b>"]
-        A1["<i>compare_results</i><br>
-            Compare against ground truth"]
-        A2["Metrics:<br>
-            • True/False Positives<br>
-            • Precision<br>
-            • Recall<br>
-            • F1 Score"]
-        A3["Output Files:<br>
-            • tools_results.tsv<br>
-            • hyperfine_results.tsv<br>
-            • performance_results.tsv"]
-    end
-
-    subgraph subGraph5["<b>Jupyter Notebook Analysis</b>"]
-        N1["Data Loading:<br>
-            • Load results from all runs<br>
-            • Parse run parameters"]
-        N2["Detailed Analysis:<br>
-            • Verify all reported alignments and all ground truth alignments<br>
-            • Recalculate edit distances<br>
-            • Create comparison matrices<br>
-            • Calculate per-mismatch stats<br>
-            • Analyze tool overlaps"]
-        N3["Visualization:<br>
-            • F1 vs mismatches plots<br>
-            • Runtime comparisons<br>
-            • Tool performance heatmaps<br>
-            • Occurrence-based analysis"]
-        N4["Output:<br>
-            • Interactive plots (.html)<br>
-            • Publication figures (.svg)<br>
-            • Detailed statistics (.tsv)"]
-    end
-
-    B --> C
-    B --> V
-    C --> T1
-    T1 --> T2
-    T2 --> E1
-    E1 --> E2
-    E2 --> E3
-    E2 --> P1
-    P1 --> P2
-    E3 --> P3
-    P2 --> A1
-    P3 --> A3
-    A1 --> A2
-    A2 --> A3
-    A3 --> N1
-    N1 --> N2
-    N2 --> N3
-    N3 --> N4
-
-    classDef default fill:#f9f9f9,stroke:#333,stroke-width:1px;
-    classDef emphasis fill:#e1f3d8,stroke:#333,stroke-width:2px;
-    class B,A1,P1,N2 emphasis;
-
-```
+If you use this tool in your research, please cite:
 
 <!-- ## License
 Code required for running the benchmark is available under the [MIT License](LICENSE).   

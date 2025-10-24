@@ -1,73 +1,89 @@
-import argparse
+"""
+Sequence simulation command. mostly a wrapper for the rust simulator.
+"""
 import os
-
+import logging
 
 from bench.utils.functions import *
-from bench.utils.arg_parsers import add_common_args
+
+logger = logging.getLogger(__name__)
 
 
-def main():
-    """Run only the sequence simulation step"""
-    parser = argparse.ArgumentParser(
-        description="Generate simulated sequences (contigs and spacers) with ground truth",
-        add_help=True,
-        allow_abbrev=True,
-    )
+def run_simulate(num_contigs, num_spacers, contig_length_range, spacer_length_range,
+                 mismatch_range, spacer_insertions, indel_insertions, indel_deletions,
+                 reverse_complement, threads, output_dir, id_prefix=None, gc_content=None,
+                 contig_distribution='uniform', spacer_distribution='uniform', verify=False,
+                 contigs=None, spacers=None, a_frac=None, t_frac=None, c_frac=None, g_frac=None):
+    """
+    Core simulation function that can be called from both CLI interfaces.
     
-    add_common_args(parser)
-    parser.add_argument(
-        "-o", "--output_dir", 
-        type=str, 
-        default=None,
-        help="Output directory for simulated data (default: auto-generated based on parameters)"
-    )
+    Args:
+        num_contigs: Number of contigs to generate
+        num_spacers: Number of spacers to generate
+        contig_length_range: Tuple of (min, max) contig lengths
+        spacer_length_range: Tuple of (min, max) spacer lengths
+        mismatch_range: Tuple of (min, max) substitution mismatches per spacer
+        spacer_insertions: Tuple of (min, max) number of times to insert each spacer
+        indel_insertions: Tuple of (min, max) insertion mutations within spacers
+        indel_deletions: Tuple of (min, max) deletion mutations within spacers
+        reverse_complement: Proportion of spacers to reverse complement (0.0-1.0)
+        threads: Number of threads for parallel processing
+        output_dir: Output directory for simulated data
+        id_prefix: Prefix for sequence IDs (optional)
+        gc_content: GC content percentage (optional)
+        contig_distribution: Distribution type for contig lengths
+        spacer_distribution: Distribution type for spacer lengths
+        verify: Whether to verify simulation after generation
+        contigs: Path to existing contigs file (optional)
+        spacers: Path to existing spacers file (optional)
+        a_frac: A base fraction (optional)
+        t_frac: T base fraction (optional)
+        c_frac: C base fraction (optional)
+        g_frac: G base fraction (optional)
     
-    args = parser.parse_args()
-    
-    print("Running sequence simulation...")
-    
-    # Determine output directory
-    if args.output_dir is None:
-        output_dir = f"results/sim_t_{args.threads}_nc_{args.sample_size_contigs}_ns_{args.sample_size_spacers}_ir_{args.insertion_range[0]}_{args.insertion_range[1]}_lm_{args.n_mismatch_range[0]}_{args.n_mismatch_range[1]}_nir_{args.n_insertion_range[0]}_{args.n_insertion_range[1]}_ndr_{args.n_deletion_range[0]}_{args.n_deletion_range[1]}_prc_{args.prop_rc}"
-    else:
-        output_dir = args.output_dir
-    
-    print(f"Simulation output will be saved to: {output_dir}")
+    Returns:
+        Tuple of (contigs, spacers, ground_truth) dictionaries/lists
+    """
+    logger.info(f"Starting simulation: {num_contigs} contigs, {num_spacers} spacers")
+    logger.debug(f"Output directory: {output_dir}")
     
     # Create directory structure
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(f"{output_dir}/simulated_data", exist_ok=True)
-    print("Created directory structure")
-
-    print("Simulating data...")
-    contigs, spacers, ground_truth, myers_ground_truth = simulate_data_rust(
-        contigs=args.contigs,
-        spacers=args.spacers,
-        contig_length_range=args.contig_length_range,
-        spacer_length_range=args.spacer_length_range,
-        n_mismatch_range=args.n_mismatch_range,
-        sample_size_contigs=args.sample_size_contigs,
-        sample_size_spacers=args.sample_size_spacers,
-        insertion_range=args.insertion_range,
-        n_insertion_range=args.n_insertion_range,
-        n_deletion_range=args.n_deletion_range,
-        prop_rc=args.prop_rc,
-        debug=True,
-        threads=args.threads,
+    logger.debug("Created directory structure")
+    
+    logger.info("Running Rust simulator...")
+    contigs_out, spacers_out, ground_truth = simulate_data_rust(
+        contigs=contigs,
+        spacers=spacers,
+        contig_length_range=contig_length_range,
+        spacer_length_range=spacer_length_range,
+        n_mismatch_range=mismatch_range,
+        sample_size_contigs=num_contigs,
+        sample_size_spacers=num_spacers,
+        insertion_range=spacer_insertions,
+        n_insertion_range=indel_insertions,
+        n_deletion_range=indel_deletions,
+        prop_rc=reverse_complement,
+        debug=False,
+        threads=threads,
         results_dir=output_dir,
-        id_prefix=args.id_prefix,
-        # New parameters
-        contig_distribution=args.contig_distribution,
-        spacer_distribution=args.spacer_distribution,
-        gc_content=args.gc_content,
-        a_frac=args.a_frac,
-        t_frac=args.t_frac,
-        c_frac=args.c_frac,
-        g_frac=args.g_frac,
+        id_prefix=id_prefix,
+        contig_distribution=contig_distribution,
+        spacer_distribution=spacer_distribution,
+        gc_content=gc_content,
+        a_frac=a_frac,
+        t_frac=t_frac,
+        c_frac=c_frac,
+        g_frac=g_frac,
+        verify=verify
     )
-    print(f"Generated {len(contigs)} contigs and {len(spacers)} spacers")
-    print(f"Simulation completed successfully. Data saved to {output_dir}")
+    
+    logger.info(f"Generated {len(contigs_out)} contigs and {len(spacers_out)} spacers")
+    logger.info(f"Ground truth contains {len(ground_truth)} spacer insertions")
+    logger.info(f"Simulation completed. Data saved to {output_dir}/simulated_data/")
+    
+    return contigs_out, spacers_out, ground_truth
 
 
-if __name__ == "__main__":
-    main()
+# Old argparse-based main() removed - use Click CLI via spacer_bencher command

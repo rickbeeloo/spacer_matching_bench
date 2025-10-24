@@ -1,95 +1,136 @@
 import argparse
 import json
 import sys
+import logging
 from pathlib import Path
+from typing import Dict, Optional, Any
 
 from .functions import get_parse_function
+
+logger = logging.getLogger(__name__)
+
+
+def get_tool_config_dir() -> Path:
+    """Get the path to the tool_configs directory."""
+    config_dir = Path(__file__).parent.parent.parent.parent / "tool_configs"
+    config_dir.mkdir(exist_ok=True)
+    return config_dir
+
+
+def load_tool_configs(
+    results_dir: str,
+    threads: int = 1,
+    contigs_file: Optional[str] = None,
+    spacers_file: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Load and configure tool configurations from JSON files.
+    
+    This is the new, clean version that takes explicit parameters instead of
+    relying on an args object with arbitrary attributes.
+    
+    Args:
+        results_dir: Base directory for results (used to determine default file paths)
+        threads: Number of threads to use for tool execution
+        contigs_file: Path to contigs file (optional, will use default if not provided)
+        spacers_file: Path to spacers file (optional, will use default if not provided)
+    
+    Returns:
+        Dictionary mapping tool names to their configuration dictionaries
+    """
+    # Determine file paths with defaults
+    if contigs_file is None:
+        contigs_file = f"{results_dir}/simulated_data/simulated_contigs.fa"
+    
+    if spacers_file is None:
+        spacers_file = f"{results_dir}/simulated_data/simulated_spacers.fa"
+    
+    output_dir = f"{results_dir}/raw_outputs/"
+    
+    # Get tool config directory
+    config_dir = get_tool_config_dir()
+    logger.debug(f"Using config_dir: {config_dir}")
+    
+    # Find all tool config files
+    tool_config_files = list(config_dir.glob("*.json"))
+    logger.info(f"Found {len(tool_config_files)} tool config files")
+    
+    # Load and process each tool configuration
+    tools = {}
+    required_keys = ["name", "output_file", "parse_function_name", "script_name", "command"]
+    
+    for config_file in tool_config_files:
+        logger.debug(f"Loading config from {config_file.name}")
+        try:
+            with open(config_file, "r") as f:
+                tool_config = json.load(f)
+            
+            # Validate required keys
+            if not all(key in tool_config for key in required_keys):
+                logger.warning(f"Skipping {config_file.name}: missing required keys")
+                continue
+            
+            # Substitute placeholders in output file path
+            tool_config["output_file"] = tool_config["output_file"].format(
+                output_dir=output_dir,
+                results_dir=results_dir
+            )
+            
+            # Substitute placeholders in commands
+            if isinstance(tool_config["command"], list):
+                tool_config["command"] = [
+                    cmd.format(
+                        threads=threads,
+                        contigs_file=contigs_file,
+                        spacers_file=spacers_file,
+                        output_dir=output_dir,
+                        results_dir=results_dir,
+                    )
+                    for cmd in tool_config["command"]
+                ]
+            
+            # Set default parse function if not specified
+            if not tool_config.get("parse_function_name"):
+                tool_config["parse_function_name"] = "parse_sam"
+            
+            # Add actual function reference
+            tool_config["parse_function"] = get_parse_function(
+                tool_config["parse_function_name"]
+            )
+            
+            # Add to tools dictionary
+            tools[tool_config["name"]] = tool_config
+            
+        except Exception as e:
+            logger.error(f"Error loading {config_file.name}: {e}", exc_info=True)
+            continue
+    
+    logger.info(f"Successfully loaded {len(tools)} tool configurations")
+    return tools
 
 
 def populate_tools(args):
     """
-    Populate tools dictionary by reading all jsons from the tool_configs dir.
+    Legacy wrapper for backwards compatibility with argparse-based code.
+    
+    This function maintains compatibility with existing code that passes an
+    args object. New code should use load_tool_configs() directly.
+    
+    DEPRECATED: Use load_tool_configs() instead for new code.
     """
-    threads = args.threads
-    # Use custom file paths if provided, otherwise use defaults
-    if hasattr(args, 'contigs_file') and args.contigs_file:
-        contigs_file = args.contigs_file
-    else:
-        contigs_file = f"{args.results_dir}/simulated_data/simulated_contigs.fa"
-    
-    if hasattr(args, 'spacers_file') and args.spacers_file:
-        spacers_file = args.spacers_file
-    else:
-        spacers_file = f"{args.results_dir}/simulated_data/simulated_spacers.fa"
-    
+    # Extract values from args object with defaults
+    threads = getattr(args, 'threads', 1)
     results_dir = args.results_dir
-    output_dir = f"{args.results_dir}/raw_outputs/"
-
-    # Create the tool_configs directory if it doesn't exist
-    config_dir = Path(__file__).parent.parent.parent.parent / "tool_configs"
-    config_dir.mkdir(exist_ok=True)
-
-    # Check if there are tool configurations available
-    tool_configs = list(config_dir.glob("*.json"))
-    # Load tool configurations from JSON files
-    tools = {}
-    for config_file in tool_configs:
-        try:
-            with open(config_file, "r") as f:
-                tool_config = json.load(f)
-
-            # Make sure required keys are present
-            required_keys = [
-                "name",
-                "output_file",
-                "parse_function_name",
-                "script_name",
-                "command",
-            ]
-            if all(key in tool_config for key in required_keys):
-                # Replace placeholders in the configuration
-                tool_config["output_file"] = tool_config["output_file"].format(
-                    output_dir=output_dir, results_dir=results_dir
-                )
-
-                # Handle command differently based on whether it's a string or list
-                if isinstance(tool_config["command"], list):
-                    # Replace placeholders in command list or string
-                    tool_config["command"] = [
-                        cmd.format(
-                            threads=threads,
-                            contigs_file=contigs_file,
-                            spacers_file=spacers_file,
-                            output_dir=output_dir,
-                            results_dir=results_dir,
-                        )
-                        for cmd in tool_config["command"]
-                    ]
-
-                # Add the tool to the dictionary
-                tools[tool_config["name"]] = tool_config
-            else:
-                print(
-                    f"Warning: Skipping tool config {config_file} due to missing required keys"
-                )
-
-        except json.JSONDecodeError:
-            print(
-                f"Warning: Failed to load tool config from {config_file} - invalid JSON"
-            )
-        except Exception as e:
-            print(f"Warning: Error loading tool config from {config_file}: {str(e)}")
-
-    # Adjust parse function based on spacer length dataframe
-    for tool in tools.values():
-        # If parse_function_name is not specified, default to parse_sam
-        if "parse_function_name" not in tool or not tool["parse_function_name"]:
-            tool["parse_function_name"] = "parse_sam"
-
-        # Add the actual function reference
-        tool["parse_function"] = get_parse_function(tool["parse_function_name"])
-
-    return tools
+    contigs_file = getattr(args, 'contigs_file', None)
+    spacers_file = getattr(args, 'spacers_file', None)
+    
+    # Call the new implementation
+    return load_tool_configs(
+        results_dir=results_dir,
+        threads=threads,
+        contigs_file=contigs_file,
+        spacers_file=spacers_file
+    )
 
 
 def prompt_for_tool_info():

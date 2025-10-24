@@ -213,18 +213,41 @@ impl Simulator {
         }
     }
 
+    /// Apply mutations to a DNA sequence.
+    ///
+    /// This function modifies a spacer sequence by applying three types of mutations:
+    /// 1. Insertion indels: Add random bases at random positions
+    /// 2. Deletion indels: Remove bases at random positions  
+    /// 3. Substitution mismatches: Replace bases with different bases
+    ///
+    /// # Parameters
+    /// - `sequence`: The original DNA sequence to mutate
+    /// - `n_mismatches`: Number of substitution mutations to apply
+    /// - `n_insertions`: Number of insertion mutations (bases to ADD)
+    /// - `n_deletions`: Number of deletion mutations (bases to REMOVE)
+    ///
+    /// # Returns
+    /// The mutated sequence as a String
+    ///
+    /// # Important Notes
+    /// - Mutations are applied in order: insertions → deletions → mismatches
+    /// - This order ensures the final sequence length is: original + insertions - deletions
+    /// - The mutated sequence is what gets inserted into contigs
+    /// - The original sequence is preserved in simulated_spacers.fa
     fn apply_mutations(&self, sequence: &str, n_mismatches: usize, n_insertions: usize, n_deletions: usize) -> String {
         let mut rng = rand::rng();
         let mut sequence: Vec<char> = sequence.chars().collect();
         
-        // Apply insertions first (before mismatches and deletions)
+        // STEP 1: Apply insertion indels
+        // Each insertion adds one random base at a random position
         for _ in 0..n_insertions {
             let insert_pos = rng.random_range(0..=sequence.len());
             let new_base = *self.nucleotides.choose(&mut rng).unwrap();
             sequence.insert(insert_pos, new_base);
         }
         
-        // Apply deletions after insertions
+        // STEP 2: Apply deletion indels
+        // Each deletion removes one base at a random position
         for _ in 0..n_deletions {
             if !sequence.is_empty() {
                 let delete_pos = rng.random_range(0..sequence.len());
@@ -232,7 +255,8 @@ impl Simulator {
             }
         }
         
-        // Apply mismatches last (after insertions and deletions, so we use the final sequence length)
+        // STEP 3: Apply substitution mismatches
+        // Replace random bases with different bases (ensures no A→A substitutions)
         if n_mismatches > 0 && !sequence.is_empty() {
             let mismatch_positions: HashSet<usize> = (0..sequence.len())
                 .collect::<Vec<_>>()
@@ -376,6 +400,7 @@ impl Simulator {
         contig_distribution: Option<DistributionType>,
         spacer_distribution: Option<DistributionType>,
         base_composition: Option<BaseComposition>,
+        data_subdir: Option<String>,
     ) -> PyResult<(HashMap<String, String>, HashMap<String, String>, Vec<Vec<String>>)> {
         
         // Estimate required contig space
@@ -503,16 +528,36 @@ impl Simulator {
             let mut rng = rand::rng();
             
             for (id, seq) in &spacers {
-                // Determine number of insertions for this spacer
+                // ========================================================================
+                // CRITICAL: Understanding the two types of "insertion"
+                // ========================================================================
+                // 
+                // 1. SPACER INSERTION (n_insertions below):
+                //    - How many TIMES this spacer gets placed into contigs
+                //    - Controlled by `insertion_range` parameter
+                //    - Example: n_insertions=2 means this spacer appears in 2 different locations
+                //    - This creates the ground truth data we're trying to find
+                //
+                // 2. INSERTION MUTATION (n_insertions in the loop below):
+                //    - How many insertion INDELS (added bases) within the spacer sequence
+                //    - Controlled by `n_insertion_range` parameter  
+                //    - Example: n_insertions=1 means add 1 extra base to the spacer
+                //    - This is a sequence-level mutation that makes alignment harder
+                // (these were clear to us but in the paper and in a few other places, we call these "occurrences". But as occurrences is passive, and here we are explicitly creating them, I use "insertions" instead.)
+                // Similarly, `n_deletions` refers to deletion MUTATIONS (removed bases)
+                // ========================================================================
+                
+                // Determine number of TIMES to insert this spacer (placement count)
                 let n_insertions = rng.random_range(insertion_range.0..=insertion_range.1);
                 
-                // Create insertion plans
+                // Create insertion plans - one plan per spacer placement
                 let mut plans = Vec::with_capacity(n_insertions);
                 for _ in 0..n_insertions {
-                    let is_rc = rng.random_bool(prop_rc);
-                    let n_mismatches = rng.random_range(n_mismatch_range.0..=n_mismatch_range.1);
-                    let n_insertions = rng.random_range(n_insertion_range.0..=n_insertion_range.1);
-                    let n_deletions = rng.random_range(n_deletion_range.0..=n_deletion_range.1);
+                    // For each placement, determine:
+                    let is_rc = rng.random_bool(prop_rc);  // Reverse complement
+                    let n_mismatches = rng.random_range(n_mismatch_range.0..=n_mismatch_range.1);  // Substitutions
+                    let n_insertions = rng.random_range(n_insertion_range.0..=n_insertion_range.1);  // Insertion MUTATIONS
+                    let n_deletions = rng.random_range(n_deletion_range.0..=n_deletion_range.1);    // Deletion MUTATIONS
                     plans.push((is_rc, n_mismatches, n_insertions, n_deletions));
                 }
                 
@@ -814,9 +859,18 @@ impl Simulator {
 
             println!("Successfully inserted {} spacer instances", final_ground_truth.len());
 
+            // Create data subdirectory if it doesn't exist
+            let data_subdir_name = data_subdir.unwrap_or_else(|| "simulated_data".to_string());
+            let data_dir = format!("{}/{}", output_dir, data_subdir_name);
+            if let Err(e) = std::fs::create_dir_all(&data_dir) {
+                return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
+                    format!("Could not create data directory '{}': {}", data_subdir_name, e)
+                ));
+            }
+            
             // Write contigs to FASTA file
             println!("Writing contigs to FASTA file...");
-            let contig_path = format!("{}/simulated_data/simulated_contigs.fa", output_dir);
+            let contig_path = format!("{}/simulated_contigs.fa", data_dir);
             let contig_file = match File::create(&contig_path) {
                 Ok(file) => file,
                 Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
@@ -835,7 +889,7 @@ impl Simulator {
 
             // Write spacers to FASTA file
             println!("Writing spacers to FASTA file...");
-            let spacer_path = format!("{}/simulated_data/simulated_spacers.fa", output_dir);
+            let spacer_path = format!("{}/simulated_spacers.fa", data_dir);
             let spacer_file = match File::create(&spacer_path) {
                 Ok(file) => file,
                 Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
@@ -854,7 +908,7 @@ impl Simulator {
 
             // Write planned ground truth to TSV file
             println!("Writing planned ground truth to TSV file...");
-            let planned_ground_truth_path = format!("{}/simulated_data/planned_ground_truth.tsv", output_dir);
+            let planned_ground_truth_path = format!("{}/planned_ground_truth.tsv", data_dir);
             let planned_ground_truth_file = match File::create(&planned_ground_truth_path) {
                 Ok(file) => file,
                 Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(

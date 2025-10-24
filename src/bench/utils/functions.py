@@ -9,7 +9,7 @@ import random
 import re
 import subprocess
 import tempfile
-
+import ipdb
 import parasail as ps
 import polars as pl
 import pyfastx as pfx
@@ -484,7 +484,7 @@ def simulate_data_rust(
     prop_rc=0.5,
     debug=False,
     threads=None,
-    verify=True,
+    verify=False,
     results_dir=None,
     id_prefix=None,
     # New parameters for base composition and distribution
@@ -496,6 +496,7 @@ def simulate_data_rust(
     t_frac=None,
     c_frac=None,
     g_frac=None,
+    data_subdir=None,
 ):
     if contigs is not None or spacers is not None:
         return simulate_data(
@@ -571,12 +572,13 @@ def simulate_data_rust(
         tuple(n_deletion_range),
         prop_rc,
         threads,
-        verify,
+        debug,
         results_dir,
         id_prefix,
         contig_dist_obj,
         spacer_dist_obj,
         composition_obj,
+        data_subdir,
     )
 
     if debug:
@@ -703,16 +705,70 @@ def read_fasta(filename):
     return sequences
 
 
-def run_tool(tool, results_dir):
-    print (f"Running {tool['script_name']} in {results_dir}/bash_scripts/{tool['script_name']}")
-    # # debug - print the contents of the script
-    # with open(f"{results_dir}/bash_scripts/{tool['script_name']}", "r") as f:
-    #     print(f.read())
-    subprocess.run(f"{results_dir}/bash_scripts/{tool['script_name']}", shell=True)
-
-    with open(f"{results_dir}/raw_outputs/{tool['script_name']}.json", "r") as f:
-        data = json.load(f)
-    return data
+def run_tool(tool, results_dir, debug=False):
+    """
+    Run a tool either via its bash script (with hyperfine) or directly (debug mode).
+    
+    Args:
+        tool: Tool configuration dictionary
+        results_dir: Results directory
+        debug: If True, run command directly without hyperfine wrapper for better error messages
+    
+    Returns:
+        Timing data dictionary (empty dict in debug mode)
+    """
+    if debug:
+        # Debug mode: run the actual command directly, not the hyperfine wrapper
+        print(f"\n{'='*60}")
+        print(f"DEBUG: Running {tool['name']} directly")
+        print(f"{'='*60}")
+        
+        # Get the mamba environment if specified
+        mamba_env = tool.get("mamba_env", None)
+        
+        # Build the command
+        if mamba_env:
+            # Activate mamba env and run command
+            cmd = f'eval "$(micromamba shell hook --shell bash)" && micromamba activate {mamba_env} && {" ".join(tool["command"])}'
+        else:
+            cmd = " ".join(tool["command"])
+        
+        print(f"Command: {cmd}\n")
+        
+        # Run the command and capture output
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            executable="/bin/bash"
+        )
+        
+        # Print stdout and stderr
+        if result.stdout:
+            print("STDOUT:")
+            print(result.stdout)
+        if result.stderr:
+            print("STDERR:")
+            print(result.stderr)
+        
+        # Check return code
+        if result.returncode != 0:
+            print(f"\n❌ Command failed with exit code {result.returncode}")
+            raise RuntimeError(f"Tool {tool['name']} failed with exit code {result.returncode}")
+        else:
+            print(f"\n✓ Command succeeded")
+        
+        print(f"{'='*60}\n")
+        return {}  # No timing data in debug mode
+    else:
+        # Normal mode: run via bash script with hyperfine
+        print(f"Running {tool['script_name']} in {results_dir}/bash_scripts/{tool['script_name']}")
+        subprocess.run(f"{results_dir}/bash_scripts/{tool['script_name']}", shell=True)
+        
+        with open(f"{results_dir}/raw_outputs/{tool['script_name']}.json", "r") as f:
+            data = json.load(f)
+        return data
 
 
 def create_bash_script(tool, results_dir, max_runs=1, warmups=1):
@@ -759,7 +815,12 @@ def clean_before_rerun(tool_name, results_dir):
 
 
 def get_aln_len_from_cigar(cigar):
-    return sum(int(num) for num in re.findall(r"\d+", cigar))
+    """Calculate reference span from CIGAR string.
+    Only M, D, N, =, X consume reference positions.
+    I, S, H do not consume reference positions."""
+    # Match operations that consume reference: M, D, N, =, X
+    ref_consuming = re.findall(r"(\d+)[MDN=X]", cigar)
+    return sum(int(num) for num in ref_consuming)
 
 
 def fix_cigar_for_pysamtools(cigar):
@@ -924,14 +985,15 @@ def parse_sassy(sassy_file, max_mismatches=5, spacer_lendf=None, **kwargs):
     """Parse Sassy TSV output format and return standardized coordinates.
 
     Sassy output format:
-    query_id, target_id, cost, strand, start, end, slice_str, cigar
+    pat_id	text_id	cost	strand	start	end	match_region	cigar
+
     """
 
     try:
         results = pl.read_csv(
             sassy_file,
             separator="\t",
-            has_header=False,
+            has_header=True,
             infer_schema_length=100000,
             new_columns=[
                 "spacer_id",
@@ -1104,55 +1166,47 @@ def parse_lexicmap(tsv_file, max_mismatches=5, spacer_lendf=None, **kwargs):
     """Parse LexicMap TSV output format and return standardized coordinates.
 
     LexicMap output columns (1-based positions):
-    1. query      - Query sequence ID
-    2. qlen       - Query sequence length
-    3. hits       - Number of subject genomes
-    4. sgenome    - Subject genome ID
-    5. sseqid     - Subject sequence ID
-    6. qcovGnm    - Query coverage per genome
-    7. hsp        - HSP number
-    8. qcovHSP    - Query coverage per HSP
-    9. alenHSP    - Aligned length in HSP
-    10. pident    - Percentage identity
-    11. gaps      - Gaps in HSP
-    12. qstart    - Query start
-    13. qend      - Query end
-    14. sstart    - Subject start
-    15. send      - Subject end
-    16. sstr      - Subject strand
-    17. slen      - Subject length
-    18+ Optional columns with -a flag (cigar, qseq, sseq, align)
+    1.  query,    Query sequence ID.
+    2.  qlen,     Query sequence length.
+    3.  hits,     Number of subject genomes.
+    4.  sgenome,  Subject genome ID.
+    5.  sseqid,   Subject sequence ID.
+    6.  qcovGnm,  Query coverage (percentage) per genome: $(aligned bases in the genome)/$qlen.
+    7.  cls,      Nth HSP cluster in the genome. (just for improving readability)
+                  It's useful to show if multiple adjacent HSPs are collinear.
+    8.  hsp,      Nth HSP in the genome.         (just for improving readability)
+    9.  qcovHSP   Query coverage (percentage) per HSP: $(aligned bases in a HSP)/$qlen.
+    10. alenHSP,  Aligned length in the current HSP.
+    11. pident,   Percentage of identical matches in the current HSP.
+    12. gaps,     Gaps in the current HSP.
+    13. qstart,   Start of alignment in query sequence.
+    14. qend,     End of alignment in query sequence.
+    15. sstart,   Start of alignment in subject sequence.
+    16. send,     End of alignment in subject sequence.
+    17. sstr,     Subject strand.
+    18. slen,     Subject sequence length.
+    19. evalue,   Expect value.
+    20. bitscore, Bit score.
+    21. cigar,    CIGAR string of the alignment.                      (optional with -a/--all)
+    22. qseq,     Aligned part of query sequence.                     (optional with -a/--all)
+    23. sseq,     Aligned part of subject sequence.                   (optional with -a/--all)
+    24. align,    Alignment text ("|" and " ") between qseq and sseq. (optional with -a/--all)
+
     """
     try:
         results = pl.read_csv(
             tsv_file,
             separator="\t",
             has_header=True,
-            new_columns=[
-                "spacer_id",
-                "qlen",
-                "hits",
-                "sgenome",
-                "contig_id",
-                "qcovGnm",
-                "hsp",
-                "qcovHSP",
-                "alenHSP",
-                "pident",
-                "gaps",
-                "qstart",
-                "qend",
-                "sstart",
-                "end",
-                "strand",
-                "slen",
-                "cigar",
-                "qseq",
-                "sseq",
-                "align",
-            ],
             infer_schema_length=100000,
         )
+        results = results.rename({
+            "query": "spacer_id",
+            "sseqid": "contig_id",
+            "sstr": "strand",
+        })
+        if results.height == 0:
+            raise ValueError(f"No results found in {tsv_file}")
     except Exception as e:
         print(
             f"Failed to create read from file {tsv_file}: {e}, returning empty dataframe"
@@ -1168,8 +1222,8 @@ def parse_lexicmap(tsv_file, max_mismatches=5, spacer_lendf=None, **kwargs):
                 "mismatches": pl.UInt32,
             }
         )
-
-    results = results.filter(pl.col("alenHSP") >= 17, pl.col("gaps") == 0)
+        
+    # results = results.filter(pl.col("alenHSP") >= 17, pl.col("gaps") == 0) # we don't really need this here, but keeping commented to remember it was done previously. Potentially, with a max mismatch >3 this could have over restrict the max mismatch arguments values.
     results = results.with_columns(pl.col("spacer_id").cast(pl.Utf8))
     results = results.with_columns(
         pl.col("align").str.count_matches("|", literal=True).alias("matches")
@@ -1178,7 +1232,8 @@ def parse_lexicmap(tsv_file, max_mismatches=5, spacer_lendf=None, **kwargs):
     results = spacer_lendf.join(results, on="spacer_id", how="inner")
     results = results.with_columns(
         (pl.col("length") - pl.col("matches")).alias("mismatches"),
-        (pl.col("sstart") - 1).alias("start"),
+        (pl.col("sstart") - 1).alias("start"), # 1-based
+        (pl.col("send")).alias("end"), # 1-based
     )
     results = results.filter(pl.col("mismatches") <= max_mismatches)
     results = results.rename({"length": "spacer_length"})
@@ -1507,7 +1562,7 @@ def parse_samVn_with_lens_pysam(
 ):
     """Parse SAM file using pysam and spacer lengths to compute mismatches"""
     try:  # if no headers, we need to find the smallest sam file in the output file directory and copy its header
-        sam_file = add_sqlines_sam(sam_file, ref_file)
+        sam_file = verify_sam_file(sam_file, ref_file)
         results = []
 
         # Create a dictionary for quick spacer length lookups
@@ -1559,8 +1614,10 @@ def parse_samVn_with_lens_pysam(
                 # # # Get soft clipped length
                 soft_clipped = sum(
                     length for op, length in read.cigartuples if op == 4
-                )  # S operation
+                )  # "S" operation
 
+
+                #debug
                 # if soft_clipped > 0:
                 #     print(f"Soft clipped {soft_clipped} for {read.query_name}")
                 #     break
@@ -1610,7 +1667,7 @@ def parse_samVn_with_lens_pysam(
             "start": pl.UInt32,
             "end": pl.UInt32,
             "mismatches": pl.UInt32,
-        },
+        },orient="row"
     ).unique()
 
 
@@ -1825,16 +1882,21 @@ def read_hyperfine_results(tools, results_dir):
     return results
 
 
-def run_tools(tools, results_dir, max_runs=1, warmups=1):
+def run_tools(tools, results_dir, debug=False):
+    """
+    Run multiple tools.
+    
+    Args:
+        tools: Dictionary of tool configurations
+        results_dir: Results directory
+        debug: If True, run commands directly without hyperfine for better error messages
+    """
     for tool in tools.values():
         try:
-            # print(f"\nRunning {tool['name']}...")
-            # extra_args = tool.get('extra_args', {})
             clean_before_rerun(tool["name"], results_dir)
-            tool["time_info"] = run_tool(
-                tool, results_dir
-            )
-            print(f"\nSuccessfully ran tool: {tool['name']}")
+            tool["time_info"] = run_tool(tool, results_dir, debug=debug)
+            if not debug:
+                print(f"\nSuccessfully ran tool: {tool['name']}")
         except Exception as e:
             print(f"{tool['name']} failed: {e}")
 
@@ -2460,90 +2522,152 @@ def read_results(
             results_df = results_df.vstack(tool_df)
         except Exception as e:
             print(f"Failed to read results for {tool['name']}: {e}")
+            ipdb.set_trace()
     return results_df
 
+def verify_sam_file(sam_file, ref_file=None): 
+    """Verify if a SAM file is valid and add SQ lines if needed
+    also potentially replaces whitespaces with tabs in the first line"""
 
-def add_sqlines_sam(sam_file, ref_file=None):
-    first_line, second_line = os.popen(f"head -n 2 {sam_file}").read().splitlines()
-    if second_line.startswith("@SQ"):
-        print("sam file looks right")
-        return sam_file
-    else:
-        print("sam file looks wrong, adding SQ lines")
-        print("first_line of sam file", first_line)
-        print("second_line of sam file", second_line)
-
-    if ref_file is not None:
-        print("Reference file provided, using it to add SQ lines")
-        tmp = pysam.FastaFile(ref_file)
-        pysam.AlignmentFile(
-            filename=sam_file + ".sqlines",
-            mode="wh",
-            reference_names=tmp.references,
-            reference_lengths=tmp.lengths,
-        )
-    else:
-        print(
-            "No reference file provided, using the smallest sam file present in the output file directory"
-        )
-        present_sam_files = glob.glob(os.path.join(os.path.dirname(sam_file), "*.sam"))
-        present_sam_files.remove(os.path.normpath(sam_file))
-        # drop mummer4 and minimap2 sam files
-        present_sam_files = [
-            thing
-            for thing in present_sam_files
-            if "mummer" not in thing and "minimap" not in thing
-        ]  # these don't print SQ lines when batching.
-        present_sam_files = [
-            thing for thing in present_sam_files if os.path.getsize(thing) > 1
-        ]
-        if len(present_sam_files) == 0:
-            print("No non-empty sam files found, returning None")
-            return None
-        smallest_sam_file = min(present_sam_files, key=os.path.getsize)
-        # write header lines to temp new file
-        with open(sam_file + ".sqlines", "w") as sqlines_file:
-            has_sq_lines = (
-                os.popen(f"head -n 2 {smallest_sam_file}")
-                .read()
-                .splitlines()[1]
-                .startswith("@SQ")
-            )
-            if not has_sq_lines:
-                smallest_sam_file = min(
-                    present_sam_files.remove(smallest_sam_file), key=os.path.getsize
-                )  # one try again
-            with open(smallest_sam_file, "r") as f2:
-                for line in f2:
-                    if line.startswith("@SQ"):
-                        sqlines_file.write(line)
-
-    with open(sam_file + "new", "w") as new_sam_file:
-        new_sam_file.write(first_line)
-        new_sam_file.write("\n")
-        # subprocess.run(f"tail -n+3 {sam_file} >> {temp_sam_file}", shell=True) # faster than reading line by line
-        with open(
-            sam_file + ".sqlines", "r"
-        ) as sqlines_file:  # add the SQ lines to the new sam file
-            for line in sqlines_file:
-                new_sam_file.write(line)
-        new_sam_file.write(
-            second_line.replace("@PG ID:", "@PG\tID:")
-            .replace(" PN:", "\tPN:")
-            .replace(" VN:", "\tVN:")
-            .replace(" CL:", "\tCL:")
-        )  # add the PG line to the new sam file
-        new_sam_file.write("\n")
-        with open(sam_file, "r") as old_sam_file:
-            for line in old_sam_file:
-                if not line.startswith(
-                    "@"
-                ):  # keep only the alignments, mummer 4.01 seems to output multiple PG lines.
+    # Read the first few lines to analyze the header
+    with open(sam_file, 'r') as f:
+        lines = f.readlines()
+    
+    if len(lines) < 2:
+        print("SAM file has less than 2 lines")
+        return None
+        
+    first_line = lines[0].strip()
+    second_line = lines[1].strip() if len(lines) > 1 else ""
+    
+    print("first line of sam file", first_line)
+    print("second line of sam file", second_line)
+    
+    # Check if this is a mummer file - always rewrite HD line for mummer
+    is_mummer_file = "mummer" in sam_file.lower()
+    
+    # Check if we have a proper HD header
+    has_hd_header = first_line.startswith("@HD")
+    
+    # Check if HD line has spaces instead of tabs (malformed)
+    hd_needs_fixing = False
+    if has_hd_header and " " in first_line and "\t" not in first_line:
+        hd_needs_fixing = True
+        print("HD line has spaces instead of tabs, will fix")
+    
+    # Check if we have SQ lines
+    sq_lines = []
+    pg_lines = []
+    alignment_start = 0
+    
+    for i, line in enumerate(lines):
+        line = line.strip()
+        if line.startswith("@SQ"):
+            sq_lines.append(line)
+        elif line.startswith("@PG"):
+            pg_lines.append(line)
+        elif not line.startswith("@"):
+            alignment_start = i
+            break
+    
+    has_sq_lines = len(sq_lines) > 0
+    has_pg_lines = len(pg_lines) > 0
+    
+    print(f"Found {len(sq_lines)} SQ lines, {len(pg_lines)} PG lines")
+    
+    # Determine if we need to fix the file
+    needs_fixing = hd_needs_fixing or not has_sq_lines or not has_pg_lines or is_mummer_file
+    
+    if needs_fixing:
+        print("SAM file needs fixing")
+        
+        # Create new file with proper header
+        with open(sam_file + ".new", "w") as new_sam_file:
+            # Handle HD line
+            if is_mummer_file:
+                # Always rewrite HD line for mummer files
+                new_sam_file.write("@HD\tVN:1.6\tSO:unsorted\n")
+                print("Rewriting HD line for mummer file")
+            elif has_hd_header:
+                if hd_needs_fixing:
+                    # Replace spaces with tabs in HD line
+                    fixed_hd = first_line.replace(" VN:", "\tVN:").replace(" SO:", "\tSO:")
+                    new_sam_file.write(fixed_hd + "\n")
+                else:
+                    new_sam_file.write(first_line + "\n")
+            else:
+                # Add default HD line if missing
+                new_sam_file.write("@HD\tVN:1.6\tSO:unsorted\n")
+            
+            # Add SQ lines
+            if has_sq_lines:
+                for sq_line in sq_lines:
+                    new_sam_file.write(sq_line + "\n")
+            elif ref_file is not None:
+                print("Reference file provided, using it to add SQ lines")
+                try:
+                    tmp = pysam.FastaFile(ref_file)
+                    for ref_name, ref_length in zip(tmp.references, tmp.lengths):
+                        new_sam_file.write(f"@SQ\tSN:{ref_name}\tLN:{ref_length}\n")
+                except Exception as e:
+                    print(f"Error reading reference file: {e}")
+                    return None
+            else:
+                print("No reference file provided, trying to find SQ lines from other SAM files")
+                present_sam_files = glob.glob(os.path.join(os.path.dirname(sam_file), "*.sam"))
+                present_sam_files = [f for f in present_sam_files if f != os.path.normpath(sam_file)]
+                # Drop mummer4 and minimap2 sam files as they don't print SQ lines when batching
+                present_sam_files = [f for f in present_sam_files if "mummer" not in f and "minimap" not in f]
+                present_sam_files = [f for f in present_sam_files if os.path.getsize(f) > 1]
+                
+                if len(present_sam_files) == 0:
+                    print("No non-empty sam files found, returning None")
+                    return None
+                
+                # Find a SAM file with SQ lines
+                sq_found = False
+                for sam_file_candidate in present_sam_files:
+                    with open(sam_file_candidate, 'r') as f:
+                        for line in f:
+                            if line.startswith("@SQ"):
+                                new_sam_file.write(line)
+                                sq_found = True
+                            elif line.startswith("@PG") or (not line.startswith("@") and line.strip()):
+                                break
+                    if sq_found:
+                        break
+                
+                if not sq_found:
+                    print("No SQ lines found in any SAM files")
+                    return None
+            
+            # Add PG lines
+            if has_pg_lines:
+                for pg_line in pg_lines:
+                    # Fix PG line if it has spaces instead of tabs
+                    if " " in pg_line and "\t" not in pg_line:
+                        fixed_pg = pg_line.replace(" ID:", "\tID:").replace(" PN:", "\tPN:").replace(" VN:", "\tVN:").replace(" CL:", "\tCL:")
+                        new_sam_file.write(fixed_pg + "\n")
+                    else:
+                        new_sam_file.write(pg_line + "\n")
+            else:
+                # Add default PG line if missing
+                new_sam_file.write("@PG\tID:unknown\tPN:unknown\tVN:unknown\n")
+            
+            # Add alignment lines
+            for i in range(alignment_start, len(lines)):
+                line = lines[i]
+                if not line.startswith("@"):  # Keep only the alignments
                     new_sam_file.write(line)
-    os.rename(sam_file + "new", sam_file)
-    os.remove(sam_file + ".sqlines")
+        
+        # Replace original file with fixed version
+        os.rename(sam_file + ".new", sam_file)
+        print("SAM file has been fixed")
+    
+    else:
+        print("SAM file looks good, no changes needed")
+    
     return sam_file
-
 
 def prefilter_sam_with_sambamba(input_sam, output_sam, max_mismatches=5, threads=1):
     """Prefilter SAM file using sambamba to remove unmapped reads and reads with gaps"""
@@ -2560,7 +2684,7 @@ def prefilter_sam_with_sambamba(input_sam, output_sam, max_mismatches=5, threads
         print(f"File {input_sam} is empty, skipping")
         return None
 
-    input_sam = add_sqlines_sam(input_sam)
+    input_sam = verify_sam_file(input_sam)
 
     command = [
         "sambamba",
@@ -2636,10 +2760,13 @@ def compare_aligner(
     aligner_results: pl.DataFrame,
     return_classification=False,
     max_mismatches=5,
-    soft_false_positive_threshold=0,
+    contigs_file=None,
+    spacers_file=None,
+    verify_false_positives=True,
 ):
     # Convert string strands to boolean if needed
-    if ground_truth["strand"].dtype == pl.Utf8:
+    convert_to_bool = ground_truth["strand"].dtype == pl.Utf8
+    if convert_to_bool:
         ground_truth = ground_truth.with_columns(
             (pl.col("strand") == "-").alias("strand")
         )
@@ -2649,83 +2776,273 @@ def compare_aligner(
         )
 
     aligner_results = aligner_results.with_row_index()
-
     aligner_results = aligner_results.filter(pl.col("mismatches") <= max_mismatches)
 
-    true_positives = ground_truth.join(
-        aligner_results,
-        on=["spacer_id", "contig_id", "strand", "start", "end"],
-        how="inner",
-        suffix="_aligner",
-    )
-
-    true_positives = true_positives.unique(
-        subset=[
-            "spacer_id",
-            "contig_id",
-            "strand",
-            "start",
-            "end",
-            "mismatches",
-            "tool",
-            "mismatches_aligner",
-        ],
-        keep="last",
-    )
-    # Find false positives (predictions not in ground truth). Trying to see if the aligner found any insertions (i.e. pairs of spacer_id and contig_id) that are not in the ground truth
-    false_positives = aligner_results.join(
-        ground_truth,
-        on=["spacer_id", "contig_id", "strand", "start", "end"],
-        how="anti",
-    )
-
-    # get false positives:
-    # try to see if see if these are soft false positives or totally off  (i.e. if the start and end positions are close to the ground truth)
-    # these can happen if the aligner used gaps or if the mismatches are terminal causing the alignment to be off by a few bases.
-    for row in false_positives.iter_rows(named=True):
-        index = row["index"]
-        spacer_id = row["spacer_id"]
-        contig_id = row["contig_id"]
-        # strand = row["strand"]  # Not used in this context
-        start = row["start"]
-        end = row["end"]
-        ground_truth_same_pair = ground_truth.filter(
-            pl.col("spacer_id") == spacer_id, pl.col("contig_id") == contig_id
+    # Use interval-based validation with polars-bio
+    # This will identify exact_match, partial_overlap, no_overlap, and strand_mismatch
+    try:
+        validation_results = validate_intervals_with_polars_bio(
+            ground_truth, aligner_results, max_mismatches
         )
-        if len(ground_truth_same_pair) == 0:
-            print(f"No ground truth for {spacer_id} {contig_id}")
-            continue
-        if ground_truth_same_pair.height > 0:
-            diff_start = abs(start - ground_truth_same_pair["start"].to_list()[0])
-            diff_end = abs(end - ground_truth_same_pair["end"].to_list()[0])
-            if (
-                diff_start <= soft_false_positive_threshold
-                and diff_end <= soft_false_positive_threshold
-            ):
-                # get the ground truth row's mismatches
-                ground_truth_mismatches = ground_truth_same_pair[
-                    "mismatches"
-                ].to_list()[0]
-                row["mismatches_aligner"] = row["mismatches"]
-                row["mismatches"] = ground_truth_mismatches
-                row = order_columns_to_match(pl.from_dict(row), true_positives)
-                # remove from false positives, and add to true positives
-                false_positives = false_positives.filter(pl.col("index") != index)
-                true_positives = vstack_easy(true_positives, row)
-                # print(f"Soft false positive: {spacer_id} {contig_id} diff start: {diff_start} diff end: {diff_end}")
+    except Exception as e:
+        print(f"Error in interval validation: {e}")
+        print("Falling back to simple join-based approach")
+        # Fallback to exact join if polars-bio fails
+        true_positives = ground_truth.join(
+            aligner_results,
+            on=["spacer_id", "contig_id", "strand", "start", "end"],
+            how="inner",
+            suffix="_aligner",
+        )
+        # Deduplicate based on ground truth identity only
+        true_positives = true_positives.unique(
+            subset=[
+                "spacer_id",
+                "contig_id",
+                "strand",
+                "start",
+                "end",
+                "mismatches",  # Ground truth mismatches
+            ],
+            keep="first",
+        )
+        false_positives = aligner_results.join(
+            ground_truth,
+            on=["spacer_id", "contig_id", "strand", "start", "end"],
+            how="anti",
+        )
+        # Skip detailed FP analysis in fallback mode
+        total_true_positives = true_positives.height
+        total_false_positives = false_positives.height
+        total_ground_truth = ground_truth.height
+        
+        Precision = (
+            total_true_positives / (total_true_positives + total_false_positives)
+            if (total_true_positives + total_false_positives) > 0
+            else 0
+        )
+        Recall = total_true_positives / total_ground_truth if total_ground_truth > 0 else 0
+        F1 = (
+            2 * (Precision * Recall) / (Precision + Recall)
+            if (Precision + Recall) > 0
+            else 0
+        )
+        
+        if return_classification:
+            aligner_results = aligner_results.with_columns(
+                pl.when(pl.col("index").is_in(true_positives.get_column("index")))
+                .then(pl.lit("true_positive"))
+                .otherwise(pl.lit("false_positive"))
+                .alias("classification")
+            )
+            return aligner_results
+        else:
+            return {
+                "tool": aligner_results["tool"].unique()[0],
+                "true_positives": total_true_positives,
+                "exact_matches": 0,  # Unknown in fallback
+                "partial_overlaps": 0,  # Unknown in fallback
+                "false_positives": total_false_positives,
+                "positives_not_in_plan": 0,
+                "true_false_positives": 0,
+                "ground_truth_total": total_ground_truth,
+                "precision": Precision,
+                "recall": Recall,
+                "f1_score": F1,
+            }
+    
+    # Process validation results to categorize matches
+    # exact_match: perfect match, count as TP
+    exact_matches = validation_results.filter(pl.col("overlap_type") == "exact_match")
+    
+    # partial_overlap: tool found the right region but coordinates are slightly off
+    # These are "soft" true positives - the tool found the right location
+    partial_overlaps = validation_results.filter(pl.col("overlap_type") == "partial_overlap")
+    
+    # The polars-bio overlap adds "_2" suffix to the second dataframe (aligner_results) columns
+    # So "index" becomes "index_2"
+    index_col = "index_2" if "index_2" in validation_results.columns else "index"
+    
+    # Combine exact and partial as true positives
+    # Map validation results back to get tool indices
+    tp_indices = pl.concat([
+        exact_matches.select(index_col).rename({index_col: "index"}) if exact_matches.height > 0 else pl.DataFrame({"index": []}),
+        partial_overlaps.select(index_col).rename({index_col: "index"}) if partial_overlaps.height > 0 else pl.DataFrame({"index": []})
+    ]).unique() if exact_matches.height > 0 or partial_overlaps.height > 0 else pl.DataFrame({"index": []})
+    
+    # Get unique ground truth entries that were matched (deduplicate by ground truth)
+    # Note: mismatches_1 is from ground truth after overlap
+    mismatch_col = "mismatches_1" if "mismatches_1" in validation_results.columns else "mismatches"
+    
+    # Build list of dataframes to concat, only including non-empty ones
+    matched_dfs = []
+    if exact_matches.height > 0:
+        matched_dfs.append(
+            exact_matches.select(["spacer_id_1", "contig_id_1", "start_1", "end_1", "strand_1", mismatch_col])
+            .rename({mismatch_col: "mismatches"})
+        )
+    if partial_overlaps.height > 0:
+        matched_dfs.append(
+            partial_overlaps.select(["spacer_id_1", "contig_id_1", "start_1", "end_1", "strand_1", mismatch_col])
+            .rename({mismatch_col: "mismatches"})
+        )
+    
+    matched_ground_truth = pl.concat(matched_dfs).unique() if matched_dfs else pl.DataFrame({
+        "spacer_id_1": [], "contig_id_1": [], "start_1": [], "end_1": [], "strand_1": [], "mismatches": []
+    })
+    
+    true_positives_count = matched_ground_truth.height if matched_ground_truth.height > 0 else 0
+    
+    # Find tool results that didn't match any ground truth intervals
+    # These are the false positives we need to categorize
+    if tp_indices.height > 0 and "index" in tp_indices.columns:
+        false_positives = aligner_results.filter(~pl.col("index").is_in(tp_indices["index"]))
+    else:
+        false_positives = aligner_results
+    
+    # Initialize false positive categories
+    positives_not_in_plan = 0  # Valid alignments but not planned
+    true_false_positives = 0   # No good alignment exists
+    partial_match_fps = 0      # Tool found the region but coordinates are slightly off (from partial_overlap)
+    
+    # Collect examples of positives_not_in_plan for logging (up to 3)
+    positives_not_in_plan_examples = []
+    
+    # Identify partial overlaps that were counted as FPs
+    # These are cases where the tool found a different spacer-contig pair that partially overlaps
+    # but wasn't the exact match we were looking for
+    if false_positives.height > 0:
+        # Load sequences if we need to verify false positives
+        false_positives_with_seqs = None
+        if verify_false_positives and contigs_file and spacers_file:
+            try:
+                print(f"Verifying {false_positives.height} false positive alignments...")
+                false_positives_with_seqs = populate_pldf_withseqs_needletail(
+                    false_positives,
+                    seqfile=contigs_file,
+                    idcol="contig_id",
+                    seqcol="contig_seq",
+                    trim_to_region=True,
+                    reverse_by_strand_col=True,
+                )
+                false_positives_with_seqs = populate_pldf_withseqs_needletail(
+                    false_positives_with_seqs,
+                    seqfile=spacers_file,
+                    idcol="spacer_id",
+                    seqcol="spacer_seq",
+                    trim_to_region=False,
+                    reverse_by_strand_col=False,
+                )
+            except Exception as e:
+                print(f"Warning: Could not load sequences for FP verification: {e}")
+                false_positives_with_seqs = None
+        
+        # Categorize each false positive
+        for row in false_positives.iter_rows(named=True):
+            index = row["index"]
+            spacer_id = row["spacer_id"]
+            contig_id = row["contig_id"]
+            strand = row["strand"]
+            start = row["start"]
+            end = row["end"]
+            
+            # Check if this spacer-contig pair exists in ground truth
+            ground_truth_same_pair = ground_truth.filter(
+                (pl.col("spacer_id") == spacer_id) & (pl.col("contig_id") == contig_id)
+            )
+            
+            if ground_truth_same_pair.height == 0:
+                # No ground truth for this spacer-contig pair at all
+                # This is either a valid alignment not in plan, or a true false positive
+                if verify_false_positives and false_positives_with_seqs is not None:
+                    # Verify the alignment
+                    fp_row = false_positives_with_seqs.filter(pl.col("index") == index)
+                    if fp_row.height > 0 and "spacer_seq" in fp_row.columns and "contig_seq" in fp_row.columns:
+                        spacer_seq = fp_row["spacer_seq"][0]
+                        contig_seq = fp_row["contig_seq"][0]
+                        if spacer_seq and contig_seq:
+                            # Use test_alignment to verify
+                            actual_mismatches = test_alignment(
+                                spacer_seq, contig_seq,
+                                strand=False,  # Already reverse complemented if needed
+                                start=None, end=None,
+                                gaps_as_mismatch=True
+                            )
+                            if actual_mismatches <= max_mismatches:
+                                # Valid alignment, just not in the plan
+                                positives_not_in_plan += 1
+                                if len(positives_not_in_plan_examples) < 3:
+                                    positives_not_in_plan_examples.append({
+                                        "spacer_id": spacer_id,
+                                        "contig_id": contig_id,
+                                        "strand": strand,
+                                        "start": start,
+                                        "end": end,
+                                        "actual_mismatches": actual_mismatches,
+                                        "spacer_seq": spacer_seq,
+                                        "contig_seq": contig_seq,
+                                        "reason": "no_ground_truth_for_pair"
+                                    })
+                            else:
+                                # Poor alignment quality
+                                true_false_positives += 1
+                        else:
+                            true_false_positives += 1
+                    else:
+                        true_false_positives += 1
+                else:
+                    # Without verification, count as positive not in plan
+                    positives_not_in_plan += 1
+            else:
+                # There IS ground truth for this pair, but not at this exact position
+                # This means the tool found a different location on the same contig
+                # Verify if it's a real alignment
+                if verify_false_positives and false_positives_with_seqs is not None:
+                    fp_row = false_positives_with_seqs.filter(pl.col("index") == index)
+                    if fp_row.height > 0 and "spacer_seq" in fp_row.columns and "contig_seq" in fp_row.columns:
+                        spacer_seq = fp_row["spacer_seq"][0]
+                        contig_seq = fp_row["contig_seq"][0]
+                        if spacer_seq and contig_seq:
+                            actual_mismatches = test_alignment(
+                                spacer_seq, contig_seq,
+                                strand=False,
+                                start=None, end=None,
+                                gaps_as_mismatch=True
+                            )
+                            if actual_mismatches <= max_mismatches:
+                                positives_not_in_plan += 1
+                                if len(positives_not_in_plan_examples) < 3:
+                                    positives_not_in_plan_examples.append({
+                                        "spacer_id": spacer_id,
+                                        "contig_id": contig_id,
+                                        "strand": strand,
+                                        "start": start,
+                                        "end": end,
+                                        "actual_mismatches": actual_mismatches,
+                                        "spacer_seq": spacer_seq,
+                                        "contig_seq": contig_seq,
+                                        "reason": "different_location_same_pair"
+                                    })
+                            else:
+                                true_false_positives += 1
+                        else:
+                            true_false_positives += 1
+                    else:
+                        true_false_positives += 1
+                else:
+                    positives_not_in_plan += 1
 
     # Calculate metrics
-    total_true_positives = true_positives.height
     total_false_positives = false_positives.height
     total_ground_truth = ground_truth.height
-
+    
     # Calculate precision and recall
     Precision = (
-        total_true_positives / (total_true_positives + total_false_positives)
-        if (total_true_positives + total_false_positives) > 0
+        true_positives_count / (true_positives_count + total_false_positives)
+        if (true_positives_count + total_false_positives) > 0
         else 0
     )
-    Recall = total_true_positives / total_ground_truth if total_ground_truth > 0 else 0
+    Recall = true_positives_count / total_ground_truth if total_ground_truth > 0 else 0
 
     # Calculate F1 score
     F1 = (
@@ -2733,11 +3050,30 @@ def compare_aligner(
         if (Precision + Recall) > 0
         else 0
     )
+    
+    # Log examples of positives_not_in_plan if any were found
+    if positives_not_in_plan_examples:
+        tool_name = aligner_results["tool"].unique()[0]
+        print(f"\n{tool_name}: Found {positives_not_in_plan} valid alignments not in ground truth plan")
+        print(f"  Examples (up to 3):")
+        for i, example in enumerate(positives_not_in_plan_examples, 1):
+            reason_str = "No ground truth for this pair" if example["reason"] == "no_ground_truth_for_pair" else "Different location than ground truth"
+            print(
+                f"    {i}. {example['spacer_id']} -> {example['contig_id']}:{example['start']}-{example['end']} "
+                f"(strand={example['strand']}, mismatches={example['actual_mismatches']}) - {reason_str}"
+            )
+            # Print sequences aligned
+            spacer_seq = example.get('spacer_seq', '')
+            contig_seq = example.get('contig_seq', '')
+            if spacer_seq and contig_seq:
+                print(f"       {contig_seq}  contig_region")
+                print(f"       {spacer_seq}  spacer")
+            print()
 
     if return_classification:
         # Add a classification column to the aligner results
         aligner_results = aligner_results.with_columns(
-            pl.when(pl.col("index").is_in(true_positives["index"]))
+            pl.when(pl.col("index").is_in(tp_indices["index"]) if tp_indices.height > 0 else pl.lit(False))
             .then(pl.lit("true_positive"))
             .otherwise(pl.lit("false_positive"))
             .alias("classification")
@@ -2746,8 +3082,12 @@ def compare_aligner(
     else:
         return {
             "tool": aligner_results["tool"].unique()[0],
-            "true_positives": total_true_positives,
+            "true_positives": true_positives_count,
+            "exact_matches": exact_matches.height,
+            "partial_overlaps": partial_overlaps.height,
             "false_positives": total_false_positives,
+            "positives_not_in_plan": positives_not_in_plan,
+            "true_false_positives": true_false_positives,
             "ground_truth_total": total_ground_truth,
             "precision": Precision,
             "recall": Recall,
@@ -2756,9 +3096,46 @@ def compare_aligner(
 
 
 def compare_results(
-    tools, ground_truth, tools_results, soft_false_positive_threshold=0
+    tools, ground_truth, tools_results,
+    contigs_file=None, spacers_file=None, verify_false_positives=True,
+    estimate_spurious=False
 ):
+    """
+    Compare tool results against ground truth.
+    
+    Args:
+        tools: Dictionary of tool configurations
+        ground_truth: Ground truth DataFrame
+        tools_results: Tool results DataFrame
+        contigs_file: Path to contigs FASTA file (for FP verification and spurious estimation)
+        spacers_file: Path to spacers FASTA file (for FP verification and spurious estimation)
+        verify_false_positives: Whether to verify false positives by checking actual alignments
+        estimate_spurious: Whether to estimate expected spurious alignments (uses fast statistical method)
+    
+    Returns:
+        DataFrame with comparison results, optionally with spurious estimation
+    """
     comparison_results = []
+    
+    # Estimate expected spurious alignments if requested
+    expected_spurious_per_tool = None
+    if estimate_spurious and contigs_file and spacers_file:
+        try:
+            print("Estimating expected spurious alignments using fast statistical method...")
+            # Load contigs and spacers
+            contigs_dict = read_fasta(contigs_file)
+            spacers_dict = read_fasta(spacers_file)
+            
+            # Use fast statistical estimation instead of slow simulation
+            spurious_est = estimate_expected_spurious_alignments_fast(
+                contigs_dict, spacers_dict,
+                max_mismatches=5  # TODO: make this configurable
+            )
+            expected_spurious_per_tool = spurious_est['mean_spurious']
+            print(f"Expected spurious alignments: {expected_spurious_per_tool:.2f} ± {spurious_est['std_spurious']:.2f}")
+            print(f"Method: {spurious_est['method']}")
+        except Exception as e:
+            print(f"Failed to estimate spurious alignments: {e}")
 
     for tool in tools.values():
         try:
@@ -2766,8 +3143,15 @@ def compare_results(
             comp = compare_aligner(
                 ground_truth,
                 result,
-                soft_false_positive_threshold=soft_false_positive_threshold,
+                contigs_file=contigs_file,
+                spacers_file=spacers_file,
+                verify_false_positives=verify_false_positives,
             )
+            
+            # Add expected spurious count if available
+            if expected_spurious_per_tool is not None:
+                comp["expected_spurious"] = expected_spurious_per_tool
+            
             # temp2=compare_aligner(ground_truth, result, return_classification=True)
             comparison_results.append(comp)
         except Exception as e:
@@ -2866,7 +3250,7 @@ def validate_intervals_with_polars_bio(planned_intervals, tool_results, max_mism
     
     Args:
         planned_intervals: DataFrame with planned spacer insertions (spacer_id, contig_id, start, end, strand, mismatches)
-        tool_results: DataFrame with tool results (spacer_id, contig_id, start, end, strand, mismatches)
+    tool_results: DataFrame with tool results (spacer_id, contig_id, start, end, strand, mismatches)
         max_mismatches: Maximum allowed mismatches for validation
     
     Returns:
@@ -2875,7 +3259,7 @@ def validate_intervals_with_polars_bio(planned_intervals, tool_results, max_mism
     # Filter tool results by max mismatches
     tool_results_filtered = tool_results.filter(pl.col("mismatches") <= max_mismatches)
     
-    # Convert to polars-bio format for interval operations
+    # Add chrom column for polars-bio compatibility (use contig_id as chrom)
     planned_df = planned_intervals.with_columns([
         pl.col("start").cast(pl.UInt32),
         pl.col("end").cast(pl.UInt32),
@@ -2888,20 +3272,53 @@ def validate_intervals_with_polars_bio(planned_intervals, tool_results, max_mism
         pl.col("strand").cast(pl.Utf8)
     ])
     
-    # Use polars-bio overlap operation
-    overlap_result = pb.overlap(planned_df, tool_df)
+    # Check if dataframes are empty
+    if planned_df.height == 0:
+        print("Warning: planned_df is empty")
+        return pl.DataFrame(schema={
+            "spacer_id_1": pl.Utf8, "contig_id_1": pl.Utf8, "start_1": pl.UInt32, "end_1": pl.UInt32, "strand_1": pl.Utf8,
+            "spacer_id_2": pl.Utf8, "contig_id_2": pl.Utf8, "start_2": pl.UInt32, "end_2": pl.UInt32, "strand_2": pl.Utf8,
+            "overlap_type": pl.Utf8
+        })
+    if tool_df.height == 0:
+        print("Warning: tool_df is empty")
+        return pl.DataFrame(schema={
+            "spacer_id_1": pl.Utf8, "contig_id_1": pl.Utf8, "start_1": pl.UInt32, "end_1": pl.UInt32, "strand_1": pl.Utf8,
+            "spacer_id_2": pl.Utf8, "contig_id_2": pl.Utf8, "start_2": pl.UInt32, "end_2": pl.UInt32, "strand_2": pl.Utf8,
+            "overlap_type": pl.Utf8
+        })
     
-    # Calculate validation metrics
+    # Use polars-bio overlap operation
+    try:
+        overlap_result = pb.overlap(planned_df, tool_df,cols1=["contig_id","start", "end"],cols2=["contig_id","start", "end"])
+    except Exception as e:
+        print(f"Error in pb.overlap: {e}")
+        print(f"planned_df shape: {planned_df.shape}")
+        print(f"tool_df shape: {tool_df.shape}")
+        raise
+    
+    # Calculate validation metrics with strand consideration
     validation_results = overlap_result.with_columns([
-        pl.when(pl.col("start_1") <= pl.col("start_2") & pl.col("end_1") >= pl.col("end_2"))
-        .then(pl.lit("exact_match"))
-        .when(pl.col("start_1") < pl.col("start_2") & pl.col("end_1") > pl.col("start_2"))
-        .then(pl.lit("partial_overlap"))
-        .when(pl.col("start_2") < pl.col("start_1") & pl.col("end_2") > pl.col("start_1"))
-        .then(pl.lit("partial_overlap"))
-        .otherwise(pl.lit("no_overlap"))
+        # First check if strands match (both forward or both reverse)
+        pl.when(pl.col("strand_1") == pl.col("strand_2"))
+        .then(
+            # If strands match, check for coordinate overlaps
+            # Use symmetric overlap detection logic
+            pl.when(
+                # Exact match: intervals are identical
+                (pl.col("start_1") == pl.col("start_2")) & (pl.col("end_1") == pl.col("end_2"))
+            )
+            .then(pl.lit("exact_match"))
+            .when(
+                # Partial overlap: intervals overlap but are not identical
+                (pl.col("start_1") < pl.col("end_2")) & (pl.col("start_2") < pl.col("end_1"))
+            )
+            .then(pl.lit("partial_overlap"))
+            .otherwise(pl.lit("no_overlap"))
+        )
+        .otherwise(pl.lit("strand_mismatch"))  # Different strands = no valid match
         .alias("overlap_type")
-    ])
+    ]).collect()
     
     return validation_results
 
@@ -2970,13 +3387,12 @@ def detect_spurious_alignments(contigs, spacers, planned_intervals, max_mismatch
     for spacer_id, spacer_seq in spacers.items():
         for contig_id, contig_seq in contigs.items():
             # Perform alignment using parasail
-            result = ps.sg_qx_trace_scan_sat(
+            result = ps.sg_trace_scan_sat(
                 spacer_seq.encode('utf-8'),
                 contig_seq.encode('utf-8'),
-                2,  # match score
-                -1,  # mismatch penalty
-                -1,  # gap open penalty
-                -1   # gap extend penalty
+                1,  # gap open penalty (must be >= 0)
+                1,  # gap extend penalty (must be >= 0)
+                ps.nuc44  # substitution matrix
             )
             
             # Check if alignment meets criteria
@@ -3005,9 +3421,90 @@ def detect_spurious_alignments(contigs, spacers, planned_intervals, max_mismatch
     return pl.DataFrame(spurious_alignments) if spurious_alignments else pl.DataFrame()
 
 
+def estimate_expected_spurious_alignments_fast(contigs, spacers, max_mismatches=5):
+    """
+    Fast statistical estimate of expected spurious alignments using probability theory.
+    
+    This calculates the expected number of spurious alignments based on:
+    - Total search space (contig length × number of contigs)
+    - Spacer lengths and count
+    - Allowed mismatch rate
+    - Base composition (assumes uniform 0.25 for each base)
+    
+    Args:
+        contigs: Dictionary of contig_id -> sequence (or just contig count and total length)
+        spacers: Dictionary of spacer_id -> sequence
+        max_mismatches: Maximum mismatches to consider
+    
+    Returns:
+        Dictionary with expected spurious alignment statistics
+    """
+    # Calculate total search space
+    if isinstance(contigs, dict):
+        total_contig_length = sum(len(seq) for seq in contigs.values())
+        num_contigs = len(contigs)
+    else:
+        # If just numbers provided
+        total_contig_length = contigs
+        num_contigs = 1
+    
+    # Calculate spacer statistics
+    if isinstance(spacers, dict):
+        spacer_lengths = [len(seq) for seq in spacers.values()]
+        num_spacers = len(spacers)
+    else:
+        # If just numbers provided
+        spacer_lengths = [spacers]
+        num_spacers = 1
+    
+    avg_spacer_length = sum(spacer_lengths) / len(spacer_lengths) if spacer_lengths else 30
+    
+    # For each spacer, calculate probability of random match
+    # P(match at position) = sum over k mismatches of: C(L, k) * 0.25^(L-k) * 0.75^k
+    # where L = spacer length, k = number of mismatches (0 to max_mismatches)
+    
+    expected_matches_per_spacer = []
+    for spacer_len in spacer_lengths:
+        # Number of positions to test in all contigs (accounting for both strands)
+        num_positions = (total_contig_length - spacer_len + 1) * 2  # *2 for reverse complement
+        
+        # Calculate probability of match with <= max_mismatches
+        # Using binomial distribution: P(X <= k) where X ~ Binomial(n=spacer_len, p=0.75)
+        # 0.75 is probability of mismatch at each position
+        prob_match = 0
+        from math import comb
+        for k in range(max_mismatches + 1):
+            # Probability of exactly k mismatches
+            prob_k_mismatches = comb(spacer_len, k) * (0.75 ** k) * (0.25 ** (spacer_len - k))
+            prob_match += prob_k_mismatches
+        
+        # Expected number of matches for this spacer
+        expected_matches = num_positions * prob_match
+        expected_matches_per_spacer.append(expected_matches)
+    
+    # Total expected spurious alignments
+    total_expected = sum(expected_matches_per_spacer)
+    
+    # Standard deviation (using Poisson approximation for rare events)
+    # Var(sum) = sum(Var) for independent events
+    std_dev = np.sqrt(total_expected)
+    
+    return {
+        'mean_spurious': total_expected,
+        'std_spurious': std_dev,
+        'max_spurious': total_expected + 2 * std_dev,  # Approximate 95% CI
+        'min_spurious': max(0, total_expected - 2 * std_dev),
+        'per_spacer_expected': expected_matches_per_spacer,
+        'method': 'probability_theory',
+        'note': 'Fast statistical estimate assuming uniform base composition'
+    }
+
+
 def estimate_expected_spurious_alignments(contigs, spacers, num_random_samples=1000, 
                                         max_mismatches=5, alignment_threshold=0.8):
     """
+    DEPRECATED: This function is very slow. Use estimate_expected_spurious_alignments_fast() instead.
+    
     Estimate expected number of spurious alignments by testing against random sequences.
     
     Args:
@@ -3020,6 +3517,7 @@ def estimate_expected_spurious_alignments(contigs, spacers, num_random_samples=1
     Returns:
         Dictionary with spurious alignment statistics
     """
+    print("WARNING: Using slow spurious estimation method. Consider using estimate_expected_spurious_alignments_fast() instead.")
     spurious_counts = []
     
     # Generate random sequences with similar characteristics to contigs
@@ -3033,10 +3531,10 @@ def estimate_expected_spurious_alignments(contigs, spacers, num_random_samples=1
         # Test against all spacers
         spurious_count = 0
         for spacer_id, spacer_seq in spacers.items():
-            result = ps.sg_qx_trace_scan_sat(
+            result = ps.sg_trace_scan_sat(
                 spacer_seq.encode('utf-8'),
                 random_seq.encode('utf-8'),
-                2, -1, -1, -1
+                1, 1, ps.nuc44
             )
             
             if result.score >= len(spacer_seq) * alignment_threshold:

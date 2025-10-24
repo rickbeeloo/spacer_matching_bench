@@ -36,7 +36,12 @@ dependencies = [
     "cmap>=0.6.0,<0.7",
     "pypdf2>=3.0.1,<4",
     "charset-normalizer>=3.4.2,<4",
-    "polars>=1.34.0,<2", "pydustmasker>=1.0.3,<2", "kcounter>=0.1.1,<0.2", "polars-bio>=0.18.0,<0.19",
+    "click>=8.0.0,<9",
+    "polars>=1.34.0,<2",
+    "pydustmasker>=1.0.3,<2",
+    "kcounter>=0.1.1,<0.2",
+    "polars-bio>=0.18.0,<0.19",
+    "ipdb>=0.13.13,<0.14", "uv>=0.9.5,<0.10",
 ]
 
 [project.urls]
@@ -51,7 +56,7 @@ build-backend = "hatchling.build"
 packages = ["bench"] #this is the package name
 
 [project.scripts]
-spacer_bencher = "bench.bench:main" # this is the CLI entry point
+spacer_bencher = "bench.cli:main" # this is the CLI entry point
 
 [dependency-groups]
 build = ["hatch >=1.14.0,<2", "pip >=25.0.1,<26"]
