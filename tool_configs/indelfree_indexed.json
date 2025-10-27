@@ -5,6 +5,6 @@
     "script_name": "indelfree_indexed.sh",
     "mamba_env": "bbmap_env",
     "command": [
-        "indelfree.sh in={spacers_file} ref={contigs_file} out={output_dir}/indelfree_indexed_output.sam index=t threads={threads}"
+        "indelfree.sh in={spacers_file} ref={contigs_file} out={output_dir}/indelfree_indexed_output.sam index=t threads={threads} k=8"
     ]
 }
