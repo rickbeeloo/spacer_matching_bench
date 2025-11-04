@@ -73,6 +73,3 @@ def run_generate_scripts(input_dir, threads=4, max_runs=1, warmups=0,
             raise
     
     logger.info(f"Successfully generated {len(tools)} tool scripts in {input_dir}/bash_scripts/")
-
-
-# Old argparse-based main() removed - use Click CLI via spacer_bencher command

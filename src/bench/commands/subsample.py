@@ -279,7 +279,7 @@ def subsample_dataset(
         gc_bins: Number of GC content bins for stratification
         length_bins: Number of length bins for stratification
         logger: Optional logger instance    
-        extract_method: Method to extract sequences from the contigs file, "iter" or "pyfastx"
+        extract_method: Method to extract sequences from the contigs file, "iter" or "pyfastx" - pyfastx is faster, but requires an inital (one time) indexing of the fasta file.
         
         
     Returns:

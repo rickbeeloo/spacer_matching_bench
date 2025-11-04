@@ -5,6 +5,7 @@ import click
 import logging
 import sys
 from pathlib import Path
+from rich.logging import RichHandler
 
 # Configure global logger
 logger = logging.getLogger('spacer_bencher')
@@ -12,7 +13,7 @@ logger = logging.getLogger('spacer_bencher')
 
 def setup_logging(verbose: bool = False):
     """
-    Configure global logging for the application.
+    Configure global logging for the application using Rich for pretty output.
     
     Args:
         verbose: If True, set logging level to DEBUG, otherwise INFO
@@ -25,19 +26,18 @@ def setup_logging(verbose: bool = False):
     # Remove any existing handlers to avoid duplicates
     root_logger.handlers.clear()
     
-    # Configure format
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+    # Configure Rich handler for pretty output with clickable file paths
+    rich_handler = RichHandler(
+        rich_tracebacks=True,
+        show_path=True,
+        show_time=True,
+        markup=True,  # Enable rich markup in log messages
+        omit_repeated_times=False
     )
-    
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
     
     # Configure root logger (all loggers inherit from this)
     root_logger.setLevel(level)
-    root_logger.addHandler(console_handler)
+    root_logger.addHandler(rich_handler)
 
 
 @click.group()
@@ -50,10 +50,10 @@ def cli(verbose):
     This tool provides a complete pipeline for:
     
     \b
-    1. Generating simulated CRISPR spacer and contig sequences
-    2. Creating execution scripts for various alignment tools
-    3. Running alignment tools and collecting results
-    4. Comparing and validating tool performance
+    1. Generating simulated CRISPR spacer and contig sequences (spacer_bencher simulate)
+    2. Creating execution scripts for various alignment tools (spacer_bencher generate-scripts)
+    3. Running alignment tools and collecting results (spacer_bencher execute-tools)
+    4. Comparing and validating tool performance (spacer_bencher compare-results)
     
     Use 'spacer_bencher COMMAND --help' for detailed information on each command.
     """
@@ -61,18 +61,18 @@ def cli(verbose):
     logger.debug("CLI initialized in verbose mode")
 
 
-@cli.command()
-@click.option('--num-contigs', '-nc', type=int, default=100,
+@cli.command(context_settings=dict(show_default=True))
+@click.option('--num-contigs', '-nc', type=int, default=1000,
               help='Number of contigs to generate')
-@click.option('--num-spacers', '-ns', type=int, default=50,
+@click.option('--num-spacers', '-ns', type=int, default=200,
               help='Number of spacers to generate')
-@click.option('--contig-length', '-cl', type=(int, int), default=(2000, 5000),
+@click.option('--contig-length', '-cl', type=(int, int), default=(2000, 15000),
               help='Range of contig lengths (min max)')
 @click.option('--spacer-length', '-ls', type=(int, int), default=(20, 60),
               help='Range of spacer lengths (min max)')
-@click.option('--mismatch-range', '-lm', type=(int, int), default=(0, 0),
+@click.option('--mismatch-range', '-lm', type=(int, int), default=(0, 3),
               help='Range of substitution mismatches per spacer (min max)')
-@click.option('--spacer-insertions', '-ir', type=(int, int), default=(1, 1),
+@click.option('--spacer-insertions', '-ir', type=(int, int), default=(1, 4),
               help='Number of times to insert each spacer into contigs (min max)')
 @click.option('--indel-insertions', '-nir', type=(int, int), default=(0, 0),
               help='Number of insertion mutations (indels) to add within each spacer (min max)')
@@ -94,18 +94,22 @@ def cli(verbose):
               default='uniform', help='Distribution for spacer lengths')
 @click.option('--verify', is_flag=True,
               help='Verify simulation after generation')
+@click.option('--contigs', type=click.Path(exists=True), default=None,
+              help='Path to existing contigs FASTA file (optional, for read-and-insert mode)')
+@click.option('--spacers', type=click.Path(exists=True), default=None,
+              help='Path to existing spacers FASTA file (optional, for read-and-insert mode)')
 def simulate(num_contigs, num_spacers, contig_length, spacer_length,
              mismatch_range, spacer_insertions, indel_insertions, indel_deletions,
              reverse_complement, threads, output_dir, id_prefix, gc_content,
-             contig_distribution, spacer_distribution, verify):
+             contig_distribution, spacer_distribution, verify, contigs, spacers):
     """
     Generate simulated CRISPR spacer and contig sequences.
     
     This command creates synthetic test data by:
     
     \b
-    1. Generating random contig sequences
-    2. Generating random spacer sequences  
+    1. Generating random contig sequences (or reading from --contigs file)
+    2. Generating random spacer sequences (or reading from --spacers file)
     3. Inserting spacers into contigs with optional mutations
     4. Recording ground truth positions and mutations
     
@@ -125,9 +129,22 @@ def simulate(num_contigs, num_spacers, contig_length, spacer_length,
                                Example: -ndr 0 1 means 0-1 deletion indels.
     
     \b
+    Read-and-Insert Mode:
+      If --contigs and/or --spacers are provided, those sequences will be read from
+      files instead of being generated. This is useful for:
+      - Testing tools on real CRISPR sequences
+      - Creating synthetic insertions in real metagenomic contigs
+      - Validating tool performance on known sequences
+    
+    \b
     Perfect Match Example:
       spacer_bencher simulate -nc 100 -ns 50 -lm 0 0 -ir 1 1 -nir 0 0 -ndr 0 0
       This creates spacers with NO mutations inserted exactly ONCE.
+    
+    \b
+    Read-and-Insert Example:
+      spacer_bencher simulate --contigs real_contigs.fa --spacers real_spacers.fa -ir 2 5 -lm 0 2 -o output/
+      This reads real sequences and inserts spacers with 0-2 mismatches, 2-5 times each.
     
     \b
     Output Files:
@@ -157,7 +174,9 @@ def simulate(num_contigs, num_spacers, contig_length, spacer_length,
             gc_content=gc_content,
             contig_distribution=contig_distribution,
             spacer_distribution=spacer_distribution,
-            verify=verify
+            verify=verify,
+            contigs=contigs,
+            spacers=spacers
         )
         logger.info("Simulation completed successfully")
         click.echo(click.style("✓ Simulation completed successfully", fg='green'))
@@ -167,7 +186,7 @@ def simulate(num_contigs, num_spacers, contig_length, spacer_length,
         sys.exit(1)
 
 
-@cli.command('generate-scripts')
+@cli.command('generate-scripts', context_settings=dict(show_default=True))
 @click.option('--input-dir', '-i', type=click.Path(exists=True), required=True,
               help='Input directory containing simulated data')
 @click.option('--threads', '-t', type=int, default=4,
@@ -218,7 +237,7 @@ def generate_scripts(input_dir, threads, max_runs, warmups, skip_tools, only_too
         sys.exit(1)
 
 
-@cli.command('execute-tools')
+@cli.command('execute-tools', context_settings=dict(show_default=True))
 @click.option('--input-dir', '-i', type=click.Path(exists=True), required=True,
               help='Input directory containing scripts and data')
 @click.option('--skip-tools', '-st', type=str, default='',
@@ -265,20 +284,20 @@ def execute_tools(input_dir, skip_tools, only_tools, debug):
         sys.exit(1)
 
 
-@cli.command('full-run')
+@cli.command('full-run', context_settings=dict(show_default=True))
 @click.option('--output-dir', '-o', type=click.Path(), required=True,
               help='Output directory for the entire pipeline')
-@click.option('--num-contigs', '-nc', type=int, default=100,
+@click.option('--num-contigs', '-nc', type=int, default=1000,
               help='Number of contigs to generate')
-@click.option('--num-spacers', '-ns', type=int, default=50,
+@click.option('--num-spacers', '-ns', type=int, default=200,
               help='Number of spacers to generate')
 @click.option('--contig-length', '-cl', type=(int, int), default=(2000, 5000),
               help='Range of contig lengths (min max)')
 @click.option('--spacer-length', '-ls', type=(int, int), default=(20, 60),
               help='Range of spacer lengths (min max)')
-@click.option('--mismatch-range', '-lm', type=(int, int), default=(0, 0),
+@click.option('--mismatch-range', '-lm', type=(int, int), default=(0, 5),
               help='Range of substitution mismatches per spacer (min max)')
-@click.option('--spacer-insertions', '-ir', type=(int, int), default=(1, 1),
+@click.option('--spacer-insertions', '-ir', type=(int, int), default=(1, 4),
               help='Number of times to insert each spacer into contigs (min max)')
 @click.option('--indel-insertions', '-nir', type=(int, int), default=(0, 0),
               help='Number of insertion mutations per spacer (min max)')
@@ -298,10 +317,18 @@ def execute_tools(input_dir, skip_tools, only_tools, debug):
               help='Comma-separated list of tools to run')
 @click.option('--max-mismatches', '-mm', type=int, default=5,
               help='Maximum number of mismatches for comparison')
+@click.option('--augment-ground-truth', is_flag=True, default=False,
+              help='Count verified non-planned alignments as true positives')
+@click.option('--distance', type=click.Choice(['hamming', 'edit']), default='hamming',
+              help='Distance metric for validation: hamming (substitutions only) or edit (substitutions + indels). ')
+@click.option('--gap-open-penalty', type=int, default=5,
+              help='Gap open penalty for alignment validation')
+@click.option('--gap-extend-penalty', type=int, default=5,
+              help='Gap extension penalty for alignment validation')
 def full_run(output_dir, num_contigs, num_spacers, contig_length, spacer_length,
              mismatch_range, spacer_insertions, indel_insertions, indel_deletions,
              reverse_complement, threads, max_runs, warmups, skip_tools, only_tools,
-             max_mismatches):
+             max_mismatches, augment_ground_truth, distance, gap_open_penalty, gap_extend_penalty):
     """
     Run the complete benchmarking pipeline.
     
@@ -375,7 +402,11 @@ def full_run(output_dir, num_contigs, num_spacers, contig_length, spacer_length,
             output_file=f"{output_dir}/comparison_results.tsv",
             threads=threads,
             skip_tools=skip_tools,
-            only_tools=only_tools
+            only_tools=only_tools,
+            augment_ground_truth=augment_ground_truth,
+            distance_metric=distance,
+            gap_open_penalty=gap_open_penalty,
+            gap_extend_penalty=gap_extend_penalty
         )
         click.echo(click.style("✓ Step 4/4: Results comparison completed", fg='green'))
         
@@ -406,7 +437,20 @@ def full_run(output_dir, num_contigs, num_spacers, contig_length, spacer_length,
               help='Output file for comparison results (default: stdout)')
 @click.option('--threads', '-t', type=int, default=4,
               help='Number of threads for processing')
-def compare_results(input_dir, max_mismatches, output_file, threads):
+@click.option('--augment-ground-truth', is_flag=True, default=False,
+              help='Count verified non-planned alignments as true positives')
+@click.option('--skip-tools', '-st', type=str, default='',
+              help='Comma-separated list of tools to skip')
+@click.option('--only-tools', '-rt', type=str, default=None,
+              help='Comma-separated list of tools to run')
+@click.option('--distance', type=click.Choice(['hamming', 'edit']), default='hamming',
+              help='Distance metric for validation: hamming (substitutions only) or edit (substitutions + indels). Default: hamming')
+@click.option('--gap-open-penalty', type=int, default=5,
+              help='Gap open penalty for alignment validation')
+@click.option('--gap-extend-penalty', type=int, default=5,
+              help='Gap extension penalty for alignment validation')
+def compare_results(input_dir, max_mismatches, output_file, threads, augment_ground_truth,
+                   skip_tools, only_tools, distance, gap_open_penalty, gap_extend_penalty):
     """
     Compare and validate alignment tool results.
     
@@ -424,8 +468,24 @@ def compare_results(input_dir, max_mismatches, output_file, threads):
       - F1 Score: Harmonic mean of precision and recall
     
     \b
+    Augmented Ground Truth Mode (--augment-ground-truth):
+      When enabled, verified non-planned alignments (valid alignments found by tools
+      but not in the original simulation plan) are counted as true positives rather
+      than false positives. This gives a more realistic performance assessment when
+      sequences contain naturally occurring similar regions.
+    
+    \b
+    Gap Penalty Options:
+      Control how gaps are scored during alignment validation:
+      --no-gaps-as-mismatches: Count gaps as mismatches 
+      --gap-open-penalty: Penalty for opening a gap
+      --gap-extend-penalty: Penalty for extending a gap
+    
+    \b
     Example:
       spacer_bencher compare-results -i tests/validation -mm 3 -o results.tsv
+      spacer_bencher compare-results -i tests/validation --augment-ground-truth
+      spacer_bencher compare-results -i tests/validation --no-gaps-as-mismatches
     """
     from bench.commands.compare_results import run_compare_results
     
@@ -436,7 +496,13 @@ def compare_results(input_dir, max_mismatches, output_file, threads):
             input_dir=input_dir,
             max_mismatches=max_mismatches,
             output_file=output_file,
-            threads=threads
+            threads=threads,
+            augment_ground_truth=augment_ground_truth,
+            skip_tools=skip_tools,
+            only_tools=only_tools,
+            distance_metric=distance,
+            gap_open_penalty=gap_open_penalty,
+            gap_extend_penalty=gap_extend_penalty
         )
         logger.info("Results comparison completed successfully")
         click.echo(click.style("✓ Results compared successfully", fg='green'))

@@ -85,5 +85,3 @@ def run_simulate(num_contigs, num_spacers, contig_length_range, spacer_length_ra
     
     return contigs_out, spacers_out, ground_truth
 
-
-# Old argparse-based main() removed - use Click CLI via spacer_bencher command

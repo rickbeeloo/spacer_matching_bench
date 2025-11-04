@@ -73,6 +73,3 @@ def run_execute_tools(input_dir, skip_tools='', only_tools=None, debug=False):
     except Exception as e:
         logger.error(f"Tool execution failed: {e}", exc_info=True)
         raise
-
-
-# Old argparse-based main() removed - use Click CLI via spacer_bencher command

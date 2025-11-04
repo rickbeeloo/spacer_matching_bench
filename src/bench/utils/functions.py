@@ -1,7 +1,6 @@
 # some utility functions for the benchmark.
 import glob
 
-# from needletail import reverse_complement as needletail_reverse_complement
 import hashlib
 import json
 import os
@@ -14,13 +13,12 @@ import parasail as ps
 import polars as pl
 import pyfastx as pfx
 import pysam
-# import pysam.samtools
 from needletail import parse_fastx_file  # , NeedletailError, normalize_seq
 from tqdm import tqdm
 from collections import Counter
 import math
 import numpy as np
-# import time
+import time
 import polars_bio as pb
 
 pl.Config.set_tbl_cols(-1)
@@ -286,170 +284,6 @@ def reverse_complement(sequence):
     return "".join(complement[base] for base in reversed(sequence))
 
 
-def simulate_data(
-    contig_length_range,
-    spacer_length_range,
-    n_mismatch_range,
-    sample_size_contigs,
-    sample_size_spacers,
-    insertion_range,
-    contigs=None,
-    spacers=None,
-    prop_rc=0.5,
-    debug=False,
-):
-    if contigs is None:  # if not provided, generate contigs
-        if debug:
-            print("Generating contigs...")
-            import time
-
-            start_time = time.time()
-        # Pre-generate all random lengths at once
-        contig_lengths = [
-            random.randint(*contig_length_range) for _ in range(sample_size_contigs)
-        ]
-        total_length = sum(contig_lengths)
-
-        # Generate one large sequence and split it
-        large_sequence = "".join(random.choices("ATCG", k=total_length))
-
-        # Split into individual contigs
-        contigs = {}
-        used_positions_per_contig = {}
-        current_pos = 0
-
-        for i in range(sample_size_contigs):
-            length = contig_lengths[i]
-            contig_id = f"contig_{i}"
-            contigs[contig_id] = large_sequence[current_pos : current_pos + length]
-            used_positions_per_contig[contig_id] = set()
-            current_pos += length
-    else:
-        if debug:
-            print("Reading contigs from file...")
-        contigs = read_fasta(contigs)
-        used_positions_per_contig = {contig_id: set() for contig_id in contigs.keys()}
-        sample_size_contigs = len(contigs)
-        if debug:
-            print(f"Read {sample_size_contigs} contigs")
-
-    if spacers is None:  # if not provided, generate spacers
-        if debug:
-            print("Generating spacers...")
-        spacers = {}
-        # Generate spacers
-        for i in tqdm(
-            range(sample_size_spacers),
-            desc="Generating spacers",
-            total=sample_size_spacers,
-        ):
-            spacer_length = random.randint(*spacer_length_range)
-            spacer = generate_random_sequence(spacer_length)
-            spacer_id = f"spacer_{i}"
-            spacers[spacer_id] = spacer
-            # if debug and i % 1000 == 0: print(f"Generated {i} spacers...")
-    else:
-        if debug:
-            print("Reading spacers from file...")
-        spacers = read_fasta(spacers)
-        sample_size_spacers = len(spacers)
-        if debug:
-            print(f"Read {sample_size_spacers} spacers")
-
-    ground_truth = []
-    if insertion_range == (0, 0):
-        if debug:
-            print("No insertions requested, returning empty ground truth")
-        return (
-            contigs,
-            spacers,
-            pl.DataFrame(
-                schema={
-                    "spacer_id": pl.Utf8,
-                    "contig_id": pl.Utf8,
-                    "start": pl.UInt32,
-                    "end": pl.UInt32,
-                    "strand": pl.Boolean,
-                    "mismatches": pl.UInt32,
-                }
-            ),
-        )
-
-    if debug:
-        print("Starting spacer insertions...")
-    # insert every spacer into random contigs
-    for i in tqdm(
-        range(sample_size_spacers), desc="Processing spacer", total=sample_size_spacers
-    ):
-        n_insertions = random.randint(*insertion_range)
-        spacer_id = f"spacer_{i}"
-        spacer = spacers[spacer_id]
-        if debug and i % 100 == 0:
-            print(f"Processing spacer {i}, making {n_insertions} insertions")
-
-        # For each insertion, randomly select a contig
-        for j in range(n_insertions):
-            target_contig_id = random.choice(list(contigs.keys()))
-            target_contig = contigs[target_contig_id]
-
-            # Decide whether to reverse complement
-            is_rc = random.random() < prop_rc
-            spacer_to_insert = reverse_complement(spacer) if is_rc else spacer
-
-            # Apply mismatches
-            n_mismatches = random.randint(*n_mismatch_range)
-            spacer_with_errors = apply_mismatches(spacer_to_insert, n_mismatches)
-
-            # Find non-overlapping position for substitution
-            while True:  # this could probably be made more efficient by selecting non occupied positions. but with a small number of insertions (and small insertion size, and large contig size) I guess the chacnes of overlap are low.
-                # Ensure we don't try to substitute beyond contig bounds
-                max_pos = len(target_contig) - len(spacer_with_errors)
-                if max_pos < 0:  # Skip if spacer is longer than contig
-                    if debug:
-                        print(
-                            f"Warning: spacer {spacer_id} is longer than contig {target_contig_id}, skipping"
-                        )
-                    continue
-
-                start_pos = random.randint(0, max_pos)
-                end_pos = start_pos + len(spacer_with_errors)
-                position_range = set(range(start_pos, end_pos))
-
-                if not position_range.intersection(
-                    used_positions_per_contig[target_contig_id]
-                ):
-                    used_positions_per_contig[target_contig_id].update(position_range)
-                    break
-
-            # Substitute the spacer into the contig
-            contig_list = list(target_contig)
-            contig_list[start_pos:end_pos] = spacer_with_errors
-            contigs[target_contig_id] = "".join(contig_list)
-
-            # Record the ground truth
-            ground_truth.append(
-                [spacer_id, target_contig_id, start_pos, end_pos, is_rc, n_mismatches]
-            )
-
-    if debug:
-        print("Creating ground truth DataFrame...")
-    ground_truth = pl.DataFrame(
-        ground_truth,
-        schema={
-            "spacer_id": pl.Utf8,
-            "contig_id": pl.Utf8,
-            "start": pl.UInt32,
-            "end": pl.UInt32,
-            "strand": pl.Boolean,
-            "mismatches": pl.UInt32,
-        },
-    )
-    if debug:
-        end_time = time.time()
-        print(f"Simulation complete in {end_time - start_time} seconds")
-    return contigs, spacers, ground_truth
-
-
 from rust_simulator import Simulator, BaseComposition, DistributionType
 
 
@@ -498,19 +332,87 @@ def simulate_data_rust(
     g_frac=None,
     data_subdir=None,
 ):
+    # Use the Rust implementation for input file simulation
     if contigs is not None or spacers is not None:
-        return simulate_data(
-            contig_length_range,
-            spacer_length_range,
-            n_mismatch_range,
+        if debug:
+            print("Using Rust simulate_from_input_files...")
+            start_time = time.time()
+        
+        # Generate simulation ID if not provided
+        if id_prefix is None:
+            sim_params = {
+                "contig_length_range": contig_length_range,
+                "spacer_length_range": spacer_length_range,
+                "n_mismatch_range": n_mismatch_range,
+                "sample_size_contigs": sample_size_contigs,
+                "sample_size_spacers": sample_size_spacers,
+                "insertion_range": insertion_range,
+                "prop_rc": prop_rc,
+            }
+            id_prefix = generate_simulation_id(sim_params)
+            print(f"Using generated simulation ID: {id_prefix}")
+        else:
+            print(f"Using provided ID prefix: {id_prefix}")
+        
+        simulator = Simulator()
+        
+        contigs_dict, spacers_dict, ground_truth = simulator.simulate_from_input_files(
+            tuple(contig_length_range),
+            tuple(spacer_length_range),
+            tuple(n_mismatch_range),
             sample_size_contigs,
             sample_size_spacers,
-            insertion_range,
-            contigs,
-            spacers,
+            tuple(insertion_range),
             prop_rc,
+            results_dir,
+            id_prefix,
+            contigs,  # Pass file path if string, None otherwise
+            spacers,  # Pass file path if string, None otherwise
+            data_subdir,
             debug,
         )
+        
+        if debug:
+            end_time = time.time()
+            print(f"Simulation time when using Rust: {end_time - start_time} seconds")
+        
+        # Convert the ground truth data types before creating DataFrame
+        processed_ground_truth = [
+            [
+                row[0],  # spacer_id (already has prefix from Rust)
+                row[1],  # contig_id (already has prefix from Rust)
+                int(row[2]),  # start (int)
+                int(row[3]),  # end (int)
+                row[4].lower() == "true",  # strand (bool)
+                int(row[5]),  # mismatches (int)
+            ]
+            for row in ground_truth
+        ]
+        
+        ground_truth_df = pl.DataFrame(
+            processed_ground_truth,
+            schema={
+                "spacer_id": pl.Utf8,
+                "contig_id": pl.Utf8,
+                "start": pl.UInt32,
+                "end": pl.UInt32,
+                "strand": pl.Boolean,
+                "mismatches": pl.UInt32,
+            },
+        )
+        
+        if verify:
+            verrify_df = verify_simulated_data(contigs_dict, spacers_dict, ground_truth_df)
+            if (
+                verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches")).height
+                > 0
+            ):
+                print(verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches")))
+                raise ValueError("Simulated data is not correct")
+            else:
+                print("Simulated data is correct")
+        
+        return contigs_dict, spacers_dict, ground_truth_df
 
     if threads is None:
         import multiprocessing
@@ -519,8 +421,6 @@ def simulate_data_rust(
 
     if debug:
         print(f"Using {threads} threads for Rust simulation...")
-        import time
-
         start_time = time.time()
 
     # Generate simulation ID if not provided
@@ -597,6 +497,7 @@ def simulate_data_rust(
         ]
         for row in ground_truth
     ]
+    # breakpoint()
 
     ground_truth_df = pl.DataFrame(
         processed_ground_truth,
@@ -608,6 +509,7 @@ def simulate_data_rust(
             "strand": pl.Boolean,
             "mismatches": pl.UInt32,
         },
+        orient="row"
     )
     if verify:
         verrify_df = verify_simulated_data(contigs, spacers, ground_truth_df)
@@ -911,58 +813,6 @@ def parse_samVext(sam_file, max_mismatches=5):
     return df.unique()
 
 
-def parse_samV1(sam_file, max_mismatches=5):
-    """Parse SAM file and return standardized coordinates (1-based).
-    SAM format uses 1-based coordinates.
-    Filter out rows with more than max_mismatches mismatches. (i.e. retain up to (including) max_mismatches mismatches)"""
-    results = []
-    with open(sam_file, "r") as f:
-        for line in f:
-            if line.startswith("@"):
-                continue
-            fields = line.strip().split("\t")
-            if fields[2] == "*":  # unmapped
-                continue
-            if len(fields) >= 3:
-                spacer_id = fields[0]
-                flag = int(fields[1])
-                is_reverse = bool(flag & 16)
-                strand = is_reverse  # Changed from '-' if is_reverse else '+'
-                contig_id = fields[2]
-                start = int(fields[3]) - 1  # SAM is 1-based
-                cigar = fields[5]
-                seq_length = get_aln_len_from_cigar(cigar)
-                mismatches = -1  # default value, to raise suspicion later if we don't find NM:i: and the sam version is not v1.4
-                if len(fields) >= 12:  # has tags
-                    # get which tag is NM:i:``
-                    nm_tag = [x for x in fields[11:] if x.startswith("NM:i:")]
-                    if len(nm_tag) > 0:
-                        mismatches = int(nm_tag[0].split(":")[2])
-                        # Mummer doesn't report terminal gaps (clipping) as mismatches, so we will test if the alignment is clipped and if so, add the number of clipped bases as mismatches
-                        clipping = re.findall(r"\d+S", cigar)
-                        if clipping:
-                            # get the number of clipped bases
-                            clipped_bases = sum(int(num[:-1]) for num in clipping)
-                            mismatches += clipped_bases  # can not figure out how did mummer calculate this as 0 or 1 mis: 88755144\t16\tIMGVR_UViG_2571042239_000005|2571042239|2571059887|117-31391\t14196\t30\t3S26M\t*\t0\t0\ttattaacctcctttctagctaccaaataa\t*\tNM:i:1\tMD:Z:5a14215
-
-                if mismatches > max_mismatches:
-                    continue
-                # Calculate end position based on CIGAR string, probably wrong...
-                end = start + seq_length
-                # For reverse complement, coordinates are already correct in SAM
-                results.append(
-                    [spacer_id, contig_id, strand, start, end, mismatches]
-                )  # maybe later add mismatches to the results
-    if len(results) == 0:
-        return pl.DataFrame(
-            schema=["spacer_id", "contig_id", "strand", "start", "end", "mismatches"]
-        )  # empty dataframe, so we can still join with other results
-    return pl.DataFrame(
-        results,
-        schema=["spacer_id", "contig_id", "strand", "start", "end", "mismatches"],
-    ).unique()
-
-
 def order_columns_to_match(df1_to_order, df2_to_match):
     return df1_to_order.select(df2_to_match.columns)
 
@@ -1263,155 +1113,8 @@ def parse_lexicmap(tsv_file, max_mismatches=5, spacer_lendf=None, **kwargs):
         "mismatches",
     )
 
-
-def parse_samV1_with_lens(sam_file, spacer_lendf, max_mismatches=5, **kwargs):
-    """Parse SAM file using spacer lengths from reference table to compute mismatches.
-    spacer_lens_df should be a polars DataFrame with columns: spacer_id, length"""
-    results = []
-    with open(sam_file, "r") as f:
-        for line in f:
-            if line.startswith("@"):
-                continue
-            fields = line.strip().split("\t")
-            if fields[2] == "*":  # unmapped
-                continue
-            if len(fields) >= 3:
-                spacer_id = fields[0]
-                # Get query sequence length from spacer_lens_df
-                spacer_in_df = spacer_lendf.filter(pl.col("spacer_id") == spacer_id)
-                if spacer_in_df.height == 0:
-                    # print(f"Spacer {spacer_id} not found in spacer_lendf")
-                    continue
-                flag = int(fields[1])
-                is_reverse = bool(flag & 16)
-                strand = is_reverse  # Changed from '-' if is_reverse else '+'
-                contig_id = fields[2]
-                start = int(fields[3]) - 1  # SAM is 1-based
-                cigar = fields[5]
-                seq_length = get_aln_len_from_cigar(cigar)
-                spacer_len = spacer_in_df["length"].unique().item()
-
-                # Count matches from CIGAR string
-                matches = sum(int(num) for num in re.findall(r"(\d+)[=M]", cigar))
-
-                # Calculate mismatches as spacer length minus matches
-                mismatches = spacer_len - matches
-
-                if mismatches > max_mismatches:
-                    continue
-
-                end = start + seq_length
-                results.append(
-                    [
-                        str(spacer_id),
-                        str(contig_id),
-                        str(strand),
-                        int(start),
-                        int(end),
-                        int(mismatches),
-                    ]
-                )
-
-    if len(results) == 0:
-        return pl.DataFrame(
-            schema={
-                "spacer_id": pl.Utf8,
-                "contig_id": pl.Utf8,
-                "strand": pl.Utf8,
-                "start": pl.UInt32,
-                "end": pl.UInt32,
-                "mismatches": pl.UInt32,
-            }
-        )
-
-    return pl.DataFrame(
-        results,
-        schema={
-            "spacer_id": pl.Utf8,
-            "contig_id": pl.Utf8,
-            "strand": pl.Utf8,
-            "start": pl.UInt32,
-            "end": pl.UInt32,
-            "mismatches": pl.UInt32,
-        },
-    ).unique()
-
-
-def parse_samVext_with_lens(sam_file, spacer_lendf, max_mismatches=5, **kwargs):
-    """Parse SAM file using spacer lengths and extended CIGAR (=X) to compute mismatches."""
-    results = []
-    with open(sam_file, "r") as f:
-        for line in f:
-            if line.startswith("@"):
-                continue
-            fields = line.strip().split("\t")
-            if fields[2] == "*":  # unmapped
-                continue
-            if len(fields) >= 3:
-                spacer_id = str(fields[0])
-                # Get query sequence length from spacer_lens_df
-                spacer_in_df = spacer_lendf.filter(pl.col("spacer_id") == spacer_id)
-                if spacer_in_df.height == 0:
-                    # print(f"Spacer {spacer_id} not found in spacer_lendf")
-                    continue
-                flag = int(fields[1])
-                is_reverse = bool(flag & 16)
-                strand = is_reverse  # Changed from '-' if is_reverse else '+'
-                contig_id = str(fields[2])
-                start = int(fields[3]) - 1  # SAM is 1-based
-                cigar = fields[5]
-                seq_length = get_aln_len_from_cigar(cigar)
-
-                # Count matches from extended CIGAR string
-                matches = sum(int(num) for num in re.findall(r"(\d+)[=M]", cigar))
-
-                spacer_len = spacer_in_df["length"].unique().item()
-
-                # Calculate mismatches as spacer length minus matches
-                mismatches = spacer_len - matches
-
-                if mismatches > max_mismatches:
-                    continue
-
-                end = start + seq_length
-                results.append(
-                    [
-                        str(spacer_id),
-                        str(contig_id),
-                        str(strand),
-                        int(start),
-                        int(end),
-                        int(mismatches),
-                    ]
-                )
-
-    if len(results) == 0:
-        return pl.DataFrame(
-            schema={
-                "spacer_id": pl.Utf8,
-                "contig_id": pl.Utf8,
-                "strand": pl.Utf8,
-                "start": pl.UInt32,
-                "end": pl.UInt32,
-                "mismatches": pl.UInt32,
-            }
-        )
-
-    return pl.DataFrame(
-        results,
-        schema={
-            "spacer_id": pl.Utf8,
-            "contig_id": pl.Utf8,
-            "strand": pl.Utf8,
-            "start": pl.UInt32,
-            "end": pl.UInt32,
-            "mismatches": pl.UInt32,
-        },
-    ).unique()
-
-
 def parse_samVn_with_lens_polars(
-    sam_file, spacer_lendf, max_mismatches=5, sam_version="1"
+    sam_file, spacer_lendf, max_mismatches=5
 ):
     """Parse SAM file using spacer lengths for qlen and numerics in CIGAR for alignment length
     uses polars to speed up things"""
@@ -1496,7 +1199,7 @@ def parse_samVn_with_lens_polars(
         )
 
     # Continue with existing processing
-    sam_df = sam_df.with_columns((pl.col("start") - 1).alias("start"))
+    sam_df = sam_df.with_columns((pl.col("start") - 1).alias("start")) # sam is 1-based
     sam_df = sam_df.with_columns(
         [
             pl.when(pl.col("flag") == 16)
@@ -1557,95 +1260,16 @@ def parse_samVn_with_lens_polars(
     return sam_df
 
 
-def parse_samVn_with_lens_pysam(
-    sam_file, spacer_lendf, max_mismatches=5, threads=4, ref_file=None, **kwargs
+def parse_sam(
+    sam_file, spacer_lendf, max_mismatches=5, threads=4, ref_file=None, gaps_as_mismatches=False, **kwargs
 ):
-    """Parse SAM file using pysam and spacer lengths to compute mismatches"""
-    try:  # if no headers, we need to find the smallest sam file in the output file directory and copy its header
+    """Parse SAM file using pysam and spacer lengths to compute mismatches
+    RENAMED FROM parse_samVn_with_lens_pysam """
+    
+    try:  
         sam_file = verify_sam_file(sam_file, ref_file)
-        results = []
-
-        # Create a dictionary for quick spacer length lookups
-        spacer_lens = dict(zip(spacer_lendf["spacer_id"], spacer_lendf["length"]))
-
-        with pysam.AlignmentFile(sam_file, "r", check_sq=False) as samfile:
-            for read in tqdm(samfile, desc="Parsing SAM file"):
-                if read.is_unmapped:
-                    continue
-
-                # spacer_len = read.query_length # 213768.22it/s
-                # read.cigarstring = fix_cigar_for_pysamtools(read.cigarstring) # if missing integars in the cigar string...
-                spacer_len = spacer_lens.get(
-                    read.query_name
-                )  #  199485, with the "fix_cigar_for_pysamtools" ~99k.
-
-                # spacer_len = read.infer_read_length() #
-                # ## Get hard clipped length
-                # hard_clipped = sum(length for op, length in read.cigartuples
-                #                  if op == 5)  # H operation
-                # # if hard_clipped > 0:
-                # #     print(f"Hard clipped {hard_clipped} for {read.query_name}")
-                # #     # break
-                # if spacer_len == 0: # some alignments get 0 length, maybe because some tools do not output the sequence for secondary/ambiguous alignments. I suspect pysam get's the query length from the nchar of the seq.
-                #     # print (f"spacer_len == 0 for {read.query_name}, extracting alignment info from cigar")
-                # # Get spacer length from reference table instead of query sequence
-                #     spacer_len = spacer_lens.get(read.query_name)
-                # else:
-                #     spacer_len = spacer_len + hard_clipped
-                #     # print(f"{spacer_len}")
-                #     # break
-                if spacer_len is None:
-                    print(
-                        f"Warning: spacer {read.query_name} not found in reference table"
-                    )
-                    break
-                # Get alignment infto_string()
-                # strand = '-' if read.is_reverse else '+'
-                start = read.reference_start  # pysam uses 0-based coordinates
-
-                # Get alignment length excluding soft clips
-                # query_alignment_length = read.query_alignment_length
-                query_alignment_length = len(
-                    read.get_reference_positions(full_length=False)
-                )
-                # aligned_length = sum(length for op, length in read.cigartuples
-                #                   if op in [0, 7, 8])  # M, =, X operations
-
-                # # # Get soft clipped length
-                soft_clipped = sum(
-                    length for op, length in read.cigartuples if op == 4
-                )  # "S" operation
-
-
-                #debug
-                # if soft_clipped > 0:
-                #     print(f"Soft clipped {soft_clipped} for {read.query_name}")
-                #     break
-                # Get edit distance from NM tag  (counts non-identical positions including gaps)
-                nm = (read.get_tag("NM") if read.has_tag("NM") else 0) + soft_clipped
-
-                # Calculate mismatches based on length and matches
-                mismatches = (spacer_len - query_alignment_length) + nm
-                if mismatches < 0:
-                    print("mismatches < 0")
-                    break
-                if mismatches > max_mismatches or nm > max_mismatches:
-                    continue
-
-                results.append(
-                    [
-                        str(read.query_name),
-                        str(read.reference_name),
-                        int(spacer_len),
-                        read.is_reverse,
-                        int(start),
-                        int(read.reference_end),  # read.reference_end
-                        int(mismatches),
-                    ]
-                )
-
     except Exception as e:
-        print(f"Failed to read SAM file {sam_file}: {e}, returning empty dataframe")
+        print(f"Failed to verify SAM file {sam_file}: {e}, returning empty dataframe")
         return pl.DataFrame(
             schema={
                 "spacer_id": pl.Utf8,
@@ -1656,7 +1280,88 @@ def parse_samVn_with_lens_pysam(
                 "end": pl.UInt32,
                 "mismatches": pl.UInt32,
             }
-        )
+    )
+
+    results = []
+    # Create a dictionary for quick spacer length lookups - TODO: maybe there's a faster native polars way to do this.
+    spacer_lens = dict(zip(spacer_lendf["spacer_id"], spacer_lendf["length"]))
+
+    with pysam.AlignmentFile(sam_file, "r", check_sq=False) as samfile:
+        for read in tqdm(samfile, desc="Parsing SAM file"):
+            if read.is_unmapped:
+                continue
+
+            # spacer_len = read.query_length # 213768.22it/s
+            # read.cigarstring = fix_cigar_for_pysamtools(read.cigarstring) # if missing integars in the cigar string...
+            spacer_len = spacer_lens.get(
+                read.query_name
+            )  #  199485it/s, with the "fix_cigar_for_pysamtools" ~99k.
+
+            # spacer_len = read.infer_read_length() #
+            # ## Get hard clipped length
+            # hard_clipped = sum(length for op, length in read.cigartuples
+            #                  if op == 5)  # H operation
+            # # if hard_clipped > 0:
+            # #     print(f"Hard clipped {hard_clipped} for {read.query_name}")
+            # #     # break
+            # if spacer_len == 0: # some alignments get 0 length, maybe because some tools do not output the sequence for secondary/ambiguous alignments. I suspect pysam get's the query length from the nchar of the seq.
+            #     # print (f"spacer_len == 0 for {read.query_name}, extracting alignment info from cigar")
+            # # Get spacer length from reference table instead of query sequence
+            #     spacer_len = spacer_lens.get(read.query_name)
+            # else:
+            #     spacer_len = spacer_len + hard_clipped
+            #     # print(f"{spacer_len}")
+            #     # break
+            if spacer_len is None:
+                print(
+                    f"Warning: spacer {read.query_name} not found in reference table"
+                )
+                break
+            # Get alignment infto_string()
+            # strand = '-' if read.is_reverse else '+'
+            start = read.reference_start  # pysam uses 0-based coordinates (i.e. it knows the sam file is 1-based, and corrects for it)
+
+            # Get alignment length excluding soft clips
+            # query_alignment_length = read.query_alignment_length
+            query_alignment_length = len(
+                read.get_reference_positions(full_length=False)
+            )
+            # aligned_length = sum(length for op, length in read.cigartuples
+            #                   if op in [0, 7, 8])  # M, =, X operations
+
+            # # # Get soft clipped length
+            soft_clipped = sum(
+                length for op, length in read.cigartuples if op == 4
+            )  # "S" operation
+
+
+            #debug
+            # if soft_clipped > 0:
+            #     print(f"Soft clipped {soft_clipped} for {read.query_name}")
+            #     break
+            # Get edit distance from NM tag  (counts non-identical positions including gaps)
+            nm = (read.get_tag("NM") if read.has_tag("NM") else 0) + soft_clipped
+
+            # Calculate mismatches based on length and matches
+            mismatches = (spacer_len - query_alignment_length) + nm
+            if mismatches < 0:
+                print("mismatches < 0")
+                break
+            if mismatches > max_mismatches or nm > max_mismatches:
+                continue
+
+            results.append(
+                [
+                    str(read.query_name),
+                    str(read.reference_name),
+                    int(spacer_len),
+                    read.is_reverse,
+                    int(start),
+                    int(read.reference_end),  # read.reference_end
+                    int(mismatches),
+                ]
+            )
+
     return pl.DataFrame(
         results,
         schema={
@@ -1844,7 +1549,7 @@ def parse_hyperfine_output(json_file):
     time_info = pl.DataFrame(
         {
             "mean_time": result["mean"],
-            "stddev_time": result["stddev"],
+            "stddev_time": result["stddev"] if result["stddev"] is not None else 0.0, # need to debug this
             "median_time": result["median"],
             "user_time": result["user"],
             "system_time": result["system"],
@@ -1854,6 +1559,7 @@ def parse_hyperfine_output(json_file):
             "tool": json_file.split("/")[-1].replace(".sh.json", ""),
         }
     )
+    # breakpoint()
     return time_info
 
 
@@ -2375,6 +2081,14 @@ def test_alignment(
     gaps_as_mismatch=True,
     **kwargs,
 ):
+    """Test if an alignment matches between a spacer and contig using Needleman-Wunsch algorithm.
+    Input is a spacer and contig sequence and coordinates, and optionally strand, start, end, gap_cost, extend_cost, and gaps_as_mismatch.
+    Returns the number of mismatches.
+    
+    Args:
+        gaps_as_mismatch: If True, count gaps as mismatches (edit distance).
+                         If False, count only substitutions (hamming-like distance).
+    """
     if start is not None and end is not None:
         aligned_region = contig_seq[start:end]
     else:
@@ -2382,29 +2096,31 @@ def test_alignment(
     if strand:  # True means reverse strand
         aligned_region = reverse_complement(aligned_region)
 
+    # Always use nw_trace to get the alignment string for accurate counting
+    alignment = ps.nw_trace(
+        spacer_seq,
+        aligned_region,
+        open=gap_cost,
+        extend=extend_cost,
+        matrix=ps.nuc44,
+    )
+    
+    # In parasail's comp string:
+    # '|' = match
+    # '.' = mismatch (substitution)
+    # ' ' (space) = gap/indel
+    
+    comp_string = alignment.traceback.comp
+    matches = comp_string.count("|")
+    
     if gaps_as_mismatch:
-        alignment = ps.nw_trace(
-            spacer_seq,
-            aligned_region,
-            open=gap_cost,
-            extend=extend_cost,
-            matrix=ps.nuc44,
-        )
-        mismatches = (
-            alignment.traceback.comp.count(" ")
-            + alignment.traceback.comp.count("-")
-            + alignment.traceback.comp.count(".")
-        )
-        # mismatches = len(spacer_seq) - (alignment.matches)
+        # Edit distance: spacer length minus matched positions
+        # This counts all differences including substitutions and indels
+        mismatches = len(spacer_seq) - matches
     else:
-        alignment = ps.nw_stats_scan(
-            spacer_seq,
-            aligned_region,
-            open=gap_cost,
-            extend=extend_cost,
-            matrix=ps.nuc44,
-        )
-        mismatches = len(spacer_seq) - (alignment.matches)
+        # Hamming distance: count only substitutions, exclude gaps
+        # This counts mismatched positions but ignores indels
+        mismatches = comp_string.count(".")
 
     return mismatches
 
@@ -2459,7 +2175,6 @@ def read_results(
     tools,
     max_mismatches=5,
     spacer_lendf=None,
-    sam_version="1",
     ref_file=None,
     threads=4,
 ):
@@ -2526,7 +2241,7 @@ def read_results(
     return results_df
 
 def verify_sam_file(sam_file, ref_file=None): 
-    """Verify if a SAM file is valid and add SQ lines if needed
+    """Verify if a SAM file is valid and add SQ lines if needed (from reference file if provided or from other sam files in the same directory)
     also potentially replaces whitespaces with tabs in the first line"""
 
     # Read the first few lines to analyze the header
@@ -2670,11 +2385,11 @@ def verify_sam_file(sam_file, ref_file=None):
     return sam_file
 
 def prefilter_sam_with_sambamba(input_sam, output_sam, max_mismatches=5, threads=1):
-    """Prefilter SAM file using sambamba to remove unmapped reads and reads with gaps"""
+    """Prefilter SAM file using sambamba to remove unmapped reads with mismatches (NM) <= max_mismatches"""
     # Filter expression:
     # - not unmapped: keep only mapped reads
     # - [NM] <= max_mismatches: keep reads with max_mismatches or fewer mismatches
-    # - cigar !~ /[ID]/: exclude reads with insertions or deletions in CIGAR string
+    # - cigar !~ /[ID]/: exclude reads with insertions or deletions in CIGAR string # UPDATE: never used.
 
     filter_expression = f'"not (unmapped) and [NM] <= {max_mismatches}"'
     if not os.path.exists(input_sam):
@@ -2755,412 +2470,6 @@ def create_comparison_matrix(tools_results, n_mismatches):
     return matrix_df
 
 
-def compare_aligner(
-    ground_truth: pl.DataFrame,
-    aligner_results: pl.DataFrame,
-    return_classification=False,
-    max_mismatches=5,
-    contigs_file=None,
-    spacers_file=None,
-    verify_false_positives=True,
-):
-    # Convert string strands to boolean if needed
-    convert_to_bool = ground_truth["strand"].dtype == pl.Utf8
-    if convert_to_bool:
-        ground_truth = ground_truth.with_columns(
-            (pl.col("strand") == "-").alias("strand")
-        )
-    if aligner_results["strand"].dtype == pl.Utf8:
-        aligner_results = aligner_results.with_columns(
-            (pl.col("strand") == "-").alias("strand")
-        )
-
-    aligner_results = aligner_results.with_row_index()
-    aligner_results = aligner_results.filter(pl.col("mismatches") <= max_mismatches)
-
-    # Use interval-based validation with polars-bio
-    # This will identify exact_match, partial_overlap, no_overlap, and strand_mismatch
-    try:
-        validation_results = validate_intervals_with_polars_bio(
-            ground_truth, aligner_results, max_mismatches
-        )
-    except Exception as e:
-        print(f"Error in interval validation: {e}")
-        print("Falling back to simple join-based approach")
-        # Fallback to exact join if polars-bio fails
-        true_positives = ground_truth.join(
-            aligner_results,
-            on=["spacer_id", "contig_id", "strand", "start", "end"],
-            how="inner",
-            suffix="_aligner",
-        )
-        # Deduplicate based on ground truth identity only
-        true_positives = true_positives.unique(
-            subset=[
-                "spacer_id",
-                "contig_id",
-                "strand",
-                "start",
-                "end",
-                "mismatches",  # Ground truth mismatches
-            ],
-            keep="first",
-        )
-        false_positives = aligner_results.join(
-            ground_truth,
-            on=["spacer_id", "contig_id", "strand", "start", "end"],
-            how="anti",
-        )
-        # Skip detailed FP analysis in fallback mode
-        total_true_positives = true_positives.height
-        total_false_positives = false_positives.height
-        total_ground_truth = ground_truth.height
-        
-        Precision = (
-            total_true_positives / (total_true_positives + total_false_positives)
-            if (total_true_positives + total_false_positives) > 0
-            else 0
-        )
-        Recall = total_true_positives / total_ground_truth if total_ground_truth > 0 else 0
-        F1 = (
-            2 * (Precision * Recall) / (Precision + Recall)
-            if (Precision + Recall) > 0
-            else 0
-        )
-        
-        if return_classification:
-            aligner_results = aligner_results.with_columns(
-                pl.when(pl.col("index").is_in(true_positives.get_column("index")))
-                .then(pl.lit("true_positive"))
-                .otherwise(pl.lit("false_positive"))
-                .alias("classification")
-            )
-            return aligner_results
-        else:
-            return {
-                "tool": aligner_results["tool"].unique()[0],
-                "true_positives": total_true_positives,
-                "exact_matches": 0,  # Unknown in fallback
-                "partial_overlaps": 0,  # Unknown in fallback
-                "false_positives": total_false_positives,
-                "positives_not_in_plan": 0,
-                "true_false_positives": 0,
-                "ground_truth_total": total_ground_truth,
-                "precision": Precision,
-                "recall": Recall,
-                "f1_score": F1,
-            }
-    
-    # Process validation results to categorize matches
-    # exact_match: perfect match, count as TP
-    exact_matches = validation_results.filter(pl.col("overlap_type") == "exact_match")
-    
-    # partial_overlap: tool found the right region but coordinates are slightly off
-    # These are "soft" true positives - the tool found the right location
-    partial_overlaps = validation_results.filter(pl.col("overlap_type") == "partial_overlap")
-    
-    # The polars-bio overlap adds "_2" suffix to the second dataframe (aligner_results) columns
-    # So "index" becomes "index_2"
-    index_col = "index_2" if "index_2" in validation_results.columns else "index"
-    
-    # Combine exact and partial as true positives
-    # Map validation results back to get tool indices
-    tp_indices = pl.concat([
-        exact_matches.select(index_col).rename({index_col: "index"}) if exact_matches.height > 0 else pl.DataFrame({"index": []}),
-        partial_overlaps.select(index_col).rename({index_col: "index"}) if partial_overlaps.height > 0 else pl.DataFrame({"index": []})
-    ]).unique() if exact_matches.height > 0 or partial_overlaps.height > 0 else pl.DataFrame({"index": []})
-    
-    # Get unique ground truth entries that were matched (deduplicate by ground truth)
-    # Note: mismatches_1 is from ground truth after overlap
-    mismatch_col = "mismatches_1" if "mismatches_1" in validation_results.columns else "mismatches"
-    
-    # Build list of dataframes to concat, only including non-empty ones
-    matched_dfs = []
-    if exact_matches.height > 0:
-        matched_dfs.append(
-            exact_matches.select(["spacer_id_1", "contig_id_1", "start_1", "end_1", "strand_1", mismatch_col])
-            .rename({mismatch_col: "mismatches"})
-        )
-    if partial_overlaps.height > 0:
-        matched_dfs.append(
-            partial_overlaps.select(["spacer_id_1", "contig_id_1", "start_1", "end_1", "strand_1", mismatch_col])
-            .rename({mismatch_col: "mismatches"})
-        )
-    
-    matched_ground_truth = pl.concat(matched_dfs).unique() if matched_dfs else pl.DataFrame({
-        "spacer_id_1": [], "contig_id_1": [], "start_1": [], "end_1": [], "strand_1": [], "mismatches": []
-    })
-    
-    true_positives_count = matched_ground_truth.height if matched_ground_truth.height > 0 else 0
-    
-    # Find tool results that didn't match any ground truth intervals
-    # These are the false positives we need to categorize
-    if tp_indices.height > 0 and "index" in tp_indices.columns:
-        false_positives = aligner_results.filter(~pl.col("index").is_in(tp_indices["index"]))
-    else:
-        false_positives = aligner_results
-    
-    # Initialize false positive categories
-    positives_not_in_plan = 0  # Valid alignments but not planned
-    true_false_positives = 0   # No good alignment exists
-    partial_match_fps = 0      # Tool found the region but coordinates are slightly off (from partial_overlap)
-    
-    # Collect examples of positives_not_in_plan for logging (up to 3)
-    positives_not_in_plan_examples = []
-    
-    # Identify partial overlaps that were counted as FPs
-    # These are cases where the tool found a different spacer-contig pair that partially overlaps
-    # but wasn't the exact match we were looking for
-    if false_positives.height > 0:
-        # Load sequences if we need to verify false positives
-        false_positives_with_seqs = None
-        if verify_false_positives and contigs_file and spacers_file:
-            try:
-                print(f"Verifying {false_positives.height} false positive alignments...")
-                false_positives_with_seqs = populate_pldf_withseqs_needletail(
-                    false_positives,
-                    seqfile=contigs_file,
-                    idcol="contig_id",
-                    seqcol="contig_seq",
-                    trim_to_region=True,
-                    reverse_by_strand_col=True,
-                )
-                false_positives_with_seqs = populate_pldf_withseqs_needletail(
-                    false_positives_with_seqs,
-                    seqfile=spacers_file,
-                    idcol="spacer_id",
-                    seqcol="spacer_seq",
-                    trim_to_region=False,
-                    reverse_by_strand_col=False,
-                )
-            except Exception as e:
-                print(f"Warning: Could not load sequences for FP verification: {e}")
-                false_positives_with_seqs = None
-        
-        # Categorize each false positive
-        for row in false_positives.iter_rows(named=True):
-            index = row["index"]
-            spacer_id = row["spacer_id"]
-            contig_id = row["contig_id"]
-            strand = row["strand"]
-            start = row["start"]
-            end = row["end"]
-            
-            # Check if this spacer-contig pair exists in ground truth
-            ground_truth_same_pair = ground_truth.filter(
-                (pl.col("spacer_id") == spacer_id) & (pl.col("contig_id") == contig_id)
-            )
-            
-            if ground_truth_same_pair.height == 0:
-                # No ground truth for this spacer-contig pair at all
-                # This is either a valid alignment not in plan, or a true false positive
-                if verify_false_positives and false_positives_with_seqs is not None:
-                    # Verify the alignment
-                    fp_row = false_positives_with_seqs.filter(pl.col("index") == index)
-                    if fp_row.height > 0 and "spacer_seq" in fp_row.columns and "contig_seq" in fp_row.columns:
-                        spacer_seq = fp_row["spacer_seq"][0]
-                        contig_seq = fp_row["contig_seq"][0]
-                        if spacer_seq and contig_seq:
-                            # Use test_alignment to verify
-                            actual_mismatches = test_alignment(
-                                spacer_seq, contig_seq,
-                                strand=False,  # Already reverse complemented if needed
-                                start=None, end=None,
-                                gaps_as_mismatch=True
-                            )
-                            if actual_mismatches <= max_mismatches:
-                                # Valid alignment, just not in the plan
-                                positives_not_in_plan += 1
-                                if len(positives_not_in_plan_examples) < 3:
-                                    positives_not_in_plan_examples.append({
-                                        "spacer_id": spacer_id,
-                                        "contig_id": contig_id,
-                                        "strand": strand,
-                                        "start": start,
-                                        "end": end,
-                                        "actual_mismatches": actual_mismatches,
-                                        "spacer_seq": spacer_seq,
-                                        "contig_seq": contig_seq,
-                                        "reason": "no_ground_truth_for_pair"
-                                    })
-                            else:
-                                # Poor alignment quality
-                                true_false_positives += 1
-                        else:
-                            true_false_positives += 1
-                    else:
-                        true_false_positives += 1
-                else:
-                    # Without verification, count as positive not in plan
-                    positives_not_in_plan += 1
-            else:
-                # There IS ground truth for this pair, but not at this exact position
-                # This means the tool found a different location on the same contig
-                # Verify if it's a real alignment
-                if verify_false_positives and false_positives_with_seqs is not None:
-                    fp_row = false_positives_with_seqs.filter(pl.col("index") == index)
-                    if fp_row.height > 0 and "spacer_seq" in fp_row.columns and "contig_seq" in fp_row.columns:
-                        spacer_seq = fp_row["spacer_seq"][0]
-                        contig_seq = fp_row["contig_seq"][0]
-                        if spacer_seq and contig_seq:
-                            actual_mismatches = test_alignment(
-                                spacer_seq, contig_seq,
-                                strand=False,
-                                start=None, end=None,
-                                gaps_as_mismatch=True
-                            )
-                            if actual_mismatches <= max_mismatches:
-                                positives_not_in_plan += 1
-                                if len(positives_not_in_plan_examples) < 3:
-                                    positives_not_in_plan_examples.append({
-                                        "spacer_id": spacer_id,
-                                        "contig_id": contig_id,
-                                        "strand": strand,
-                                        "start": start,
-                                        "end": end,
-                                        "actual_mismatches": actual_mismatches,
-                                        "spacer_seq": spacer_seq,
-                                        "contig_seq": contig_seq,
-                                        "reason": "different_location_same_pair"
-                                    })
-                            else:
-                                true_false_positives += 1
-                        else:
-                            true_false_positives += 1
-                    else:
-                        true_false_positives += 1
-                else:
-                    positives_not_in_plan += 1
-
-    # Calculate metrics
-    total_false_positives = false_positives.height
-    total_ground_truth = ground_truth.height
-    
-    # Calculate precision and recall
-    Precision = (
-        true_positives_count / (true_positives_count + total_false_positives)
-        if (true_positives_count + total_false_positives) > 0
-        else 0
-    )
-    Recall = true_positives_count / total_ground_truth if total_ground_truth > 0 else 0
-
-    # Calculate F1 score
-    F1 = (
-        2 * (Precision * Recall) / (Precision + Recall)
-        if (Precision + Recall) > 0
-        else 0
-    )
-    
-    # Log examples of positives_not_in_plan if any were found
-    if positives_not_in_plan_examples:
-        tool_name = aligner_results["tool"].unique()[0]
-        print(f"\n{tool_name}: Found {positives_not_in_plan} valid alignments not in ground truth plan")
-        print(f"  Examples (up to 3):")
-        for i, example in enumerate(positives_not_in_plan_examples, 1):
-            reason_str = "No ground truth for this pair" if example["reason"] == "no_ground_truth_for_pair" else "Different location than ground truth"
-            print(
-                f"    {i}. {example['spacer_id']} -> {example['contig_id']}:{example['start']}-{example['end']} "
-                f"(strand={example['strand']}, mismatches={example['actual_mismatches']}) - {reason_str}"
-            )
-            # Print sequences aligned
-            spacer_seq = example.get('spacer_seq', '')
-            contig_seq = example.get('contig_seq', '')
-            if spacer_seq and contig_seq:
-                print(f"       {contig_seq}  contig_region")
-                print(f"       {spacer_seq}  spacer")
-            print()
-
-    if return_classification:
-        # Add a classification column to the aligner results
-        aligner_results = aligner_results.with_columns(
-            pl.when(pl.col("index").is_in(tp_indices["index"]) if tp_indices.height > 0 else pl.lit(False))
-            .then(pl.lit("true_positive"))
-            .otherwise(pl.lit("false_positive"))
-            .alias("classification")
-        )
-        return aligner_results
-    else:
-        return {
-            "tool": aligner_results["tool"].unique()[0],
-            "true_positives": true_positives_count,
-            "exact_matches": exact_matches.height,
-            "partial_overlaps": partial_overlaps.height,
-            "false_positives": total_false_positives,
-            "positives_not_in_plan": positives_not_in_plan,
-            "true_false_positives": true_false_positives,
-            "ground_truth_total": total_ground_truth,
-            "precision": Precision,
-            "recall": Recall,
-            "f1_score": F1,
-        }
-
-
-def compare_results(
-    tools, ground_truth, tools_results,
-    contigs_file=None, spacers_file=None, verify_false_positives=True,
-    estimate_spurious=False
-):
-    """
-    Compare tool results against ground truth.
-    
-    Args:
-        tools: Dictionary of tool configurations
-        ground_truth: Ground truth DataFrame
-        tools_results: Tool results DataFrame
-        contigs_file: Path to contigs FASTA file (for FP verification and spurious estimation)
-        spacers_file: Path to spacers FASTA file (for FP verification and spurious estimation)
-        verify_false_positives: Whether to verify false positives by checking actual alignments
-        estimate_spurious: Whether to estimate expected spurious alignments (uses fast statistical method)
-    
-    Returns:
-        DataFrame with comparison results, optionally with spurious estimation
-    """
-    comparison_results = []
-    
-    # Estimate expected spurious alignments if requested
-    expected_spurious_per_tool = None
-    if estimate_spurious and contigs_file and spacers_file:
-        try:
-            print("Estimating expected spurious alignments using fast statistical method...")
-            # Load contigs and spacers
-            contigs_dict = read_fasta(contigs_file)
-            spacers_dict = read_fasta(spacers_file)
-            
-            # Use fast statistical estimation instead of slow simulation
-            spurious_est = estimate_expected_spurious_alignments_fast(
-                contigs_dict, spacers_dict,
-                max_mismatches=5  # TODO: make this configurable
-            )
-            expected_spurious_per_tool = spurious_est['mean_spurious']
-            print(f"Expected spurious alignments: {expected_spurious_per_tool:.2f} ± {spurious_est['std_spurious']:.2f}")
-            print(f"Method: {spurious_est['method']}")
-        except Exception as e:
-            print(f"Failed to estimate spurious alignments: {e}")
-
-    for tool in tools.values():
-        try:
-            result = tools_results.filter(pl.col("tool") == tool["name"])
-            comp = compare_aligner(
-                ground_truth,
-                result,
-                contigs_file=contigs_file,
-                spacers_file=spacers_file,
-                verify_false_positives=verify_false_positives,
-            )
-            
-            # Add expected spurious count if available
-            if expected_spurious_per_tool is not None:
-                comp["expected_spurious"] = expected_spurious_per_tool
-            
-            # temp2=compare_aligner(ground_truth, result, return_classification=True)
-            comparison_results.append(comp)
-        except Exception as e:
-            print(f"Failed to compare results for {tool['name']}: {e}")
-
-    # Create final results dataframe
-    results_df = pl.DataFrame(comparison_results)
-    # print(results_df)
-    return results_df
 
 
 def get_parse_function(func_name):
@@ -3230,18 +2539,6 @@ class DebugArgs:
 #         .otherwise(pl.lit("+"))
 #         .alias("strand")
 #     )
-
-
-def parse_sam(
-    sam_file, spacer_lendf=None, max_mismatches=5, threads=4, ref_file=None, **kwargs
-):
-    """
-    A convenience function that forwards all arguments to parse_samVn_with_lens_pysam.
-    This is the recommended function to use for parsing SAM files.
-    """
-    return parse_samVn_with_lens_pysam(
-        sam_file, spacer_lendf, max_mismatches, threads, ref_file, **kwargs
-    )
 
 
 def validate_intervals_with_polars_bio(planned_intervals, tool_results, max_mismatches=5):
@@ -3421,24 +2718,324 @@ def detect_spurious_alignments(contigs, spacers, planned_intervals, max_mismatch
     return pl.DataFrame(spurious_alignments) if spurious_alignments else pl.DataFrame()
 
 
-def estimate_expected_spurious_alignments_fast(contigs, spacers, max_mismatches=5):
+def _calculate_match_prob_with_base_composition(base_comp):
+    """
+    Calculate probability of a random match between two bases given base composition.
+    
+    Args:
+        base_comp: BaseComposition object or dict with a_frac, t_frac, c_frac, g_frac
+    
+    Returns:
+        Probability that two random bases match
+    """
+    if isinstance(base_comp, dict):
+        a_frac = base_comp.get('a_frac', 0.25)
+        t_frac = base_comp.get('t_frac', 0.25)
+        c_frac = base_comp.get('c_frac', 0.25)
+        g_frac = base_comp.get('g_frac', 0.25)
+    else:
+        # Assume BaseComposition object
+        a_frac = base_comp.a_frac if hasattr(base_comp, 'a_frac') else 0.25
+        t_frac = base_comp.t_frac if hasattr(base_comp, 't_frac') else 0.25
+        c_frac = base_comp.c_frac if hasattr(base_comp, 'c_frac') else 0.25
+        g_frac = base_comp.g_frac if hasattr(base_comp, 'g_frac') else 0.25
+    
+    # Probability of match = sum of P(both are A) + P(both are T) + ...
+    match_prob = (a_frac ** 2 + t_frac ** 2 + c_frac ** 2 + g_frac ** 2)
+    return match_prob
+
+
+def _calculate_edit_distance_probability_hamming(spacer_len, max_edits, match_prob, 
+                                               match_reward=2, mismatch_penalty=-3,
+                                               k_param=0.14, lambda_param=0.69):
+    """
+    Calculate probability of spurious alignment using BLAST-style E-value approach for Hamming distance.
+    
+    This uses the Karlin-Altschul statistics to estimate the expected number of
+    spurious alignments for Hamming distance-based matching (substitutions only).
+    
+    Args:
+        spacer_len: Length of spacer
+        max_edits: Maximum allowed edits (mismatches only)
+        match_prob: Probability that a single position matches (for base composition)
+        match_reward: Score for matching characters
+        mismatch_penalty: Score for mismatches
+        k_param: Karlin-Altschul K parameter for ungapped alignments
+        lambda_param: Karlin-Altschul lambda parameter for ungapped alignments
+    
+    Returns:
+        Expected number of spurious alignments per position
+    """
+    # For Hamming distance, calculate the raw score for the worst-case alignment
+    # with exactly max_edits mismatches
+    matches = spacer_len - max_edits
+    raw_score = matches * match_reward + max_edits * mismatch_penalty
+    
+    # Calculate E-value using BLAST statistics
+    e_value = _calculate_blast_evalue(
+        raw_score, spacer_len, 1, k_param, lambda_param
+    )
+    
+    return e_value
+
+
+def _calculate_blast_evalue(raw_score, query_length, db_size, k_param, lambda_param):
+    """
+    Calculate BLAST E-value (expected number of spurious alignments) using Karlin-Altschul statistics.
+    
+    Args:
+        raw_score: The raw alignment score (S)
+        query_length: Length of query sequence (m)
+        db_size: Total number of residues in database (n)
+        k_param: Karlin-Altschul scaling parameter K
+        lambda_param: Karlin-Altschul decay parameter lambda
+    
+    Returns:
+        Expected number of spurious alignments (E-value)
+    """
+    import math
+    e_value = k_param * query_length * db_size * math.exp(-lambda_param * raw_score)
+    return e_value
+
+
+def demonstrate_blast_based_spurious_estimation(contigs, spacers, max_edits_range=(2, 10), 
+                                              base_composition=None, verbose=True):
+    """
+    Demonstrate BLAST-based spurious alignment estimation with educational output.
+    
+    This function shows how BLAST E-values work for different distance metrics
+    and parameters, making it easier to understand the relationship between
+    edit distance and spurious alignments.
+    
+    Args:
+        contigs: Dictionary of contig_id -> sequence
+        spacers: Dictionary of spacer_id -> sequence  
+        max_edits_range: Tuple of (min, max) edit distance thresholds to test
+        base_composition: Base composition dict or None for uniform
+        verbose: Whether to print detailed output
+    
+    Returns:
+        Dictionary with results for further analysis
+    """
+    if verbose:
+        print("=== BLAST-based Spurious Alignment Demonstration ===")
+        print("This shows how E-values change with different distance metrics")
+        print()
+    
+    # Calculate total search space
+    total_contig_length = sum(len(seq) for seq in contigs.values())
+    total_spacer_length = sum(len(seq) for seq in spacers.values())
+    avg_spacer_length = total_spacer_length / len(spacers)
+    
+    if verbose:
+        print(f"Search space: {total_contig_length:,} bp in {len(contigs)} contigs")
+        print(f"Query space: {len(spacers)} spacers, avg length {avg_spacer_length:.1f} bp")
+        print()
+    
+    results = {
+        'search_space': total_contig_length,
+        'num_contigs': len(contigs),
+        'num_spacers': len(spacers),
+        'avg_spacer_length': avg_spacer_length,
+        'hamming_results': [],
+        'edit_results': [],
+        'comparisons': []
+    }
+    
+    # Test different edit distance thresholds
+    for max_edits in range(max_edits_range[0], max_edits_range[1] + 1):
+        # Hamming distance (substitutions only)
+        hamming_result = estimate_expected_spurious_alignments_fast(
+            contigs, spacers, max_mismatches=max_edits, 
+            use_edit_distance=False, base_composition=base_composition
+        )
+        
+        # Edit distance (with indels)
+        edit_result = estimate_expected_spurious_alignments_fast(
+            contigs, spacers, max_mismatches=max_edits,
+            use_edit_distance=True, base_composition=base_composition
+        )
+        
+        results['hamming_results'].append({
+            'max_edits': max_edits,
+            'mean_spurious': hamming_result['mean_spurious'],
+            'std_spurious': hamming_result['std_spurious']
+        })
+        
+        results['edit_results'].append({
+            'max_edits': max_edits,
+            'mean_spurious': edit_result['mean_spurious'],
+            'std_spurious': edit_result['std_spurious']
+        })
+        
+        # Calculate ratio
+        ratio = (edit_result['mean_spurious'] / hamming_result['mean_spurious'] 
+                if hamming_result['mean_spurious'] > 0 else 0)
+        
+        results['comparisons'].append({
+            'max_edits': max_edits,
+            'hamming_evalue': hamming_result['mean_spurious'],
+            'edit_evalue': edit_result['mean_spurious'],
+            'ratio': ratio
+        })
+        
+        if verbose:
+            print(f"Max edits {max_edits:2d}: Hamming={hamming_result['mean_spurious']:.2e}, "
+                  f"Edit={edit_result['mean_spurious']:.2e}, Ratio={ratio:.1f}x")
+    
+    if verbose:
+        print()
+        print("Key Insights:")
+        print("• BLAST E-values are extremely conservative (very small numbers)")
+        print("• Edit distance can be MORE restrictive than Hamming distance")
+        print("• Gap penalties make indels expensive in BLAST scoring")
+        print("• The relationship depends on edit distance to sequence length ratio")
+        print()
+    
+    return results
+
+
+def _calculate_score_range_for_edit_distance(length, max_edits, match_reward=2, mismatch_penalty=-3, 
+                                           gap_open_penalty=-5, gap_extend_penalty=-2):
+    """
+    Calculate the range of possible raw scores for a given edit distance threshold.
+    
+    This simulates all possible combinations of substitutions, insertions, and deletions
+    that result in edit distance <= max_edits.
+    
+    Args:
+        length: Length of the query sequence
+        max_edits: Maximum allowed edit distance
+        match_reward: Score for matching characters
+        mismatch_penalty: Score for mismatches (should be negative)
+        gap_open_penalty: Score for opening a gap (should be negative)
+        gap_extend_penalty: Score for extending a gap (should be negative)
+    
+    Returns:
+        Tuple of (min_score, max_score) for the given edit distance threshold
+    """
+    scores = []
+    
+    # Enumerate all valid combinations of substitutions, insertions, and deletions
+    for total_ops in range(max_edits + 1):
+        for subs in range(total_ops + 1):
+            for ins in range(total_ops - subs + 1):
+                dels = total_ops - subs - ins
+                
+                # Skip impossible combinations
+                if dels > length:
+                    continue
+                
+                # Calculate aligned length after operations
+                aligned_len_source = length
+                aligned_len_target = length - dels + ins
+                
+                if aligned_len_source <= 0 or aligned_len_target <= 0:
+                    continue
+                
+                # Calculate raw score for this combination
+                # Matches: positions that are neither substituted nor deleted
+                matches = aligned_len_source - subs - dels
+                score = (
+                    matches * match_reward +           # matches
+                    subs * mismatch_penalty +          # substitutions
+                    (ins + dels) * gap_open_penalty +  # gap open penalty for each indel
+                    (ins + dels) * gap_extend_penalty  # gap extend penalty
+                )
+                scores.append(score)
+    
+    return (min(scores), max(scores)) if scores else (0, 0)
+
+
+def _calculate_edit_distance_probability_with_indels(spacer_len, max_edits, match_prob, 
+                                                   match_reward=2, mismatch_penalty=-3,
+                                                   gap_open_penalty=-5, gap_extend_penalty=-2,
+                                                   k_param=0.14, lambda_param=0.69):
+    """
+    Calculate probability of spurious alignment using BLAST-style E-value approach.
+    
+    This uses the Karlin-Altschul statistics to estimate the expected number of
+    spurious alignments for edit distance-based matching.
+    
+    Args:
+        spacer_len: Length of spacer
+        max_edits: Maximum allowed edit distance
+        match_prob: Probability that a single position matches (for base composition)
+        match_reward: Score for matching characters
+        mismatch_penalty: Score for mismatches
+        gap_open_penalty: Score for opening a gap
+        gap_extend_penalty: Score for extending a gap
+        k_param: Karlin-Altschul K parameter for gapped alignments
+        lambda_param: Karlin-Altschul lambda parameter for gapped alignments
+    
+    Returns:
+        Expected number of spurious alignments per position
+    """
+    # Calculate the range of possible scores for this edit distance threshold
+    min_score, max_score = _calculate_score_range_for_edit_distance(
+        spacer_len, max_edits, match_reward, mismatch_penalty, 
+        gap_open_penalty, gap_extend_penalty
+    )
+    
+    # Use the maximum score (most permissive) to calculate E-value
+    # This represents the worst-case scenario for spurious alignments
+    e_value = _calculate_blast_evalue(
+        max_score, spacer_len, 1, k_param, lambda_param
+    )
+    
+    # Convert E-value to probability per position
+    # E-value is already the expected number of spurious alignments
+    return e_value
+
+
+def estimate_expected_spurious_alignments_fast(
+    contigs, 
+    spacers, 
+    max_mismatches=5, 
+    max_edit_distance=None,
+    base_composition=None,
+    use_edit_distance=False
+):
     """
     Fast statistical estimate of expected spurious alignments using probability theory.
     
     This calculates the expected number of spurious alignments based on:
     - Total search space (contig length × number of contigs)
     - Spacer lengths and count
-    - Allowed mismatch rate
-    - Base composition (assumes uniform 0.25 for each base)
+    - Allowed mismatches or edit distance (maximum!)
+    - Base composition (uniform 0.25 each base if not specified)
     
     Args:
         contigs: Dictionary of contig_id -> sequence (or just contig count and total length)
         spacers: Dictionary of spacer_id -> sequence
-        max_mismatches: Maximum mismatches to consider
+        max_mismatches: Maximum mismatches to consider (for Hamming distance)
+        max_edit_distance: Maximum edit distance to consider (for edit distance with indels)
+                          If None and use_edit_distance=True, uses max_mismatches
+        base_composition: BaseComposition object or dict with a_frac, t_frac, c_frac, g_frac
+                         If None, assumes uniform (0.25 each)
+        use_edit_distance: If True, calculate using edit distance (allowing indels)
+                          If False, use Hamming distance (mismatches only)
     
     Returns:
         Dictionary with expected spurious alignment statistics
     """
+    # Handle base composition
+    if base_composition is None:
+        base_comp_dict = {'a_frac': 0.25, 't_frac': 0.25, 'c_frac': 0.25, 'g_frac': 0.25}
+    elif isinstance(base_composition, dict):
+        base_comp_dict = base_composition
+    elif hasattr(base_composition, 'a_frac'):
+        base_comp_dict = {
+            'a_frac': base_composition.a_frac,
+            't_frac': base_composition.t_frac,
+            'c_frac': base_composition.c_frac,
+            'g_frac': base_composition.g_frac
+        }
+    else:
+        base_comp_dict = {'a_frac': 0.25, 't_frac': 0.25, 'c_frac': 0.25, 'g_frac': 0.25}
+    
+    match_prob = _calculate_match_prob_with_base_composition(base_comp_dict)
+    
     # Calculate total search space
     if isinstance(contigs, dict):
         total_contig_length = sum(len(seq) for seq in contigs.values())
@@ -3457,26 +3054,40 @@ def estimate_expected_spurious_alignments_fast(contigs, spacers, max_mismatches=
         spacer_lengths = [spacers]
         num_spacers = 1
     
-    avg_spacer_length = sum(spacer_lengths) / len(spacer_lengths) if spacer_lengths else 30
+    # Determine which distance metric to use
+    if use_edit_distance:
+        max_edits = max_edit_distance if max_edit_distance is not None else max_mismatches
+        distance_type = 'edit_distance'
+        distance_note = f'Edit distance <= {max_edits} (allowing indels)'
+    else:
+        max_edits = max_mismatches
+        distance_type = 'hamming'
+        distance_note = f'Hamming distance <= {max_mismatches} (mismatches only)'
     
     # For each spacer, calculate probability of random match
-    # P(match at position) = sum over k mismatches of: C(L, k) * 0.25^(L-k) * 0.75^k
-    # where L = spacer length, k = number of mismatches (0 to max_mismatches)
-    
     expected_matches_per_spacer = []
     for spacer_len in spacer_lengths:
         # Number of positions to test in all contigs (accounting for both strands)
-        num_positions = (total_contig_length - spacer_len + 1) * 2  # *2 for reverse complement
+        # For edit distance, we allow more positions due to indels
+        if use_edit_distance:
+            # With indels, the aligned region can be longer, so we test more positions
+            num_positions = (total_contig_length - max(spacer_len - max_edits, 1) + 1) * 2
+        else:
+            num_positions = (total_contig_length - spacer_len + 1) * 2  # *2 for reverse complement
         
-        # Calculate probability of match with <= max_mismatches
-        # Using binomial distribution: P(X <= k) where X ~ Binomial(n=spacer_len, p=0.75)
-        # 0.75 is probability of mismatch at each position
-        prob_match = 0
-        from math import comb
-        for k in range(max_mismatches + 1):
-            # Probability of exactly k mismatches
-            prob_k_mismatches = comb(spacer_len, k) * (0.75 ** k) * (0.25 ** (spacer_len - k))
-            prob_match += prob_k_mismatches
+        # Calculate probability of match using BLAST-style E-value approach
+        if use_edit_distance:
+            # Use gapped alignment parameters for edit distance
+            prob_match = _calculate_edit_distance_probability_with_indels(
+                spacer_len, max_edits, match_prob,
+                k_param=0.14, lambda_param=0.69  # Gapped nucleotide alignment parameters
+            )
+        else:
+            # Use ungapped alignment parameters for Hamming distance
+            prob_match = _calculate_edit_distance_probability_hamming(
+                spacer_len, max_edits, match_prob,
+                k_param=0.14, lambda_param=0.69  # Ungapped nucleotide alignment parameters
+            )
         
         # Expected number of matches for this spacer
         expected_matches = num_positions * prob_match
@@ -3489,6 +3100,8 @@ def estimate_expected_spurious_alignments_fast(contigs, spacers, max_mismatches=
     # Var(sum) = sum(Var) for independent events
     std_dev = np.sqrt(total_expected)
     
+    base_comp_note = 'uniform' if all(abs(v - 0.25) < 1e-6 for v in base_comp_dict.values()) else 'non-uniform'
+    
     return {
         'mean_spurious': total_expected,
         'std_spurious': std_dev,
@@ -3496,65 +3109,13 @@ def estimate_expected_spurious_alignments_fast(contigs, spacers, max_mismatches=
         'min_spurious': max(0, total_expected - 2 * std_dev),
         'per_spacer_expected': expected_matches_per_spacer,
         'method': 'probability_theory',
-        'note': 'Fast statistical estimate assuming uniform base composition'
+        'distance_type': distance_type,
+        'distance_note': distance_note,
+        'base_composition': base_comp_dict,
+        'base_comp_note': base_comp_note,
+        'note': f'Fast statistical estimate with {base_comp_note} base composition'
     }
 
-
-def estimate_expected_spurious_alignments(contigs, spacers, num_random_samples=1000, 
-                                        max_mismatches=5, alignment_threshold=0.8):
-    """
-    DEPRECATED: This function is very slow. Use estimate_expected_spurious_alignments_fast() instead.
-    
-    Estimate expected number of spurious alignments by testing against random sequences.
-    
-    Args:
-        contigs: Dictionary of contig_id -> sequence
-        spacers: Dictionary of spacer_id -> sequence
-        num_random_samples: Number of random sequences to test
-        max_mismatches: Maximum mismatches to consider
-        alignment_threshold: Minimum alignment score threshold
-    
-    Returns:
-        Dictionary with spurious alignment statistics
-    """
-    print("WARNING: Using slow spurious estimation method. Consider using estimate_expected_spurious_alignments_fast() instead.")
-    spurious_counts = []
-    
-    # Generate random sequences with similar characteristics to contigs
-    contig_lengths = [len(seq) for seq in contigs.values()]
-    avg_length = sum(contig_lengths) / len(contig_lengths)
-    
-    for _ in range(num_random_samples):
-        # Generate random sequence
-        random_seq = ''.join(random.choices('ATCG', k=int(avg_length)))
-        
-        # Test against all spacers
-        spurious_count = 0
-        for spacer_id, spacer_seq in spacers.items():
-            result = ps.sg_trace_scan_sat(
-                spacer_seq.encode('utf-8'),
-                random_seq.encode('utf-8'),
-                1, 1, ps.nuc44
-            )
-            
-            if result.score >= len(spacer_seq) * alignment_threshold:
-                # Check for alignments with acceptable mismatches
-                for i in range(len(random_seq) - len(spacer_seq) + 1):
-                    region = random_seq[i:i + len(spacer_seq)]
-                    mismatches = sum(1 for a, b in zip(spacer_seq, region) if a != b)
-                    
-                    if mismatches <= max_mismatches:
-                        spurious_count += 1
-        
-        spurious_counts.append(spurious_count)
-    
-    return {
-        'mean_spurious': np.mean(spurious_counts),
-        'std_spurious': np.std(spurious_counts),
-        'max_spurious': max(spurious_counts),
-        'min_spurious': min(spurious_counts),
-        'samples': spurious_counts
-    }
 
 
 def compare_tool_results_with_intervals(planned_intervals, tool_results, max_mismatches=5):
@@ -3597,9 +3158,9 @@ def compare_tool_results_with_intervals(planned_intervals, tool_results, max_mis
 
 def comprehensive_interval_validation(planned_intervals, tool_results, contigs, spacers, 
                                     max_mismatches=5, alignment_threshold=0.8, 
-                                    num_random_samples=1000):
+                                    ):
     """
-    Comprehensive interval-based validation that includes:
+    Interval-based validation that includes:
     1. Interval overlap validation
     2. Spurious alignment detection
     3. Expected spurious alignment estimation
@@ -3638,8 +3199,8 @@ def comprehensive_interval_validation(planned_intervals, tool_results, contigs, 
     
     # 4. Estimate expected spurious alignments
     print("4. Estimating expected spurious alignments...")
-    spurious_estimation = estimate_expected_spurious_alignments(
-        contigs, spacers, num_random_samples, max_mismatches, alignment_threshold
+    spurious_estimation = estimate_expected_spurious_alignments_fast(
+        contigs, spacers, max_mismatches, use_edit_distance=False
     )
     
     # 5. Calculate additional metrics

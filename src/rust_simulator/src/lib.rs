@@ -213,6 +213,34 @@ impl Simulator {
         }
     }
 
+    /// Read FASTA file and return HashMap of id -> sequence
+    fn read_fasta_file(&self, filepath: &str) -> PyResult<HashMap<String, String>> {
+        let file = match File::open(filepath) {
+            Ok(f) => f,
+            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
+                format!("Could not open file '{}': {}", filepath, e)
+            ))
+        };
+        
+        let reader = fasta::Reader::new(file);
+        let mut sequences = HashMap::new();
+        
+        for result in reader.records() {
+            let record = match result {
+                Ok(r) => r,
+                Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
+                    format!("Error reading FASTA record: {}", e)
+                ))
+            };
+            
+            let id = record.id().to_string();
+            let seq = String::from_utf8_lossy(record.seq()).to_string();
+            sequences.insert(id, seq);
+        }
+        
+        Ok(sequences)
+    }
+
     /// Apply mutations to a DNA sequence.
     ///
     /// This function modifies a spacer sequence by applying three types of mutations:
@@ -957,6 +985,306 @@ impl Simulator {
 
             Ok((final_contigs, spacers, final_ground_truth))
         })
+    }
+
+    /// Simulate data using pre-existing contigs and/or spacers from files or provided data
+    /// This is a simpler simulation that only applies substitution mismatches (no indels)
+    /// Similar to the Python simulate_data_from_input_files function
+    fn simulate_from_input_files(
+        &self,
+        contig_length_range: (usize, usize),
+        spacer_length_range: (usize, usize),
+        n_mismatch_range: (usize, usize),
+        sample_size_contigs: usize,
+        sample_size_spacers: usize,
+        insertion_range: (usize, usize),
+        prop_rc: f64,
+        output_dir: String,
+        id_prefix: Option<String>,
+        contigs_file: Option<String>,
+        spacers_file: Option<String>,
+        data_subdir: Option<String>,
+        debug: bool,
+    ) -> PyResult<(HashMap<String, String>, HashMap<String, String>, Vec<Vec<String>>)> {
+        
+        // Load or generate contigs
+        let mut contigs: HashMap<String, String> = if let Some(file_path) = contigs_file {
+            if debug {
+                println!("Reading contigs from file: {}", file_path);
+            }
+            self.read_fasta_file(&file_path)?
+        } else {
+            if debug {
+                println!("Generating contigs...");
+            }
+            let pb = ProgressBar::new(sample_size_contigs as u64);
+            pb.set_style(ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+                .unwrap());
+            
+            let mut generated_contigs = HashMap::new();
+            for i in 0..sample_size_contigs {
+                let mut rng = rand::rng();
+                let length = rng.random_range(contig_length_range.0..=contig_length_range.1);
+                let sequence = self.generate_random_sequence(length);
+                
+                let id = match &id_prefix {
+                    Some(prefix) => format!("{}_contig_{}", prefix, i),
+                    None => format!("contig_{}", i),
+                };
+                
+                generated_contigs.insert(id, sequence);
+                pb.inc(1);
+            }
+            pb.finish_with_message("Contigs generated");
+            generated_contigs
+        };
+        
+        // Load or generate spacers
+        let spacers: HashMap<String, String> = if let Some(file_path) = spacers_file {
+            if debug {
+                println!("Reading spacers from file: {}", file_path);
+            }
+            self.read_fasta_file(&file_path)?
+        } else {
+            if debug {
+                println!("Generating spacers...");
+            }
+            let pb = ProgressBar::new(sample_size_spacers as u64);
+            pb.set_style(ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+                .unwrap());
+            
+            let mut generated_spacers = HashMap::new();
+            for i in 0..sample_size_spacers {
+                let mut rng = rand::rng();
+                let length = rng.random_range(spacer_length_range.0..=spacer_length_range.1);
+                let sequence = self.generate_random_sequence(length);
+                
+                let id = match &id_prefix {
+                    Some(prefix) => format!("{}_spacer_{}", prefix, i),
+                    None => format!("spacer_{}", i),
+                };
+                
+                generated_spacers.insert(id, sequence);
+                pb.inc(1);
+            }
+            pb.finish_with_message("Spacers generated");
+            generated_spacers
+        };
+        
+        // Check for empty insertion range
+        if insertion_range.0 == 0 && insertion_range.1 == 0 {
+            if debug {
+                println!("No insertions requested, returning empty ground truth");
+            }
+            return Ok((contigs, spacers, Vec::new()));
+        }
+        
+        // Track used positions per contig to avoid overlaps
+        let mut used_positions: HashMap<String, HashSet<usize>> = HashMap::new();
+        for contig_id in contigs.keys() {
+            used_positions.insert(contig_id.clone(), HashSet::new());
+        }
+        
+        let mut ground_truth: Vec<Vec<String>> = Vec::new();
+        let mut rng = rand::rng();
+        
+        if debug {
+            println!("Starting spacer insertions...");
+        }
+        
+        let pb = ProgressBar::new(spacers.len() as u64);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+            .unwrap());
+        
+        // Process each spacer
+        for (spacer_id, spacer_seq) in &spacers {
+            let n_insertions = rng.random_range(insertion_range.0..=insertion_range.1);
+            
+            // For each insertion of this spacer
+            for _ in 0..n_insertions {
+                // Select random contig
+                let contig_ids: Vec<&String> = contigs.keys().collect();
+                let target_contig_id = contig_ids[rng.random_range(0..contig_ids.len())].clone();
+                
+                // Decide on reverse complement
+                let is_rc = rng.random_bool(prop_rc);
+                let spacer_to_insert = if is_rc {
+                    self.reverse_complement(spacer_seq)
+                } else {
+                    spacer_seq.to_string()
+                };
+                
+                // Apply mismatches (only substitutions, no indels)
+                let n_mismatches = rng.random_range(n_mismatch_range.0..=n_mismatch_range.1);
+                let mut spacer_with_errors = self.apply_mutations(&spacer_to_insert, n_mismatches, 0, 0);
+                
+                // Find non-overlapping position
+                let target_contig = contigs.get(&target_contig_id).unwrap();
+                let max_attempts = 1000;
+                let mut attempt = 0;
+                let mut position_found = false;
+                let mut start_pos = 0;
+                let mut end_pos = 0;
+                
+                while attempt < max_attempts {
+                    let max_pos = target_contig.len().saturating_sub(spacer_with_errors.len());
+                    if max_pos == 0 {
+                        // Spacer is longer than contig, skip
+                        if debug {
+                            println!("Warning: spacer {} is longer than contig {}, skipping", 
+                                spacer_id, target_contig_id);
+                        }
+                        break;
+                    }
+                    
+                    start_pos = rng.random_range(0..=max_pos);
+                    end_pos = start_pos + spacer_with_errors.len();
+                    
+                    // Check if this range overlaps with any used positions
+                    let position_range: HashSet<usize> = (start_pos..end_pos).collect();
+                    let used = used_positions.get(&target_contig_id).unwrap();
+                    
+                    if position_range.is_disjoint(used) {
+                        // Found non-overlapping position
+                        position_found = true;
+                        break;
+                    }
+                    
+                    attempt += 1;
+                }
+                
+                if !position_found {
+                    if debug {
+                        println!("Could not find non-overlapping position for spacer {} in contig {} after {} attempts", 
+                            spacer_id, target_contig_id, max_attempts);
+                    }
+                    continue;
+                }
+                
+                // Mark positions as used
+                for pos in start_pos..end_pos {
+                    used_positions.get_mut(&target_contig_id).unwrap().insert(pos);
+                }
+                
+                // Insert spacer into contig
+                let contig = contigs.get_mut(&target_contig_id).unwrap();
+                let mut contig_chars: Vec<char> = contig.chars().collect();
+                let spacer_chars: Vec<char> = spacer_with_errors.chars().collect();
+                
+                // Replace the region
+                for (i, &c) in spacer_chars.iter().enumerate() {
+                    if start_pos + i < contig_chars.len() {
+                        contig_chars[start_pos + i] = c;
+                    }
+                }
+                *contig = contig_chars.into_iter().collect();
+                
+                // Record ground truth
+                ground_truth.push(vec![
+                    spacer_id.clone(),
+                    target_contig_id.clone(),
+                    start_pos.to_string(),
+                    end_pos.to_string(),
+                    if is_rc { "true".to_string() } else { "false".to_string() },
+                    n_mismatches.to_string(),
+                ]);
+            }
+            
+            pb.inc(1);
+        }
+        pb.finish_with_message("Spacer insertions completed");
+        
+        println!("Successfully inserted {} spacer instances", ground_truth.len());
+        
+        // Create data subdirectory if it doesn't exist
+        let data_subdir_name = data_subdir.unwrap_or_else(|| "simulated_data".to_string());
+        let data_dir = format!("{}/{}", output_dir, data_subdir_name);
+        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+            return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
+                format!("Could not create data directory '{}': {}", data_subdir_name, e)
+            ));
+        }
+        
+        // Write contigs to FASTA file
+        println!("Writing contigs to FASTA file...");
+        let contig_path = format!("{}/simulated_contigs.fa", data_dir);
+        let contig_file = match File::create(&contig_path) {
+            Ok(file) => file,
+            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
+                format!("Could not create contigs file: {}", e)
+            )),
+        };
+        
+        let mut contig_writer = fasta::Writer::new(contig_file);
+        for (id, seq) in &contigs {
+            if let Err(e) = contig_writer.write(id, None, seq.as_bytes()) {
+                return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
+                    format!("Error writing contig {}: {}", id, e)
+                ));
+            }
+        }
+        
+        // Write spacers to FASTA file
+        println!("Writing spacers to FASTA file...");
+        let spacer_path = format!("{}/simulated_spacers.fa", data_dir);
+        let spacer_file = match File::create(&spacer_path) {
+            Ok(file) => file,
+            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
+                format!("Could not create spacers file: {}", e)
+            )),
+        };
+        
+        let mut spacer_writer = fasta::Writer::new(spacer_file);
+        for (id, seq) in &spacers {
+            if let Err(e) = spacer_writer.write(id, None, seq.as_bytes()) {
+                return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
+                    format!("Error writing spacer {}: {}", id, e)
+                ));
+            }
+        }
+        
+        // Write ground truth to TSV file
+        println!("Writing planned ground truth to TSV file...");
+        let ground_truth_path = format!("{}/planned_ground_truth.tsv", data_dir);
+        let ground_truth_file = match File::create(&ground_truth_path) {
+            Ok(file) => file,
+            Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
+                format!("Could not create ground truth file: {}", e)
+            )),
+        };
+        
+        let mut ground_truth_writer = BufWriter::new(ground_truth_file);
+        
+        // Write header
+        if let Err(e) = writeln!(ground_truth_writer, "spacer_id\tcontig_id\tstart\tend\tstrand\tmismatches") {
+            return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
+                format!("Error writing ground truth header: {}", e)
+            ));
+        }
+        
+        // Write data rows
+        for row in &ground_truth {
+            if row.len() != 6 {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    format!("Invalid ground truth row length: {}", row.len())
+                ));
+            }
+            
+            let line = format!("{}\t{}\t{}\t{}\t{}\t{}\n", 
+                row[0], row[1], row[2], row[3], 
+                row[4].to_lowercase(), row[5]);
+                
+            if let Err(e) = write!(ground_truth_writer, "{}", line) {
+                return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
+                    format!("Error writing ground truth line: {}", e)
+                ));
+            }
+        }
+        
+        Ok((contigs, spacers, ground_truth))
     }
 }
 

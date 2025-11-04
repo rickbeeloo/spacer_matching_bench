@@ -75,17 +75,17 @@ def plot_tool_performance(
         "bowtie1": "o",  # circle
         "bowtie2": "s",  # square
         "minimap2": "^",  # triangle up
-        "bbmap_skimmer": "D",  # diamond
+        "minimap2_mod": "P",  # plus
+        "indelfree_indexed": "D",  # diamond
         "spacer_containment": "v",  # triangle down
         "mummer4": "<",  # triangle left
         "lexicmap": ">",  # triangle right
         "mmseqs2": "p",  # pentagon
         "blastn": "h",  # hexagon
         "strobealign": "8",  # octagon
-        "minimap2_og": "*",  # star
-        "minimap2_mod": "P",  # plus
-        "bbmap_skimmer_mod": "X",  # x
-        "mmseqs2map": "d",  # thin diamond
+        "sassy": "*",  # star
+        "x-mapper": "X",  # x
+        "indelfree_bruteforce": "d",  # thin diamond
     }
 
     # Create range bins for number of occurrences

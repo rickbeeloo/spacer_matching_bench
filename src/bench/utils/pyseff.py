@@ -185,3 +185,8 @@ def pyseff(sacct_df=None):
     )
 
     return result_df
+
+if __name__ == "__main__":
+    result_df = pyseff()
+    print(result_df)
+    result_df.write_csv("slurm_efficiency.tsv", separator="\t")
