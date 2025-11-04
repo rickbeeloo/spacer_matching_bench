@@ -216,3 +216,4 @@ IMGVR4_SEQUENCES.fna.zst
 draft/
 src/tests/
 tests/
+src/bench/obsolete/
