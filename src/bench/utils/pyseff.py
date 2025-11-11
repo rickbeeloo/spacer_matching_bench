@@ -1,8 +1,10 @@
+import os
+# import re
+import shlex
 import subprocess
 import tempfile
 
 import polars as pl
-
 
 def parse_time_to_seconds(time_str):
     """Convert Slurm time format to seconds"""
@@ -186,7 +188,106 @@ def pyseff(sacct_df=None):
 
     return result_df
 
+
+
+def create_slurm_job_scripts(results_dir, slurm_opts=None, job_subdir="job_scripts"):
+    """Create SLURM job scripts for each bash script under results_dir/bash_scripts.
+
+    Args:
+        results_dir (str): Path to the results directory which contains `bash_scripts` and `slurm_logs`.
+        slurm_opts (dict or None): Optional SBATCH overrides. Keys are SBATCH flags without leading dashes, e.g. {'c':16, 'mem':'168G'}.
+        job_subdir (str): Subdirectory under results_dir to write job scripts into.
+
+    Returns:
+        list: list of created job script paths.
+    """
+    bash_dir = os.path.join(results_dir, "bash_scripts")
+    out_job_dir = os.path.join(results_dir, job_subdir)
+    log_dir = os.path.join(results_dir, "slurm_logs")
+    os.makedirs(out_job_dir, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
+    equal_opts = ['mail-user', 'mail-type']
+    # space_opts = [ 'A', 'q', 't']
+
+    default_opts = {
+        'mail-user': 'uneri@lbl.gov',
+        'mail-type': 'FAIL,END,BEGIN',
+        'A': 'grp-org-sc-metagen',
+        'q': 'jgi_normal',
+        'c': 16,
+        'mem': '168G',
+        't': '72:00:00',
+    }
+    if slurm_opts:
+        default_opts.update(slurm_opts)
+
+    created = []
+    if not os.path.isdir(bash_dir):
+        return created
+
+    for entry in sorted(os.listdir(bash_dir)):
+        if not entry.endswith('.sh'):
+            continue
+        script_path = os.path.join(bash_dir, entry)
+        tool_name = os.path.splitext(entry)[0]
+        job_name = f"{tool_name}"
+        job_file = os.path.join(out_job_dir, f"{tool_name}.sh")
+
+        # Build sbatch header
+        with open(job_file, 'w') as jf:
+            jf.write('#!/bin/bash\n')
+            for k, v in default_opts.items():
+                # Use single-dash for single-letter opts, double-dash otherwise
+                if k in equal_opts:
+                    prefix = '-' if len(str(k)) == 1 else '--'
+                    jf.write(f"#SBATCH {prefix}{k}={v}\n")
+                else:
+                    prefix = '-' if len(str(k)) == 1 else '--'
+                    jf.write(f"#SBATCH {prefix}{k} {v}\n")
+
+            jf.write(f"#SBATCH -J \"{job_name}\"\n")
+            jf.write(f"#SBATCH -o {os.path.join(log_dir, job_name)}-%A.out\n")
+            jf.write(f"#SBATCH -e {os.path.join(log_dir, job_name)}-%A.err\n\n")
+
+            # Run command: call the generated script with number of cpus
+            # Use shlex.quote to safely embed paths
+            jf.write(f"bash {shlex.quote(script_path)} \"$SLURM_CPUS_PER_TASK\"\n")
+
+        os.chmod(job_file, 0o755)
+        created.append(job_file)
+
+    return created
+
+
+def submit_slurm_jobs(results_dir, job_subdir="job_scripts", dry_run=False):
+    """Submit all job scripts in results_dir/job_subdir via sbatch.
+
+    Returns list of (script, sbatch_output) tuples for jobs submitted. If dry_run is True, only return the scripts.
+    """
+    job_dir = os.path.join(results_dir, job_subdir)
+    submitted = []
+    if not os.path.isdir(job_dir):
+        return submitted
+
+    for job in sorted(os.listdir(job_dir)):
+        job_path = os.path.join(job_dir, job)
+        if not job.endswith('.sh'):
+            continue
+        if dry_run:
+            submitted.append((job_path, None))
+            continue
+        # Use subprocess to call sbatch and capture output
+        try:
+            proc = subprocess.run(['sbatch', job_path], capture_output=True, text=True, check=True)
+            submitted.append((job_path, proc.stdout.strip()))
+        except subprocess.CalledProcessError as e:
+            submitted.append((job_path, e.stderr.strip() if e.stderr else str(e)))
+
+    return submitted
+
 if __name__ == "__main__":
     result_df = pyseff()
     print(result_df)
     result_df.write_csv("slurm_efficiency.tsv", separator="\t")
+
+

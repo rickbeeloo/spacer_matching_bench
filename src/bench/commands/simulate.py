@@ -52,7 +52,7 @@ def run_simulate(num_contigs, num_spacers, contig_length_range, spacer_length_ra
     os.makedirs(f"{output_dir}/simulated_data", exist_ok=True)
     logger.debug("Created directory structure")
     
-    logger.info("Running Rust simulator...")
+    logger.debug("Running Rust simulator...")
     contigs_out, spacers_out, ground_truth = simulate_data_rust(
         contigs=contigs,
         spacers=spacers,
@@ -81,7 +81,7 @@ def run_simulate(num_contigs, num_spacers, contig_length_range, spacer_length_ra
     
     logger.info(f"Generated {len(contigs_out)} contigs and {len(spacers_out)} spacers")
     logger.info(f"Ground truth contains {len(ground_truth)} spacer insertions")
-    logger.info(f"Simulation completed. Data saved to {output_dir}/simulated_data/")
+    logger.debug(f"Simulation completed. Data saved to {output_dir}/simulated_data/")
     
     return contigs_out, spacers_out, ground_truth
 

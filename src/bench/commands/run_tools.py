@@ -26,7 +26,7 @@ def run_execute_tools(input_dir, skip_tools='', only_tools=None, debug=False):
         only_tools: Comma-separated list of tools to run (overrides skip_tools)
         debug: If True, run commands directly without hyperfine for better error messages
     """
-    logger.info(f"Executing tools from {input_dir}")
+    logger.debug(f"Executing tools from {input_dir}")
     
     # Ensure directories exist
     if not os.path.exists(input_dir):
@@ -40,36 +40,36 @@ def run_execute_tools(input_dir, skip_tools='', only_tools=None, debug=False):
     
     # Load tool configurations (minimal - just to get tool names and script paths)
     # We use dummy values since we're only executing pre-generated scripts
-    logger.info("Loading tool configurations...")
+    logger.debug("Loading tool configurations...")
     tools = load_tool_configs(
         results_dir=input_dir,
         threads=1,  # Not used when executing scripts
         contigs_file=None,
         spacers_file=None
     )
-    logger.info(f"Loaded {len(tools)} tool configurations")
+    logger.debug(f"Loaded {len(tools)} tool configurations")
     
     # Filter tools based on skip_tools
     if skip_tools:
-        logger.info(f"Skipping tools: {skip_tools}")
+        logger.debug(f"Skipping tools: {skip_tools}")
         skip_list = skip_tools.split(",")
         tools = {k: v for k, v in tools.items() if k not in skip_list}
-        logger.info(f"Remaining tools after skip: {len(tools)}")
+        logger.debug(f"Remaining tools after skip: {len(tools)}")
     
     # Filter tools based on only_tools
     if only_tools:
-        logger.info(f"Only running tools: {only_tools}")
+        logger.debug(f"Only running tools: {only_tools}")
         only_list = only_tools.split(",")
         tools = {k: v for k, v in tools.items() if k in only_list}
-        logger.info(f"Tools to run: {len(tools)}")
+        logger.debug(f"Tools to run: {len(tools)}")
     
     # Run tools and collect results
-    logger.info(f"Executing {len(tools)} tools...")
+    logger.debug(f"Executing {len(tools)} tools...")
     if debug:
-        logger.info("Debug mode enabled - running commands directly without hyperfine")
+        logger.debug("Debug mode enabled - running commands directly without hyperfine")
     try:
         run_tools(tools, input_dir, debug=debug)
-        logger.info("All tools executed successfully")
+        logger.debug("All tools executed successfully")
     except Exception as e:
         logger.error(f"Tool execution failed: {e}", exc_info=True)
         raise

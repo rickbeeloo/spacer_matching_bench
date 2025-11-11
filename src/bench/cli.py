@@ -26,10 +26,11 @@ def setup_logging(verbose: bool = False):
     # Remove any existing handlers to avoid duplicates
     root_logger.handlers.clear()
     
-    # Configure Rich handler for pretty output with clickable file paths
+    # Configure Rich handler for pretty output
+    # Show file paths and line numbers only in verbose mode
     rich_handler = RichHandler(
         rich_tracebacks=True,
-        show_path=True,
+        show_path=verbose,  # Show file:// paths in verbose mode
         show_time=True,
         markup=True,  # Enable rich markup in log messages
         omit_repeated_times=False
@@ -187,8 +188,14 @@ def simulate(num_contigs, num_spacers, contig_length, spacer_length,
 
 
 @cli.command('generate-scripts', context_settings=dict(show_default=True))
-@click.option('--input-dir', '-i', type=click.Path(exists=True), required=True,
+@click.option('--input-dir', '-i', type=click.Path(exists=True), required=False,
               help='Input directory containing simulated data')
+@click.option('--output-dir', '-o', type=click.Path(), required=False,
+              help='Output directory for generated scripts (defaults to input-dir if specified)')
+@click.option('--contigs', type=click.Path(exists=True), required=False,
+              help='Path to custom contigs file')
+@click.option('--spacers', type=click.Path(exists=True), required=False,
+              help='Path to custom spacers file')
 @click.option('--threads', '-t', type=int, default=4,
               help='Number of threads for tool execution')
 @click.option('--max-runs', '-mr', type=int, default=1,
@@ -199,7 +206,7 @@ def simulate(num_contigs, num_spacers, contig_length, spacer_length,
               help='Comma-separated list of tools to skip')
 @click.option('--only-tools', '-rt', type=str, default=None,
               help='Comma-separated list of tools to run (overrides skip-tools)')
-def generate_scripts(input_dir, threads, max_runs, warmups, skip_tools, only_tools):
+def generate_scripts(input_dir, output_dir, contigs, spacers, threads, max_runs, warmups, skip_tools, only_tools):
     """
     Generate execution scripts for alignment tools.
     
@@ -214,7 +221,8 @@ def generate_scripts(input_dir, threads, max_runs, warmups, skip_tools, only_too
     
     \b
     Example:
-      spacer_bencher generate-scripts -i tests/validation -t 4 -mr 1
+      spacer_bencher generate-scripts -i tests/validation -o output_dir -t 4 -mr 1
+      spacer_bencher generate-scripts -o output_dir --contigs contigs.fa --spacers spacers.fa -t 4
     """
     from bench.commands.generate_scripts import run_generate_scripts
     
@@ -223,11 +231,14 @@ def generate_scripts(input_dir, threads, max_runs, warmups, skip_tools, only_too
     try:
         run_generate_scripts(
             input_dir=input_dir,
+            output_dir=output_dir,
             threads=threads,
             max_runs=max_runs,
             warmups=warmups,
             skip_tools=skip_tools,
-            only_tools=only_tools
+            only_tools=only_tools,
+            contigs=contigs,
+            spacers=spacers
         )
         logger.info("Script generation completed successfully")
         click.echo(click.style("✓ Scripts generated successfully", fg='green'))
@@ -325,10 +336,12 @@ def execute_tools(input_dir, skip_tools, only_tools, debug):
               help='Gap open penalty for alignment validation')
 @click.option('--gap-extend-penalty', type=int, default=5,
               help='Gap extension penalty for alignment validation')
+@click.option('--verbose', '-v', is_flag=True, default=False,
+              help='Enable verbose (DEBUG) logging with file paths and line numbers')
 def full_run(output_dir, num_contigs, num_spacers, contig_length, spacer_length,
              mismatch_range, spacer_insertions, indel_insertions, indel_deletions,
              reverse_complement, threads, max_runs, warmups, skip_tools, only_tools,
-             max_mismatches, augment_ground_truth, distance, gap_open_penalty, gap_extend_penalty):
+             max_mismatches, augment_ground_truth, distance, gap_open_penalty, gap_extend_penalty, verbose):
     """
     Run the complete benchmarking pipeline.
     
@@ -347,14 +360,15 @@ def full_run(output_dir, num_contigs, num_spacers, contig_length, spacer_length,
     from bench.commands.run_tools import run_execute_tools
     from bench.commands.compare_results import run_compare_results
     
-    logger.info("=" * 70)
+    # Update logging if verbose flag is set
+    if verbose:
+        setup_logging(verbose=True)
+    
     logger.info("STARTING FULL PIPELINE RUN")
-    logger.info("=" * 70)
     
     try:
         # Step 1: Simulate data
-        logger.info("\n[1/4] SIMULATING DATA")
-        logger.info("-" * 70)
+        logger.info("[1/4] SIMULATING DATA")
         run_simulate(
             num_contigs=num_contigs,
             num_spacers=num_spacers,
@@ -371,8 +385,7 @@ def full_run(output_dir, num_contigs, num_spacers, contig_length, spacer_length,
         click.echo(click.style("✓ Step 1/4: Data simulation completed", fg='green'))
         
         # Step 2: Generate scripts
-        logger.info("\n[2/4] GENERATING TOOL SCRIPTS")
-        logger.info("-" * 70)
+        logger.info("[2/4] GENERATING TOOL SCRIPTS")
         run_generate_scripts(
             input_dir=output_dir,
             threads=threads,
@@ -384,8 +397,7 @@ def full_run(output_dir, num_contigs, num_spacers, contig_length, spacer_length,
         click.echo(click.style("✓ Step 2/4: Script generation completed", fg='green'))
         
         # Step 3: Execute tools
-        logger.info("\n[3/4] EXECUTING TOOLS")
-        logger.info("-" * 70)
+        logger.info("[3/4] EXECUTING TOOLS")
         run_execute_tools(
             input_dir=output_dir,
             skip_tools=skip_tools,
@@ -394,8 +406,7 @@ def full_run(output_dir, num_contigs, num_spacers, contig_length, spacer_length,
         click.echo(click.style("✓ Step 3/4: Tool execution completed", fg='green'))
         
         # Step 4: Compare results
-        logger.info("\n[4/4] COMPARING RESULTS")
-        logger.info("-" * 70)
+        logger.info("[4/4] COMPARING RESULTS")
         run_compare_results(
             input_dir=output_dir,
             max_mismatches=max_mismatches,
@@ -411,14 +422,13 @@ def full_run(output_dir, num_contigs, num_spacers, contig_length, spacer_length,
         click.echo(click.style("✓ Step 4/4: Results comparison completed", fg='green'))
         
         # Success summary
-        logger.info("\n" + "=" * 70)
         logger.info("PIPELINE COMPLETED SUCCESSFULLY")
-        logger.info("=" * 70)
         logger.info(f"All results saved to: {output_dir}")
-        logger.info(f"  - Simulated data: {output_dir}/simulated_data/")
-        logger.info(f"  - Tool outputs: {output_dir}/raw_outputs/")
-        logger.info(f"  - Comparison results: {output_dir}/comparison_results.tsv")
-        logger.info("=" * 70)
+        # Normalize paths to avoid double slashes
+        output_dir_clean = output_dir.rstrip('/')
+        logger.info(f"  - Simulated data: {output_dir_clean}/simulated_data/")
+        logger.info(f"  - Tool outputs: {output_dir_clean}/raw_outputs/")
+        logger.info(f"  - Comparison results: {output_dir_clean}/comparison_results.tsv")
         
         click.echo(click.style(f"\n✓ Full pipeline completed! Results in: {output_dir}", fg='green', bold=True))
         

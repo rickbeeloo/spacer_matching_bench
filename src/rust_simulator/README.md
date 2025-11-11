@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Rust simulator is the core sequence generation engine for the spacer benchmarking pipeline. It generates synthetic CRISPR spacer and contig sequences with controlled mutations, creating ground truth data for tool validation.
+A sequence generation engine for the spacer benchmarking pipeline. Generates synthetic CRISPR spacer and contig sequences with controlled mutations and sequence variations (base composition, lengths, mismatches etc.) creating ground truth data for tool validation.
 
 ## Key Terminology
 

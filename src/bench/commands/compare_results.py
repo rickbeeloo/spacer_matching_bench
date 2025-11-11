@@ -56,14 +56,14 @@ def validate_unique_alignments_across_tools(
         - classified_alignments: DataFrame with alignment_idx and classification
         - exact_matches_with_gt: DataFrame with GT info for recall calculation (from polars-bio join)
     """
-    logger.info("Validating unique alignments across all tools...")
+    logger.debug("Validating unique alignments across all tools...")
     
     # Get unique alignments across all tools (by coordinates)
     unique_alignments = all_tool_results.select([
         "spacer_id", "contig_id", "start", "end", "strand", "mismatches"
     ]).unique()
     
-    logger.info(f"Total unique alignments to validate: {unique_alignments.height}")
+    logger.debug(f"Total unique alignments to validate: {unique_alignments.height}")
     
     # Add index for tracking
     unique_alignments = unique_alignments.with_row_index("alignment_idx")
@@ -86,8 +86,8 @@ def validate_unique_alignments_across_tools(
     exact_matches = validation_results.filter(pl.col("overlap_type") == "exact_match")
     partial_overlaps = validation_results.filter(pl.col("overlap_type") == "partial_overlap")
     
-    logger.info(f"Exact matches from validation: {exact_matches.height}")
-    logger.info(f"Partial overlaps: {partial_overlaps.height} (will be verified)")
+    logger.debug(f"Exact matches from validation: {exact_matches.height}")
+    logger.debug(f"Partial overlaps: {partial_overlaps.height} (will be verified)")
     
     # Debug: Check if validation created duplicate matches
     # Each unique_alignment should match at most one ground truth entry
@@ -113,7 +113,6 @@ def validate_unique_alignments_across_tools(
             .unique()  # One classification per alignment
             .with_columns(pl.lit("exact_match").alias("classification"))
         )
-    
     # Partial overlaps and non-overlaps both need verification as potential FPs
     # Combine them into the fps set to be verified
     fps_indices = []
@@ -143,13 +142,13 @@ def validate_unique_alignments_across_tools(
     else:
         fps = pl.DataFrame(schema=unique_alignments.schema)
     
-    logger.info(f"False positives to categorize: {fps.height}")
+    logger.debug(f"False positives to categorize: {fps.height}")
     
     # Categorize false positives
     fp_classifications = []
     
     if fps.height > 0 and verify_false_positives:
-        logger.info("Loading sequences for FP verification...")
+        logger.debug("Loading sequences for FP verification...")
         try:
             # Load sequences for false positives
             fps_with_seqs = populate_pldf_withseqs_needletail(
@@ -169,13 +168,13 @@ def validate_unique_alignments_across_tools(
                 reverse_by_strand_col=False,
             )
             
-            logger.info("Verifying false positive alignments...")
-            logger.info(f"  Algorithm: [cyan]Needleman-Wunsch (parasail)[/cyan]")
-            logger.info(f"  Gap open penalty: [bold]{gap_open_penalty}[/bold]")
-            logger.info(f"  Gap extend penalty: [bold]{gap_extend_penalty}[/bold]")
-            logger.info(f"  Distance metric: [bold]{distance_metric}[/bold] ({'substitutions + indels' if distance_metric == 'edit' else 'substitutions only'})")
-            logger.info(f"  Max allowed mismatches: [bold]{max_mismatches}[/bold]")
-            logger.info(f"  Alignments to verify: [bold]{fps_with_seqs.height}[/bold]")
+            logger.debug("Verifying false positive alignments...")
+            logger.debug(f"  Algorithm: [cyan]Needleman-Wunsch (parasail)[/cyan]")
+            logger.debug(f"  Gap open penalty: [bold]{gap_open_penalty}[/bold]")
+            logger.debug(f"  Gap extend penalty: [bold]{gap_extend_penalty}[/bold]")
+            logger.debug(f"  Distance metric: [bold]{distance_metric}[/bold] ({'substitutions + indels' if distance_metric == 'edit' else 'substitutions only'})")
+            logger.debug(f"  Max allowed mismatches: [bold]{max_mismatches}[/bold]")
+            logger.debug(f"  Alignments to verify: [bold]{fps_with_seqs.height}[/bold]")
             
             # Test each FP alignment
             gaps_as_mismatches = (distance_metric == 'edit')
@@ -294,8 +293,8 @@ def display_example_alignments(
     Note:
         if the query region (spacer) is of a different length than the target region (area on the contig where it matched), the hamming distance is not meaningful.
     """
-    logger.info("[bold]" + "="*80 + "[/bold]")
-    logger.info("[bold cyan]EXAMPLE ALIGNMENTS BY CLASSIFICATION[/bold cyan]")
+    logger.debug("[bold]" + "="*80 + "[/bold]")
+    logger.debug("[bold cyan]EXAMPLE ALIGNMENTS BY CLASSIFICATION[/bold cyan]")
     
     # Get examples for each classification type (except exact_match)
     classifications_to_show = ["positive_not_in_plan", "true_false_positive"]
@@ -312,11 +311,11 @@ def display_example_alignments(
         if examples.height == 0:
             # Still log that this classification exists but has no examples
             classification_name = classification.upper().replace('_', ' ')
-            logger.info(f"\n[dim]{classification_name} (0 found)[/dim]")
+            logger.debug(f"\n[dim]{classification_name} (0 found)[/dim]")
             continue
         
-        logger.info(f"\n[bold yellow]{classification.upper().replace('_', ' ')} ({total_count} total, showing {min(num_examples, examples.height)}):[/bold yellow]")
-        logger.info("[dim]" + "-" * 80 + "[/dim]")
+        logger.debug(f"\n[bold yellow]{classification.upper().replace('_', ' ')} ({total_count} total, showing {min(num_examples, examples.height)}):[/bold yellow]")
+        logger.debug("[dim]" + "-" * 80 + "[/dim]")
         
         for idx, row in enumerate(examples.iter_rows(named=True), 1):
             spacer_id = row["spacer_id"]
@@ -393,10 +392,10 @@ def display_example_alignments(
                 # Add sequence IDs on the right side
                 max_len = max(len(line) for line in lines)
                 
-                logger.info(f"[bold]Example {idx}:[/bold]")
-                logger.info(f"  {lines[0]:<{max_len}}  [cyan]{spacer_id}[/cyan]")
-                logger.info(f"  {lines[1]:<{max_len}}  [dim](alignment)[/dim]")
-                logger.info(f"  {lines[2]:<{max_len}}  [cyan]{location_str}[/cyan]")
+                logger.debug(f"[bold]Example {idx}:[/bold]")
+                logger.debug(f"  {lines[0]:<{max_len}}  [cyan]{spacer_id}[/cyan]")
+                logger.debug(f"  {lines[1]:<{max_len}}  [dim](alignment)[/dim]")
+                logger.debug(f"  {lines[2]:<{max_len}}  [cyan]{location_str}[/cyan]")
                 
                 # Determine which distance was used for validation
                 used_distance = edit_distance if distance_metric == 'edit' else hamming_distance
@@ -408,27 +407,27 @@ def display_example_alignments(
                 used_color = "bold green" if used_distance <= max_mismatches else "bold red"
                 
                 # Always show edit distance
-                logger.info(f"  Edit distance (substitutions + indels): [{edit_color}]{edit_distance}[/{edit_color}]")
+                logger.debug(f"  Edit distance (substitutions + indels): [{edit_color}]{edit_distance}[/{edit_color}]")
                 
                 # Show hamming distance, but note if it's not meaningful due to indels
                 if has_indels:
-                    logger.info(f"  Hamming distance (substitutions only): [{hamming_color}]{hamming_distance}[/{hamming_color}] [dim](indels present)[/dim]")
+                    logger.debug(f"  Hamming distance (substitutions only): [{hamming_color}]{hamming_distance}[/{hamming_color}] [dim](indels present)[/dim]")
                 else:
-                    logger.info(f"  Hamming distance (substitutions only): [{hamming_color}]{hamming_distance}[/{hamming_color}]")
+                    logger.debug(f"  Hamming distance (substitutions only): [{hamming_color}]{hamming_distance}[/{hamming_color}]")
                 
-                logger.info(f"  Max allowed mismatches: [bold]{max_mismatches}[/bold]")
-                logger.info(f"  Metric used for validation: [bold]{used_metric_name} distance[/bold] ([{used_color}]{used_distance}[/{used_color}])")
+                logger.debug(f"  Max allowed mismatches: [bold]{max_mismatches}[/bold]")
+                logger.debug(f"  Metric used for validation: [bold]{used_metric_name} distance[/bold] ([{used_color}]{used_distance}[/{used_color}])")
                 
                 if has_indels:
                     num_indels = edit_distance - hamming_distance
-                    logger.info(f"  Indels (gap positions): [yellow]{num_indels}[/yellow]")
+                    logger.debug(f"  Indels (gap positions): [yellow]{num_indels}[/yellow]")
                 else:
-                    logger.info(f"  Indels (gap positions): [green]0[/green]")
+                    logger.debug(f"  Indels (gap positions): [green]0[/green]")
                 
                 if tool_names:
-                    logger.info(f"  Found by tools: [magenta]{', '.join(tool_names)}[/magenta]")
+                    logger.debug(f"  Found by tools: [magenta]{', '.join(tool_names)}[/magenta]")
             
-    logger.info("[bold]" + "="*80 + "[/bold]")
+    logger.debug("[bold]" + "="*80 + "[/bold]")
 
 
 def calculate_all_tool_performance(
@@ -463,7 +462,7 @@ def calculate_all_tool_performance(
     deduplicated_count = unique_tool_results.height
     
     if original_count != deduplicated_count:
-        logger.info(f"Deduplicated tool results: {original_count} → {deduplicated_count} (removed {original_count - deduplicated_count} duplicates)")
+        logger.debug(f"Deduplicated tool results: {original_count} → {deduplicated_count} (removed {original_count - deduplicated_count} duplicates)")
     
     # Join deduplicated tool results with classifications
     classified_results = unique_tool_results.join(
@@ -479,10 +478,10 @@ def calculate_all_tool_performance(
             pl.col("classification") == "positive_not_in_plan"
         ).height
         gt_count = ground_truth.height + unique_positives_not_in_plan
-        logger.info(f"Augmented ground truth: {ground_truth.height} (planned) + {unique_positives_not_in_plan} (verified non-planned) = {gt_count}")
+        logger.debug(f"Augmented ground truth: {ground_truth.height} (planned) + {unique_positives_not_in_plan} (verified non-planned) = {gt_count}")
     else:
         gt_count = ground_truth.height
-        logger.info(f"Using standard ground truth count: {gt_count}")
+        logger.debug(f"Using standard ground truth count: {gt_count}")
     
     # Aggregate by tool to count each classification type
     performance = classified_results.group_by("tool").agg([
@@ -581,8 +580,8 @@ def calculate_all_tool_performance(
         tools_over_gt = performance.filter(pl.col("true_positives") > pl.col("ground_truth_total"))
         if tools_over_gt.height > 0:
             for row in tools_over_gt.iter_rows(named=True):
-                logger.info(f"  [yellow]{row['tool']}:[/yellow] {row['true_positives']} TPs > {row['ground_truth_total']} augmented GT (recall capped at 1.0)")
-                logger.info(f"    This indicates the tool reported overlapping/redundant positions for some targets")
+                logger.debug(f"  [yellow]{row['tool']}:[/yellow] {row['true_positives']} TPs > {row['ground_truth_total']} augmented GT (recall capped at 1.0)")
+                logger.debug(f"    This indicates the tool reported overlapping/redundant positions for some targets")
     else:
         # Standard mode: recall based only on planned GT entries found
         performance = performance.with_columns([
@@ -648,7 +647,7 @@ def compare_all_tools(
     Returns:
         DataFrame with comparison results for all tools
     """
-    logger.info("Starting consolidated tool comparison...")
+    logger.debug("Starting consolidated tool comparison...")
     
     # Step 1: Validate unique alignments across all tools
     alignment_classifications, exact_matches_with_gt = validate_unique_alignments_across_tools(
@@ -681,7 +680,8 @@ def compare_all_tools(
             logger.warning(f"Failed to display example alignments: {e}")
     
     # Step 2: Estimate expected spurious alignments if requested
-    expected_spurious_per_tool = None
+    expected_spurious_hamming = None
+    blast_evalue = None  # Renamed from expected_spurious_edit
     if estimate_spurious and contigs_file and spacers_file:
         try:
             logger.info("Estimating expected spurious alignments...")
@@ -692,8 +692,10 @@ def compare_all_tools(
                 contigs_dict, spacers_dict,
                 max_mismatches=max_mismatches
             )
-            expected_spurious_per_tool = spurious_est['mean_spurious']
-            logger.info(f"Expected spurious: {expected_spurious_per_tool:.2f} ± {spurious_est['std_spurious']:.2f}")
+            expected_spurious_hamming = spurious_est['expected_spurious_hamming']
+            blast_evalue = spurious_est['blast_evalue']  # Using renamed metric
+            logger.info(f"Expected spurious (Hamming-based): {expected_spurious_hamming:.2e} ± {spurious_est['std_spurious_hamming']:.2e}")
+            logger.info(f"BLAST E-value estimate: {blast_evalue:.2e} ± {spurious_est['blast_evalue_std']:.2e}")
         except Exception as e:
             logger.warning(f"Failed to estimate spurious alignments: {e}")
     
@@ -708,13 +710,14 @@ def compare_all_tools(
             augment_ground_truth=augment_ground_truth
         )
         
-        # Add expected spurious if available
-        if expected_spurious_per_tool is not None:
-            results_df = results_df.with_columns(
-                pl.lit(expected_spurious_per_tool).alias("expected_spurious")
-            )
-        
-        logger.info(f"Successfully calculated performance for {results_df.height} tools")
+        # Add expected spurious estimates if available (both methods)
+        if expected_spurious_hamming is not None:
+            results_df = results_df.with_columns([
+                pl.lit(expected_spurious_hamming).alias("expected_spurious_hamming"),
+                pl.lit(blast_evalue).alias("blast_evalue")  # Renamed column
+            ])
+
+        logger.debug(f"Successfully calculated performance for {results_df.height} tools")
         
     except Exception as e:
         logger.error(f"Failed to calculate performance metrics: {e}")
@@ -730,7 +733,7 @@ def compare_all_tools(
         ])
         results_df = results_df.join(hyperfine_df, on="tool", how="left")
     
-    logger.info("Comparison completed successfully")
+    logger.debug("Comparison completed successfully")
     return results_df
 
 
@@ -764,7 +767,7 @@ def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4
     Returns:
         Tuple of (tools_results, hyperfine_results, performance_results)
     """
-    logger.info(f"Processing tool results from {input_dir}")
+    logger.debug(f"Processing tool results from {input_dir}")
     
     # Ensure directory exists
     if not os.path.exists(input_dir):
@@ -780,31 +783,31 @@ def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4
     
     
     # Load tool configurations using the new clean function
-    logger.info("Loading tool configurations...")
+    logger.debug("Loading tool configurations...")
     tools = load_tool_configs(
         results_dir=input_dir,
         threads=threads,
         contigs_file=contigs,
         spacers_file=spacers
     )
-    logger.info(f"Loaded {len(tools)} tool configurations")
+    logger.debug(f"Loaded {len(tools)} tool configurations")
     
     # Filter tools based on skip_tools
     if skip_tools:
-        logger.info(f"Skipping tools: {skip_tools}")
+        logger.debug(f"Skipping tools: {skip_tools}")
         skip_list = skip_tools.split(",")
         tools = {k: v for k, v in tools.items() if k not in skip_list}
-        logger.info(f"Remaining tools after skip: {len(tools)}")
+        logger.debug(f"Remaining tools after skip: {len(tools)}")
     
     # Filter tools based on only_tools
     if only_tools:
-        logger.info(f"Only processing tools: {only_tools}")
+        logger.debug(f"Only processing tools: {only_tools}")
         only_list = only_tools.split(",")
         tools = {k: v for k, v in tools.items() if k in only_list}
-        logger.info(f"Tools to process: {len(tools)}")
+        logger.debug(f"Tools to process: {len(tools)}")
     
     # Create spacer length dataframe
-    logger.info("Reading spacer sequences...")
+    logger.debug("Reading spacer sequences...")
     spacers_dict = read_fasta(spacers_path)
     spacer_lendf = pl.DataFrame({
         "spacer_id": spacers_dict.keys(),
@@ -813,26 +816,26 @@ def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4
     logger.debug(f"Loaded {len(spacers_dict)} spacers")
     
     # Read tool results
-    logger.info("Reading tool alignment results...")
+    logger.debug("Reading tool alignment results...")
     tools_results = read_results(
         tools,
         max_mismatches=max_mismatches,
         spacer_lendf=spacer_lendf,
         ref_file=contigs_path,
     )
-    logger.info(f"Read {len(tools_results)} total alignment results")
+    logger.info(f"Read {tools_results.height} total alignment results")
     
     # Write tools results
     tools_output = f"{input_dir}/tools_results.tsv"
     tools_results.write_csv(tools_output, separator="\t")
-    logger.info(f"Wrote tool results to {tools_output}")
+    logger.debug(f"Wrote tool results to {tools_output}")
     
     # Read hyperfine benchmarking results
-    logger.info("Reading hyperfine benchmark results...")
+    logger.debug("Reading hyperfine benchmark results...")
     hyperfine_results = read_hyperfine_results(tools, input_dir)
     hyperfine_output = f"{input_dir}/hyperfine_results.tsv"
     hyperfine_results.write_csv(hyperfine_output, separator="\t")
-    logger.info(f"Wrote hyperfine results to {hyperfine_output}")
+    logger.debug(f"Wrote hyperfine results to {hyperfine_output}")
     
     # Check for ground truth and run performance comparison
     ground_truth_file = f"{input_dir}/simulated_data/planned_ground_truth.tsv"
@@ -842,20 +845,20 @@ def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4
     
     performance_results = None
     if os.path.exists(ground_truth_file):
-        logger.info(f"Reading ground truth from {ground_truth_file}...")
+        logger.debug(f"Reading ground truth from {ground_truth_file}...")
         ground_truth = pl.read_csv(ground_truth_file, separator="\t")
-        logger.info(f"Loaded {len(ground_truth)} ground truth annotations")
+        logger.info(f"Loaded {ground_truth.height} ground truth annotations")
         
         # Check for duplicates in ground truth
         unique_gt = ground_truth.unique(subset=["spacer_id", "contig_id", "start", "end", "strand"])
         if unique_gt.height != ground_truth.height:
             logger.warning(f"Ground truth contains {ground_truth.height - unique_gt.height} duplicate entries!")
-            logger.info(f"Using deduplicated ground truth: {unique_gt.height} unique entries")
+            logger.debug(f"Using deduplicated ground truth: {unique_gt.height} unique entries")
             ground_truth = unique_gt
         
-        logger.info("Comparing results against ground truth using consolidated validation...")
+        logger.debug("Comparing results against ground truth using consolidated validation...")
         if augment_ground_truth:
-            logger.info("  augment_ground_truth=True: Verified non-planned alignments will count as TPs")
+            logger.debug("  augment_ground_truth=True: Verified non-planned alignments will count as TPs")
         
         performance_results = compare_all_tools(
             tools=tools,
@@ -876,26 +879,27 @@ def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4
         # Output performance results
         if output_file:
             performance_results.write_csv(output_file, separator="\t")
-            logger.info(f"Wrote performance results to {output_file}")
+            logger.debug(f"Wrote performance results to {output_file}")
         else:
-            logger.info("\n=== Performance Results ===")
+            logger.debug("\n=== Performance Results ===")
             print(performance_results)
         
         # Also save to standard location
         perf_output = f"{input_dir}/performance_results.tsv"
         performance_results.write_csv(perf_output, separator="\t")
-        logger.info(f"Saved performance results to {perf_output}")
+        logger.debug(f"Saved performance results to {perf_output}")
         
         # Print a sorted, slimmer summary table to screen
         print("\n" + "="*80)
         logger.info("PERFORMANCE SUMMARY (sorted by recall score)")
         if augment_ground_truth:
-            logger.info("  Note: augment_ground_truth=True, verified non-planned alignments count as TPs")
+            logger.debug("  Note: augment_ground_truth=True, verified non-planned alignments count as TPs")
         
         # Select key columns and sort by recall score
-        summary_cols = ["tool",  "recall",  "true_false_positives","positives_not_in_plan","false_positives","true_positives"]
-        if "expected_spurious" in performance_results.columns:
-            summary_cols.append("expected_spurious")
+        summary_cols = ["tool", "recall", "true_false_positives", "positives_not_in_plan", 
+                       "false_positives", "true_positives"]
+        if "expected_spurious_hamming" in performance_results.columns:
+            summary_cols.extend(["expected_spurious_hamming", "blast_evalue"])  # Updated column names
         if "augmented_ground_truth" in performance_results.columns:
             summary_cols.append("augmented_ground_truth")
         if "avg_runtime_seconds" in performance_results.columns:
@@ -908,7 +912,7 @@ def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4
         pl.Config.set_tbl_rows(15)
         logger.info("")  # Add newline
         console.print(summary_table)  # Use console for polars table formatting
-        logger.info("="*80)
+        logger.debug("="*80)
     else:
         logger.warning("No ground truth file found, skipping performance comparison")
         logger.warning(f"Expected file at: {ground_truth_file}")

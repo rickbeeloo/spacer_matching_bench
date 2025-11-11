@@ -21,8 +21,11 @@ import numpy as np
 import time
 import polars_bio as pb
 
-pl.Config.set_tbl_cols(-1)
-
+# so printing to stdout doesn't break, line wrap, or truncate.
+pl.Config.set_tbl_rows(123123)
+pl.Config.set_tbl_cols(123123) # should be large enough
+pl.Config.set_fmt_str_lengths(2100) 
+pl.Config.set_tbl_width_chars(2100) 
 
 def read_fasta_needletail(fasta_file):
     seqs = []
@@ -31,10 +34,6 @@ def read_fasta_needletail(fasta_file):
         seqs.append(record.seq)
         seq_ids.append(record.id)
     return seq_ids, seqs
-
-def generate_random_sequence(length):
-    return "".join(random.choice("ATCG") for _ in range(length))
-
 
 def apply_mismatches(sequence, n_mismatches):
     mismatch_positions = random.sample(range(len(sequence)), n_mismatches)
@@ -285,6 +284,8 @@ def reverse_complement(sequence):
 
 
 from rust_simulator import Simulator, BaseComposition, DistributionType
+import shlex
+import subprocess
 
 
 def generate_simulation_id(params):
@@ -673,22 +674,23 @@ def run_tool(tool, results_dir, debug=False):
         return data
 
 
-def create_bash_script(tool, results_dir, max_runs=1, warmups=1):
+def create_bash_script(tool, results_dir, max_runs=1, warmups=0, hyperfine=True):
     script_name = tool["script_name"]
     mamba_env = tool.get("mamba_env", None)
-    hyperfine_command = [
-        "hyperfine",
-        "--warmup",
-        str(warmups),
-        "--max-runs",
-        str(max_runs),
-        "--prepare",
-        f'"rm -rf  {results_dir}/raw_outputs/tmp* || true"',
-        "--output",
-        f"{results_dir}/raw_outputs/hyperfine_output_{tool['script_name']}.txt",
-        "--export-json",
-        f"{results_dir}/raw_outputs/{tool['script_name']}.json",
-    ]
+    if hyperfine:
+        hyperfine_command = [
+            "hyperfine",
+            "--warmup",
+            str(warmups),
+            "--max-runs",
+            str(max_runs),
+            "--prepare",
+            f'"rm -rf  {results_dir}/raw_outputs/tmp* || true"',
+            "--output",
+            f"{results_dir}/raw_outputs/hyperfine_output_{tool['script_name']}.txt",
+            "--export-json",
+            f"{results_dir}/raw_outputs/{tool['script_name']}.json",
+        ]
 
     with open(f"{results_dir}/bash_scripts/{tool['script_name']}", "w") as f:
         f.write("#!/bin/bash\n")
@@ -696,8 +698,11 @@ def create_bash_script(tool, results_dir, max_runs=1, warmups=1):
         f.write('eval "$(micromamba shell hook --shell bash)"\n')
         if mamba_env:
             f.write(f"micromamba activate {mamba_env}\n")
-        f.write(f"{' '.join(hyperfine_command)} ")
-        f.write(f"'{' '.join(tool['command'])}'")
+        if hyperfine:
+            f.write(f"{' '.join(hyperfine_command)} ")
+            f.write(f"'{' '.join(tool['command'])}'")
+        else:
+            f.write(f"{' '.join(tool['command'])}\n")
 
         os.chmod(f"{results_dir}/bash_scripts/{script_name}", 0o755)
 
@@ -1095,23 +1100,10 @@ def parse_lexicmap(tsv_file, max_mismatches=5, spacer_lendf=None, **kwargs):
         "start",
         "end",
         "mismatches",
-    )
-    results = results.with_columns(
-        pl.when(pl.col("strand") == "-")
-        .then(pl.lit(True))
-        .otherwise(pl.lit(False))
-        .alias("strand")
-    )
+    ).unique()
+    results = results.with_columns(pl.col("spacer_id").cast(pl.Utf8))
+    return results
 
-    return results.select(
-        "spacer_id",
-        "contig_id",
-        "spacer_length",
-        "strand",
-        "start",
-        "end",
-        "mismatches",
-    )
 
 def parse_samVn_with_lens_polars(
     sam_file, spacer_lendf, max_mismatches=5
@@ -2492,54 +2484,6 @@ class DebugArgs:
         self.max_runs = 1
 
 
-# # interactive debug:
-# args = DebugArgs()
-
-# os.makedirs("results", exist_ok=True) # make sure parent results directory exists
-
-# contigs, spacers, ground_truth = simulate_data(
-#     contigs=args.contigs,
-#     spacers=args.spacers,
-#     contig_length_range=args.contig_length_range,
-#     spacer_length_range=args.spacer_length_range,
-#     n_mismatch_range=args.n_mismatch_range,
-#     sample_size_contigs=args.sample_size_contigs,
-#     sample_size_spacers=args.sample_size_spacers,
-#     insertion_range=args.insertion_range,
-#     prop_rc=args.prop_rc
-#     )
-# args.sample_size_contigs = len(contigs)
-# args.sample_size_spacers = len(spacers)
-
-# results_dir = f"results/run_t_{args.threads}_nc_{args.sample_size_contigs}_ns_{args.sample_size_spacers}_ir_{args.insertion_range[0]}_{args.insertion_range[1]}_lm_{args.n_mismatch_range[0]}_{args.n_mismatch_range[1]}_prc_{args.prop_rc}"
-# args.results_dir = results_dir # add to the args object for simplicity
-
-# os.makedirs(results_dir, exist_ok=True)
-# os.makedirs(f"{results_dir}/simulated_data", exist_ok=True)
-# os.makedirs(f"{results_dir}/raw_outputs", exist_ok=True)
-# os.makedirs(f"{results_dir}/bash_scripts", exist_ok=True)
-# write_fasta(contigs, f"{results_dir}/simulated_data/simulated_contigs.fa")
-# write_fasta(spacers, f"{results_dir}/simulated_data/simulated_spacers.fa")
-# ground_truth.write_csv(f"{results_dir}/simulated_data/ground_truth.tsv", separator="\t")
-# spacer_lendf = pl.DataFrame({"spacer_id": spacers.keys(), "length": [len(seq) for seq in spacers.values()]})
-# tools = populate_tools(args, spacer_lendf=spacer_lendf)
-
-# # Run tools and get results
-# run_tools(tools, results_dir, max_runs=args.max_runs)
-# tools_results = read_results(tools, max_mismatches=args.max_mismatches, spacer_lendf=spacer_lendf)
-# tools_results.write_csv(f"{results_dir}/tools_results.tsv", separator="\t")
-
-# performance_results = compare_results(tools, ground_truth, tools_results,soft_false_positive_threshold=0)
-
-# def convert_strand_for_display(df):
-#     """Convert boolean strand to +/- for display purposes"""
-#     return df.with_columns(
-#         pl.when(pl.col("strand"))
-#         .then(pl.lit("-"))
-#         .otherwise(pl.lit("+"))
-#         .alias("strand")
-#     )
-
 
 def validate_intervals_with_polars_bio(planned_intervals, tool_results, max_mismatches=5):
     """
@@ -2744,58 +2688,124 @@ def _calculate_match_prob_with_base_composition(base_comp):
     match_prob = (a_frac ** 2 + t_frac ** 2 + c_frac ** 2 + g_frac ** 2)
     return match_prob
 
-
-def _calculate_edit_distance_probability_hamming(spacer_len, max_edits, match_prob, 
-                                               match_reward=2, mismatch_penalty=-3,
-                                               k_param=0.14, lambda_param=0.69):
+def _calculate_edit_distance_probability_hamming(spacer_len, max_edits, match_prob, total_db_size):
     """
-    Calculate probability of spurious alignment using BLAST-style E-value approach for Hamming distance.
-    
-    This uses the Karlin-Altschul statistics to estimate the expected number of
-    spurious alignments for Hamming distance-based matching (substitutions only).
+    Calculate probability of finding a random string within Hamming distance.
+    This gives the probability per position in the database.
     
     Args:
-        spacer_len: Length of spacer
-        max_edits: Maximum allowed edits (mismatches only)
-        match_prob: Probability that a single position matches (for base composition)
-        match_reward: Score for matching characters
-        mismatch_penalty: Score for mismatches
-        k_param: Karlin-Altschul K parameter for ungapped alignments
-        lambda_param: Karlin-Altschul lambda parameter for ungapped alignments
+        spacer_len: Length of spacer sequence
+        max_edits: Maximum edit distance allowed
+        match_prob: Probability that two random bases match
+        total_db_size: Total size of sequence database
     
     Returns:
-        Expected number of spurious alignments per position
+        Probability of finding match at any given position
     """
-    # For Hamming distance, calculate the raw score for the worst-case alignment
-    # with exactly max_edits mismatches
-    matches = spacer_len - max_edits
-    raw_score = matches * match_reward + max_edits * mismatch_penalty
+    from scipy.special import comb
     
-    # Calculate E-value using BLAST statistics
-    e_value = _calculate_blast_evalue(
-        raw_score, spacer_len, 1, k_param, lambda_param
-    )
+    mismatch_prob = 1 - match_prob
+    total_prob = 0
     
-    return e_value
+    # Sum probabilities for 0 to max_edits mismatches
+    for k in range(max_edits + 1):
+        # Binomial probability: choose k positions to mismatch
+        prob_k_mismatches = comb(spacer_len, k, exact=True) * \
+                           (mismatch_prob ** k) * \
+                           (match_prob ** (spacer_len - k))
+        total_prob += prob_k_mismatches
+    
+    # Multiply by total_db_size to get expected number of matches
+    return total_prob * total_db_size
 
 
-def _calculate_blast_evalue(raw_score, query_length, db_size, k_param, lambda_param):
+def _calculate_blast_evalue(spacer_len, max_edits, match_prob, total_db_size,
+                            match_reward=1, mismatch_penalty=-3,  # Standard BLASTN scoring
+                            k_param=0.14, lambda_param=1.28):  # Lambda for +1/-3 scoring
     """
-    Calculate BLAST E-value (expected number of spurious alignments) using Karlin-Altschul statistics.
+    Calculate expected spurious alignments using BLAST-style E-value approach.
+    
+    This follows BLAST's statistical theory more closely:
+    1. Uses bit scores instead of raw scores
+    2. Applies proper scaling factors
+    3. Uses standard BLASTN scoring (+1/-3)
     
     Args:
-        raw_score: The raw alignment score (S)
-        query_length: Length of query sequence (m)
-        db_size: Total number of residues in database (n)
-        k_param: Karlin-Altschul scaling parameter K
-        lambda_param: Karlin-Altschul decay parameter lambda
+        spacer_len: Length of spacer sequence
+        max_edits: Maximum edit distance allowed
+        match_prob: Probability that two random bases match (not used in BLAST calculation)
+        total_db_size: Total size of sequence database in bases
+        match_reward: Score for matching base (default: +1 like BLASTN)
+        mismatch_penalty: Penalty for mismatching base (default: -3 like BLASTN)
+        k_param: BLAST K parameter (default 0.14 for DNA)
+        lambda_param: BLAST lambda parameter (default 1.28 for +1/-3 scoring)
     
     Returns:
         Expected number of spurious alignments (E-value)
     """
-    import math
-    e_value = k_param * query_length * db_size * math.exp(-lambda_param * raw_score)
+    # Calculate minimum score threshold
+    min_matches = spacer_len - max_edits
+    min_score = (min_matches * match_reward) + (max_edits * mismatch_penalty)
+    
+    # Convert to bit score (BLAST's statistical framework)
+    # S_bit = (lambda * S - ln(K)) / ln(2)
+    bit_score = (lambda_param * min_score - np.log(k_param)) / np.log(2)
+    
+    # Apply length-based corrections
+    # These help account for edge effects and multiple testing
+    H = 0.5772156649  # Euler's constant
+    m_prime = spacer_len / (spacer_len - H)  # Effective query length
+    n_prime = total_db_size / (spacer_len - H)  # Effective db size
+    
+    # Calculate E-value using bit score formulation
+    # E = m'n' * 2^(-S_bit)
+    e_value = m_prime * n_prime * np.power(2, -bit_score)
+    
     return e_value
+
+
+def calculate_expected_spurious_alignments(spacer_len, max_edits, total_db_size,
+                                          base_composition=None, method='both', blast_evalue=False):
+    """
+    Calculate expected number of spurious alignments using different methods.
+    
+    Args:
+        spacer_len: Length of spacer sequences
+        max_edits: Maximum edit distance/mismatches allowed
+        total_db_size: Total size of sequence database in bases
+        base_composition: BaseComposition object or dict with base frequencies
+        method: 'hamming', 'blast', or 'both'
+    
+    Returns:
+        Dictionary with expected spurious alignment statistics for both Hamming and Edit distance
+    """
+    # Calculate match probability
+    if base_composition is None:
+        match_prob = 0.25  # Uniform distribution
+    else:
+        match_prob = _calculate_match_prob_with_base_composition(base_composition)
+    
+    results = {'blast_evalue': blast_evalue}
+    
+    if method in ['hamming', 'both'] and not blast_evalue:
+        # Hamming distance (substitutions only) - use ungapped parameters
+        expected_matches_hamming = _calculate_edit_distance_probability_hamming(
+            spacer_len, max_edits, match_prob, total_db_size
+        )
+        results['expected_spurious_hamming'] = expected_matches_hamming
+    
+    if method in ['blast', 'both'] and not blast_evalue:
+        # BLAST E-value approach
+        expected_blast = _calculate_blast_evalue(
+            spacer_len, max_edits, match_prob, total_db_size
+        )
+        results['expected_spurious_blast_evalue'] = expected_blast
+    
+    if blast_evalue:
+        results['expected_spurious_blast_evalue'] = _calculate_blast_evalue(
+            spacer_len, max_edits, match_prob, total_db_size
+        )
+    return results
 
 
 def demonstrate_blast_based_spurious_estimation(contigs, spacers, max_edits_range=(2, 10), 
@@ -2845,43 +2855,42 @@ def demonstrate_blast_based_spurious_estimation(contigs, spacers, max_edits_rang
     # Test different edit distance thresholds
     for max_edits in range(max_edits_range[0], max_edits_range[1] + 1):
         # Hamming distance (substitutions only)
-        hamming_result = estimate_expected_spurious_alignments_fast(
-            contigs, spacers, max_mismatches=max_edits, 
-            use_edit_distance=False, base_composition=base_composition
+        expected_matches_hamming = _calculate_edit_distance_probability_hamming(
+            avg_spacer_length, max_edits, 0.25, total_contig_length
         )
         
-        # Edit distance (with indels)
-        edit_result = estimate_expected_spurious_alignments_fast(
-            contigs, spacers, max_mismatches=max_edits,
-            use_edit_distance=True, base_composition=base_composition
+        # BLAST E-value calculation
+        expected_matches_edit = _calculate_edit_distance_probability_with_indels(
+            avg_spacer_length, max_edits, 0.25, total_contig_length,
+            k_param=0.14, lambda_param=0.69  # These parameters only apply to BLAST E-value calculation
         )
         
         results['hamming_results'].append({
             'max_edits': max_edits,
-            'mean_spurious': hamming_result['mean_spurious'],
-            'std_spurious': hamming_result['std_spurious']
+            'mean_spurious': expected_matches_hamming,
+            'std_spurious': expected_matches_hamming ** 0.5
         })
         
         results['edit_results'].append({
             'max_edits': max_edits,
-            'mean_spurious': edit_result['mean_spurious'],
-            'std_spurious': edit_result['std_spurious']
+            'mean_spurious': expected_matches_edit,
+            'std_spurious': expected_matches_edit ** 0.5
         })
         
         # Calculate ratio
-        ratio = (edit_result['mean_spurious'] / hamming_result['mean_spurious'] 
-                if hamming_result['mean_spurious'] > 0 else 0)
+        ratio = (expected_matches_edit / expected_matches_hamming 
+                if expected_matches_hamming > 0 else 0)
         
         results['comparisons'].append({
             'max_edits': max_edits,
-            'hamming_evalue': hamming_result['mean_spurious'],
-            'edit_evalue': edit_result['mean_spurious'],
+            'hamming_evalue': expected_matches_hamming,
+            'edit_evalue': expected_matches_edit,
             'ratio': ratio
         })
         
         if verbose:
-            print(f"Max edits {max_edits:2d}: Hamming={hamming_result['mean_spurious']:.2e}, "
-                  f"Edit={edit_result['mean_spurious']:.2e}, Ratio={ratio:.1f}x")
+            print(f"Max edits {max_edits:2d}: Hamming={expected_matches_hamming:.2e}, "
+                  f"Edit={expected_matches_edit:.2e}, Ratio={ratio:.1f}x")
     
     if verbose:
         print()
@@ -2907,9 +2916,9 @@ def _calculate_score_range_for_edit_distance(length, max_edits, match_reward=2, 
         length: Length of the query sequence
         max_edits: Maximum allowed edit distance
         match_reward: Score for matching characters
-        mismatch_penalty: Score for mismatches (should be negative)
-        gap_open_penalty: Score for opening a gap (should be negative)
-        gap_extend_penalty: Score for extending a gap (should be negative)
+        mismatch_penalty: Score for mismatching base
+        gap_open_penalty: Penalty for opening a gap
+        gap_extend_penalty: Penalty for extending a gap
     
     Returns:
         Tuple of (min_score, max_score) for the given edit distance threshold
@@ -2946,30 +2955,31 @@ def _calculate_score_range_for_edit_distance(length, max_edits, match_reward=2, 
     
     return (min(scores), max(scores)) if scores else (0, 0)
 
-
 def _calculate_edit_distance_probability_with_indels(spacer_len, max_edits, match_prob, 
-                                                   match_reward=2, mismatch_penalty=-3,
+                                                   total_db_size,  # Total database size in bases
+                                                   match_reward=1, mismatch_penalty=-3,  # Changed to +1/-3 like BLASTN default
                                                    gap_open_penalty=-5, gap_extend_penalty=-2,
-                                                   k_param=0.14, lambda_param=0.69):
+                                                   k_param=0.14, lambda_param=1.28):  # Lambda adjusted for +1/-3 scoring
     """
-    Calculate probability of spurious alignment using BLAST-style E-value approach.
+    Calculate expected spurious alignments using BLAST-style E-value approach for edit distance.
     
     This uses the Karlin-Altschul statistics to estimate the expected number of
-    spurious alignments for edit distance-based matching.
+    spurious alignments for edit distance-based matching (with indels).
     
     Args:
         spacer_len: Length of spacer
         max_edits: Maximum allowed edit distance
-        match_prob: Probability that a single position matches (for base composition)
+        match_prob: Probability that two random bases match
+        total_db_size: Total size of sequence database in bases
         match_reward: Score for matching characters
-        mismatch_penalty: Score for mismatches
-        gap_open_penalty: Score for opening a gap
-        gap_extend_penalty: Score for extending a gap
+        mismatch_penalty: Penalty for mismatching base
+        gap_open_penalty: Penalty for opening a gap
+        gap_extend_penalty: Penalty for extending a gap
         k_param: Karlin-Altschul K parameter for gapped alignments
         lambda_param: Karlin-Altschul lambda parameter for gapped alignments
     
     Returns:
-        Expected number of spurious alignments per position
+        Expected number of spurious alignments for this spacer across the entire database
     """
     # Calculate the range of possible scores for this edit distance threshold
     min_score, max_score = _calculate_score_range_for_edit_distance(
@@ -2977,16 +2987,22 @@ def _calculate_edit_distance_probability_with_indels(spacer_len, max_edits, matc
         gap_open_penalty, gap_extend_penalty
     )
     
-    # Use the maximum score (most permissive) to calculate E-value
-    # This represents the worst-case scenario for spurious alignments
-    e_value = _calculate_blast_evalue(
-        max_score, spacer_len, 1, k_param, lambda_param
-    )
+    # Convert to bit score (like BLAST does)
+    # S' = (lambda * S - ln(K)) / ln(2)
+    # where S is the raw score
+    bit_score = (lambda_param * min_score - np.log(k_param)) / np.log(2)
     
-    # Convert E-value to probability per position
-    # E-value is already the expected number of spurious alignments
+    # Calculate effective lengths (simplified from BLAST's approach)
+    # In BLAST, these account for edge effects and statistical adjustments
+    effective_query_len = max(1, spacer_len - 11)  # BLAST-like adjustment
+    effective_db_size = max(1, total_db_size - (11 * (total_db_size // spacer_len)))
+    
+    # Calculate E-value using bit score and effective lengths
+    # E = mn * 2^(-S')
+    # where m and n are effective lengths
+    e_value = (effective_query_len * effective_db_size) * np.power(2, -bit_score)
+    
     return e_value
-
 
 def estimate_expected_spurious_alignments_fast(
     contigs, 
@@ -2997,13 +3013,14 @@ def estimate_expected_spurious_alignments_fast(
     use_edit_distance=False
 ):
     """
-    Fast statistical estimate of expected spurious alignments using probability theory.
+    Fast statistical estimate of expected spurious alignments using two approaches:
+    1. Hamming distance probability calculation (theoretical number of sequences within Hamming distance)
+    2. BLAST E-value calculation (statistically expected number of alignments by chance)
     
-    This calculates the expected number of spurious alignments based on:
-    - Total search space (contig length × number of contigs)
-    - Spacer lengths and count
-    - Allowed mismatches or edit distance (maximum!)
-    - Base composition (uniform 0.25 each base if not specified)
+    Note: BLAST E-values are typically much lower than Hamming-based estimates because:
+    - They account for gap penalties and scoring matrices
+    - They are calibrated for biological relevance
+    - They are intentionally conservative to minimize false positives
     
     Args:
         contigs: Dictionary of contig_id -> sequence (or just contig count and total length)
@@ -3013,11 +3030,27 @@ def estimate_expected_spurious_alignments_fast(
                           If None and use_edit_distance=True, uses max_mismatches
         base_composition: BaseComposition object or dict with a_frac, t_frac, c_frac, g_frac
                          If None, assumes uniform (0.25 each)
-        use_edit_distance: If True, calculate using edit distance (allowing indels)
-                          If False, use Hamming distance (mismatches only)
+        use_edit_distance: If True, the 'mean_spurious' field uses edit distance
+                          If False, the 'mean_spurious' field uses Hamming distance
+                          (Both are always calculated and returned)
     
     Returns:
-        Dictionary with expected spurious alignment statistics
+        Dictionary with both Hamming-based and BLAST-based estimates, including:
+        - expected_spurious_hamming: Theoretical count of sequences within Hamming distance
+        - blast_evalue: BLAST E-value (expected number of chance alignments)
+        - std_spurious_hamming: Standard deviation of Hamming-based estimate
+        - std_spurious_edit: Standard deviation of BLAST-based estimate
+        - max_spurious_hamming: Upper bound for Hamming-based estimate (mean + 2*std)
+        - min_spurious_hamming: Lower bound for Hamming-based estimate (mean - 2*std)
+        - max_blast_evalue: Upper bound for BLAST-based estimate (mean + 2*std)
+        - min_blast_evalue: Lower bound for BLAST-based estimate (mean - 2*std)
+        - per_spacer_expected_hamming: List of Hamming-based estimates per spacer
+        - per_spacer_blast_evalue: List of BLAST-based estimates per spacer
+        - method: Description of the methods used
+        - base_composition: Base composition used for the calculation
+        - base_comp_note: Note on the base composition uniformity
+        - distance_type: Type of distance used for the estimate (hamming or blast_evalue)
+        - distance_note: Description of the distance metric used
     """
     # Handle base composition
     if base_composition is None:
@@ -3054,253 +3087,77 @@ def estimate_expected_spurious_alignments_fast(
         spacer_lengths = [spacers]
         num_spacers = 1
     
-    # Determine which distance metric to use
-    if use_edit_distance:
-        max_edits = max_edit_distance if max_edit_distance is not None else max_mismatches
-        distance_type = 'edit_distance'
-        distance_note = f'Edit distance <= {max_edits} (allowing indels)'
-    else:
-        max_edits = max_mismatches
-        distance_type = 'hamming'
-        distance_note = f'Hamming distance <= {max_mismatches} (mismatches only)'
+    # Determine max edits for both calculations
+    max_edits = max_mismatches
+    if max_edit_distance is not None:
+        max_edits = max_edit_distance
     
-    # For each spacer, calculate probability of random match
-    expected_matches_per_spacer = []
+    # For Hamming distance: Account for both strands
+    total_db_size_hamming = total_contig_length * 2
+    
+    # For BLAST E-value: Use effective database size (with length adjustments)
+    # Based on BLAST's statistical theory for local alignment
+    avg_spacer_len = sum(spacer_lengths) / len(spacer_lengths)
+    H = 0.5772156649  # Euler's constant
+    effective_db_size = total_contig_length / (avg_spacer_len - H)
+    
+    # Calculate BOTH Hamming and Edit distance estimates
+    expected_matches_hamming_per_spacer = []
+    expected_matches_edit_per_spacer = []
+    
     for spacer_len in spacer_lengths:
-        # Number of positions to test in all contigs (accounting for both strands)
-        # For edit distance, we allow more positions due to indels
-        if use_edit_distance:
-            # With indels, the aligned region can be longer, so we test more positions
-            num_positions = (total_contig_length - max(spacer_len - max_edits, 1) + 1) * 2
-        else:
-            num_positions = (total_contig_length - spacer_len + 1) * 2  # *2 for reverse complement
+        # Hamming distance (substitutions only)
+        expected_matches_hamming = _calculate_edit_distance_probability_hamming(
+            spacer_len, max_edits, match_prob, total_db_size_hamming
+        )
+        expected_matches_hamming_per_spacer.append(expected_matches_hamming)
         
-        # Calculate probability of match using BLAST-style E-value approach
-        if use_edit_distance:
-            # Use gapped alignment parameters for edit distance
-            prob_match = _calculate_edit_distance_probability_with_indels(
-                spacer_len, max_edits, match_prob,
-                k_param=0.14, lambda_param=0.69  # Gapped nucleotide alignment parameters
-            )
-        else:
-            # Use ungapped alignment parameters for Hamming distance
-            prob_match = _calculate_edit_distance_probability_hamming(
-                spacer_len, max_edits, match_prob,
-                k_param=0.14, lambda_param=0.69  # Ungapped nucleotide alignment parameters
-            )
-        
-        # Expected number of matches for this spacer
-        expected_matches = num_positions * prob_match
-        expected_matches_per_spacer.append(expected_matches)
+        # BLAST E-value calculation with corrected parameters
+        # Using proper nucleotide BLAST parameters
+        expected_matches_edit = _calculate_edit_distance_probability_with_indels(
+            spacer_len, max_edits, match_prob, effective_db_size,
+            match_reward=1, mismatch_penalty=-3,  # Standard BLASTN scoring
+            k_param=0.14, lambda_param=1.28)  # Lambda adjusted for +1/-3 scoring
+        expected_matches_edit_per_spacer.append(expected_matches_edit)
     
-    # Total expected spurious alignments
-    total_expected = sum(expected_matches_per_spacer)
+    # Total expected spurious alignments (sum over all spacers)
+    total_expected_hamming = sum(expected_matches_hamming_per_spacer)
+    total_expected_edit = sum(expected_matches_edit_per_spacer)
     
-    # Standard deviation (using Poisson approximation for rare events)
-    # Var(sum) = sum(Var) for independent events
-    std_dev = np.sqrt(total_expected)
+    # Standard deviations
+    std_dev_hamming = np.sqrt(total_expected_hamming)
+    std_dev_edit = np.sqrt(total_expected_edit)
     
     base_comp_note = 'uniform' if all(abs(v - 0.25) < 1e-6 for v in base_comp_dict.values()) else 'non-uniform'
     
-    return {
-        'mean_spurious': total_expected,
-        'std_spurious': std_dev,
-        'max_spurious': total_expected + 2 * std_dev,  # Approximate 95% CI
-        'min_spurious': max(0, total_expected - 2 * std_dev),
-        'per_spacer_expected': expected_matches_per_spacer,
-        'method': 'probability_theory',
-        'distance_type': distance_type,
-        'distance_note': distance_note,
+    # Return both estimates
+    result = {
+        'expected_spurious_hamming': total_expected_hamming,
+        'std_spurious_hamming': std_dev_hamming,
+        'blast_evalue': total_expected_edit,  # Renamed from expected_spurious_edit
+        'blast_evalue_std': std_dev_edit,     # Renamed from std_spurious_edit
+        'max_spurious_hamming': total_expected_hamming + 2 * std_dev_hamming,
+        'min_spurious_hamming': max(0, total_expected_hamming - 2 * std_dev_hamming),
+        'max_blast_evalue': total_expected_edit + 2 * std_dev_edit,
+        'min_blast_evalue': max(0, total_expected_edit - 2 * std_dev_edit),
+        'per_spacer_expected_hamming': expected_matches_hamming_per_spacer,
+        'per_spacer_blast_evalue': expected_matches_edit_per_spacer,  # Renamed
+        'method': 'combined_estimates',
         'base_composition': base_comp_dict,
         'base_comp_note': base_comp_note,
-        'note': f'Fast statistical estimate with {base_comp_note} base composition'
-    }
-
-
-
-def compare_tool_results_with_intervals(planned_intervals, tool_results, max_mismatches=5):
-    """
-    Compare tool results against planned intervals using interval-based validation.
-    
-    Args:
-        planned_intervals: DataFrame with planned spacer insertions
-        tool_results: DataFrame with tool results
-        max_mismatches: Maximum allowed mismatches
-    
-    Returns:
-        Dictionary with comparison metrics
-    """
-    # Validate intervals
-    validation_results = validate_intervals_with_polars_bio(
-        planned_intervals, tool_results, max_mismatches
-    )
-    
-    # Calculate metrics
-    total_planned = planned_intervals.height
-    total_tool_results = tool_results.height
-    overlapping_results = validation_results.filter(pl.col("overlap_type") != "no_overlap").height
-    
-    # Calculate precision and recall
-    precision = overlapping_results / total_tool_results if total_tool_results > 0 else 0
-    recall = overlapping_results / total_planned if total_planned > 0 else 0
-    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-    
-    return {
-        'total_planned': total_planned,
-        'total_tool_results': total_tool_results,
-        'overlapping_results': overlapping_results,
-        'precision': precision,
-        'recall': recall,
-        'f1_score': f1_score,
-        'validation_results': validation_results
-    }
-
-
-def comprehensive_interval_validation(planned_intervals, tool_results, contigs, spacers, 
-                                    max_mismatches=5, alignment_threshold=0.8, 
-                                    ):
-    """
-    Interval-based validation that includes:
-    1. Interval overlap validation
-    2. Spurious alignment detection
-    3. Expected spurious alignment estimation
-    
-    Args:
-        planned_intervals: DataFrame with planned spacer insertions
-        tool_results: DataFrame with tool results
-        contigs: Dictionary of contig_id -> sequence
-        spacers: Dictionary of spacer_id -> sequence
-        max_mismatches: Maximum allowed mismatches
-        alignment_threshold: Minimum alignment score threshold
-        num_random_samples: Number of random samples for spurious estimation
-    
-    Returns:
-        Dictionary with comprehensive validation results
-    """
-    print("Starting comprehensive interval validation...")
-    
-    # 1. Validate intervals using polars-bio
-    print("1. Validating intervals with polars-bio...")
-    validation_results = validate_intervals_with_polars_bio(
-        planned_intervals, tool_results, max_mismatches
-    )
-    
-    # 2. Compare tool results with planned intervals
-    print("2. Comparing tool results with planned intervals...")
-    comparison_metrics = compare_tool_results_with_intervals(
-        planned_intervals, tool_results, max_mismatches
-    )
-    
-    # 3. Detect spurious alignments
-    print("3. Detecting spurious alignments...")
-    spurious_alignments = detect_spurious_alignments(
-        contigs, spacers, planned_intervals, max_mismatches, alignment_threshold
-    )
-    
-    # 4. Estimate expected spurious alignments
-    print("4. Estimating expected spurious alignments...")
-    spurious_estimation = estimate_expected_spurious_alignments_fast(
-        contigs, spacers, max_mismatches, use_edit_distance=False
-    )
-    
-    # 5. Calculate additional metrics
-    print("5. Calculating additional metrics...")
-    
-    # False positive rate
-    total_spurious_detected = spurious_alignments.height
-    expected_spurious = spurious_estimation['mean_spurious']
-    false_positive_rate = total_spurious_detected / comparison_metrics['total_tool_results'] if comparison_metrics['total_tool_results'] > 0 else 0
-    
-    # Spurious detection rate
-    spurious_detection_rate = total_spurious_detected / expected_spurious if expected_spurious > 0 else 0
-    
-    # Overlap type distribution
-    overlap_type_counts = validation_results.group_by("overlap_type").agg([
-        pl.count().alias("count")
-    ]).sort("count", descending=True)
-    
-    results = {
-        'validation_results': validation_results,
-        'comparison_metrics': comparison_metrics,
-        'spurious_alignments': spurious_alignments,
-        'spurious_estimation': spurious_estimation,
-        'overlap_type_counts': overlap_type_counts,
-        'false_positive_rate': false_positive_rate,
-        'spurious_detection_rate': spurious_detection_rate,
-        'total_spurious_detected': total_spurious_detected,
-        'expected_spurious': expected_spurious
+        'note': f'Combined Hamming-based and BLAST E-value estimates with {base_comp_note} base composition'
     }
     
-    print("Validation complete!")
-    print(f"Total planned intervals: {comparison_metrics['total_planned']}")
-    print(f"Total tool results: {comparison_metrics['total_tool_results']}")
-    print(f"Overlapping results: {comparison_metrics['overlapping_results']}")
-    print(f"Precision: {comparison_metrics['precision']:.3f}")
-    print(f"Recall: {comparison_metrics['recall']:.3f}")
-    print(f"F1 Score: {comparison_metrics['f1_score']:.3f}")
-    print(f"Spurious alignments detected: {total_spurious_detected}")
-    print(f"Expected spurious alignments: {expected_spurious:.1f} ± {spurious_estimation['std_spurious']:.1f}")
-    print(f"False positive rate: {false_positive_rate:.3f}")
+    # For backward compatibility, also include the single estimate based on use_edit_distance
+    if use_edit_distance:
+        result['mean_spurious'] = total_expected_edit
+        result['std_spurious'] = std_dev_edit
+        result['distance_type'] = 'blast_evalue'  # Renamed from edit_distance
+        result['distance_note'] = f'BLAST E-value estimate (conservative)'
+    else:
+        result['mean_spurious'] = total_expected_hamming
+        result['std_spurious'] = std_dev_hamming
+        result['distance_type'] = 'hamming'
+        result['distance_note'] = f'Hamming distance <= {max_mismatches} (theoretical count)'
     
-    return results
-
-
-def create_interval_validation_report(results, output_file=None):
-    """
-    Create a comprehensive report of interval validation results.
-    
-    Args:
-        results: Results from comprehensive_interval_validation
-        output_file: Optional file path to save report
-    
-    Returns:
-        String containing the report
-    """
-    report = []
-    report.append("=" * 80)
-    report.append("INTERVAL-BASED VALIDATION REPORT")
-    report.append("=" * 80)
-    report.append("")
-    
-    # Basic metrics
-    metrics = results['comparison_metrics']
-    report.append("BASIC METRICS:")
-    report.append(f"  Total planned intervals: {metrics['total_planned']}")
-    report.append(f"  Total tool results: {metrics['total_tool_results']}")
-    report.append(f"  Overlapping results: {metrics['overlapping_results']}")
-    report.append(f"  Precision: {metrics['precision']:.3f}")
-    report.append(f"  Recall: {metrics['recall']:.3f}")
-    report.append(f"  F1 Score: {metrics['f1_score']:.3f}")
-    report.append("")
-    
-    # Spurious alignment analysis
-    report.append("SPURIOUS ALIGNMENT ANALYSIS:")
-    report.append(f"  Spurious alignments detected: {results['total_spurious_detected']}")
-    report.append(f"  Expected spurious alignments: {results['expected_spurious']:.1f} ± {results['spurious_estimation']['std_spurious']:.1f}")
-    report.append(f"  False positive rate: {results['false_positive_rate']:.3f}")
-    report.append(f"  Spurious detection rate: {results['spurious_detection_rate']:.3f}")
-    report.append("")
-    
-    # Overlap type distribution
-    report.append("OVERLAP TYPE DISTRIBUTION:")
-    for row in results['overlap_type_counts'].iter_rows(named=True):
-        report.append(f"  {row['overlap_type']}: {row['count']}")
-    report.append("")
-    
-    # Spurious estimation details
-    estimation = results['spurious_estimation']
-    report.append("SPURIOUS ESTIMATION DETAILS:")
-    report.append(f"  Mean: {estimation['mean_spurious']:.1f}")
-    report.append(f"  Standard deviation: {estimation['std_spurious']:.1f}")
-    report.append(f"  Min: {estimation['min_spurious']}")
-    report.append(f"  Max: {estimation['max_spurious']}")
-    report.append("")
-    
-    report_text = "\n".join(report)
-    
-    if output_file:
-        with open(output_file, 'w') as f:
-            f.write(report_text)
-        print(f"Report saved to: {output_file}")
-    
-    return report_text
+    return result
