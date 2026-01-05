@@ -217,3 +217,7 @@ draft/
 src/tests/
 tests/
 src/bench/obsolete/
+
+temp_sassy_partitioned_*/*
+.tmp/
+sassy_parsed_*.parquet
