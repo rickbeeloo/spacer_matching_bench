@@ -20,6 +20,8 @@ import math
 import numpy as np
 import time
 import polars_bio as pb
+import duckdb
+import uuid
 
 # so printing to stdout doesn't break, line wrap, or truncate.
 pl.Config.set_tbl_rows(123123)
@@ -103,7 +105,7 @@ def count_kmers_df(df: pl.DataFrame, seq_col: str = "seq",id_col: str = "seqid",
         .agg(*agg_exprs)
     )
 
-def filter_repetitive_kmers(df: pl.DataFrame, seq_col: str = "seq",id_col: str = "seqid", k: int = 5, max_count: int = 10) -> pl.DataFrame:
+def filter_repetitive_kmers(df: pl.DataFrame, seq_col: str = "seq",id_col: str = "seqid", k: int = 5, max_count: int = 4) -> pl.DataFrame:
     """Filter sequences that have any k-mer appearing more than max_count times"""
     # First get k-mer counts
     df_with_kmers = count_kmers_df(df, seq_col,id_col, k, relative=False)
@@ -284,7 +286,7 @@ def reverse_complement(sequence):
 
 
 from rust_simulator import Simulator, BaseComposition, DistributionType
-import shlex
+# import shlex
 import subprocess
 
 
@@ -836,31 +838,302 @@ def vstack_easy(df1_to_stack, df2_to_stack):
     return df1_to_stack.vstack(df2_to_stack)
 
 
-def parse_sassy(sassy_file, max_mismatches=5, spacer_lendf=None, **kwargs):
-    """Parse Sassy TSV output format and return standardized coordinates.
 
+def parse_sassy(
+    sassy_file, 
+    max_mismatches=5, 
+    spacer_lendf=None, 
+    max_gaps=2, 
+    threads=10, 
+    output_prefix="sassy_parsed",
+    output_dir=".",
+    **kwargs
+):
+    """
+    Parses Sassy TSV using DuckDB with caching capabilities.
+    If a valid Parquet file already exists for the given prefix/date, it is loaded directly.
+    """
+    import datetime
+    
+    # 1. CONSTRUCT DETERMINISTIC PATH
+    # Naming convention: {output_dir}/{prefix}_{YYYYMMDD}.parquet
+    date_str = datetime.datetime.now().strftime("%Y%m%d")
+    parquet_filename = f"{output_prefix}_{date_str}.parquet"
+    parquet_path = os.path.join(output_dir, parquet_filename)
+    
+    # 2. CACHE CHECK (RESUME LOGIC)
+    if os.path.exists(parquet_path):
+        print(f"Checking existing cache at: {parquet_path}")
+        try:
+            # We try to scan the file. If the footer is missing (incomplete write), 
+            # this will throw an error immediately.
+            # Using scan_parquet().schema is a very fast metadata-only check.
+            existing_schema = pl.scan_parquet(parquet_path).schema
+            
+            # (Optional) Verify essential columns exist to ensure it's not an old version
+            if "spacer_id" in existing_schema and "mismatches" in existing_schema:
+                print(">> Valid cache found! Skipping DuckDB processing.")
+                return pl.read_parquet(parquet_path)
+            else:
+                print(">> Cache exists but schema is incorrect. Reprocessing...")
+        except Exception as e:
+            print(f">> Cache file exists but appears corrupt/incomplete ({e}). Reprocessing...")
+    
+    # =========================================================================
+    # START PROCESSING (Only if Cache Miss)
+    # =========================================================================
+    
+    con = duckdb.connect(database=':memory:')
+    
+    # Hardware Tuning
+    con.execute(f"SET threads TO {threads};")
+    con.execute("SET preserve_insertion_order = false;") 
+    con.execute("SET memory_limit = '50GB';")
+
+    # Logic Definitions
+    cigar_check = "length(cigar) - length(replace(replace(replace(cigar, 'I', ''), 'D', ''), 'N', ''))"
+    
+    if max_gaps == 1:
+        gap_logic = f"{cigar_check} = 0" 
+    else:
+        gap_logic = f"""
+            (CASE 
+                WHEN (cigar LIKE '%I%' OR cigar LIKE '%D%' OR cigar LIKE '%N%') 
+                THEN {cigar_check} <= {max_gaps}
+                ELSE TRUE 
+            END)
+        """
+
+    if spacer_lendf is not None:
+        con.register('spacer_lookup', spacer_lendf)
+        join_step = "INNER JOIN spacer_lookup s ON g.spacer_id = s.spacer_id"
+        len_selection = "s.length AS spacer_length"
+    else:
+        join_step = ""
+        len_selection = "0 AS spacer_length"
+
+    try:
+        print(f"Starting DuckDB Pipeline (Writing to: {parquet_path})...")
+        
+        query = f"""
+            COPY (
+                WITH 
+                -- STEP 1: SCAN & CHEAP FILTER
+                fast_filter AS (
+                    SELECT 
+                        spacer_id, contig_id, mismatches, strand, "start", "end", cigar
+                    FROM read_csv(
+                        '{sassy_file}', 
+                        sep='\t', 
+                        header=True, 
+                        skip=1,
+                        parallel=true,
+                        auto_detect=false,
+                        hive_partitioning=false,
+                        columns={{
+                            'spacer_id': 'VARCHAR', 'contig_id': 'VARCHAR', 
+                            'mismatches': 'UINTEGER', 'strand': 'VARCHAR', 
+                            'start': 'UINTEGER', 'end': 'UINTEGER',
+                            'slice_str': 'VARCHAR', 'cigar': 'VARCHAR'
+                        }}
+                    )
+                    WHERE mismatches <= {max_mismatches}
+                ),
+
+                -- STEP 2: EXPENSIVE FILTER
+                gap_filter AS (
+                    SELECT * FROM fast_filter
+                    WHERE {gap_logic}
+                )
+
+                -- STEP 3: JOIN & SELECT
+                SELECT 
+                    g.spacer_id,
+                    g.contig_id,
+                    {len_selection},
+                    (g.strand = '-') AS strand,
+                    g."start",
+                    g."end",
+                    g.mismatches
+                FROM gap_filter g
+                {join_step}
+
+            -- Write Config
+            ) TO '{parquet_path}' (FORMAT 'PARQUET', COMPRESSION 'SNAPPY', ROW_GROUP_SIZE 100000);
+        """
+        
+        # Execute the write
+        con.execute(query)
+        
+        # Final Read
+        print("Reading new Parquet file into Polars...")
+        if os.path.exists(parquet_path):
+            results = pl.read_parquet(parquet_path)
+        else:
+            print("Warning: DuckDB finished but no file was created (empty result set?)")
+            results = pl.DataFrame(schema={
+                "spacer_id": pl.String, "contig_id": pl.String, "spacer_length": pl.UInt32,
+                "strand": pl.Boolean, "start": pl.UInt32, "end": pl.UInt32, "mismatches": pl.UInt32,
+            })
+
+    except Exception as e:
+        print(f"Failed to process Sassy file: {e}")
+        # If the write crashed halfway, the file might be corrupt. Clean it up?
+        # Typically better to leave it for inspection or manual deletion, 
+        # but you can uncomment this if you prefer auto-cleanup:
+        # if os.path.exists(parquet_path): os.remove(parquet_path)
+        
+        return pl.DataFrame(schema={
+            "spacer_id": pl.String, "contig_id": pl.String, "spacer_length": pl.UInt32,
+            "strand": pl.Boolean, "start": pl.UInt32, "end": pl.UInt32, "mismatches": pl.UInt32,
+        })
+
+    return results
+
+# def parse_sassy(sassy_file, max_mismatches=5, spacer_lendf=None, max_gaps=2, threads=10, **kwargs):
+#     #checking size
+#     # os.path.(sassy_file).
+#     con = duckdb.connect(database=':memory:')
+    
+#     # 1. Hardware Tuning
+#     con.execute(f"SET threads TO {threads};")
+#     con.execute("SET preserve_insertion_order = false;") # Crucial for parallel writing
+#     con.execute("SET memory_limit = '50GB';")
+    
+#     # Use a single temp file instead of a directory
+#     temp_file = f"temp_sassy_{uuid.uuid4()}.parquet"
+
+#     # 2. Logic Definitions
+#     cigar_check = "length(cigar) - length(replace(replace(replace(cigar, 'I', ''), 'D', ''), 'N', ''))"
+    
+#     if max_gaps == 1:
+#         gap_logic = f"{cigar_check} = 0" 
+#     else:
+#         gap_logic = f"""
+#             (CASE 
+#                 WHEN (cigar LIKE '%I%' OR cigar LIKE '%D%' OR cigar LIKE '%N%') 
+#                 THEN {cigar_check} <= {max_gaps}
+#                 ELSE TRUE 
+#             END)
+#         """
+
+#     if spacer_lendf is not None:
+#         con.register('spacer_lookup', spacer_lendf)
+#         join_step = "INNER JOIN spacer_lookup s ON g.spacer_id = s.spacer_id"
+#         len_selection = "s.length AS spacer_length"
+#     else:
+#         join_step = ""
+#         len_selection = "0 AS spacer_length"
+
+#     try:
+#         print(f"parsing sassy (duckdb) (Threads: {threads})...")
+        
+#         query = f"""
+#             COPY (
+#                 WITH 
+#                 -- STEP 1: SCAN & CHEAP FILTER
+#                 -- Pushed down to the CSV reader for maximum I/O speed
+#                 fast_filter AS (
+#                     SELECT 
+#                         spacer_id, contig_id, mismatches, strand, "start", "end", cigar
+#                     FROM read_csv(
+#                         '{sassy_file}', 
+#                         sep='\t', 
+#                         header=True, 
+#                         skip=1,
+#                         parallel=true,
+#                         auto_detect=false,
+#                         hive_partitioning=false,
+#                         columns={{
+#                             'spacer_id': 'VARCHAR', 'contig_id': 'VARCHAR', 
+#                             'mismatches': 'UINTEGER', 'strand': 'VARCHAR', 
+#                             'start': 'UINTEGER', 'end': 'UINTEGER',
+#                             'slice_str': 'VARCHAR', 'cigar': 'VARCHAR'
+#                         }}
+#                     )
+#                     WHERE mismatches <= {max_mismatches}
+#                 ),
+
+#                 -- STEP 2: EXPENSIVE FILTER
+#                 -- Runs only on survivors of Step 1
+#                 gap_filter AS (
+#                     SELECT * FROM fast_filter
+#                     WHERE {gap_logic}
+#                 )
+
+#                 -- STEP 3: JOIN & SELECT
+#                 SELECT 
+#                     g.spacer_id,
+#                     g.contig_id,
+#                     {len_selection},
+#                     (g.strand = '-') AS strand,
+#                     g."start",
+#                     g."end",
+#                     g.mismatches
+#                 FROM gap_filter g
+#                 {join_step}
+
+#             -- Write to a SINGLE Parquet file. 
+#             -- DuckDB handles parallel row-group writing automatically.
+#             ) TO '{temp_file}' (FORMAT 'PARQUET', COMPRESSION 'SNAPPY', ROW_GROUP_SIZE 100000);
+#         """
+        
+#         con.execute(query)
+        
+#         print("Reading Parquet back into Polars...")
+#         if os.path.exists(temp_file):
+#             # scan_parquet is generally faster/lighter than read_parquet for large files
+#             results = pl.scan_parquet(temp_file).collect()
+#         else:
+#             print("Warning: No results generated.")
+#             results = pl.DataFrame(schema={
+#                 "spacer_id": pl.String, "contig_id": pl.String, "spacer_length": pl.UInt32,
+#                 "strand": pl.Boolean, "start": pl.UInt32, "end": pl.UInt32, "mismatches": pl.UInt32,
+#             })
+
+#     except Exception as e:
+#         print(f"Failed to process Sassy file: {e}")
+#         return pl.DataFrame(schema={
+#             "spacer_id": pl.String, "contig_id": pl.String, "spacer_length": pl.UInt32,
+#             "strand": pl.Boolean, "start": pl.UInt32, "end": pl.UInt32, "mismatches": pl.UInt32,
+#         })
+#     finally:
+#         if os.path.exists(temp_file):
+#             os.remove(temp_file)
+
+#     return results
+
+def parse_sassy_polars(sassy_file, max_mismatches=5, spacer_lendf=None, max_gaps=2, **kwargs):
+    """Parse Sassy TSV output format and return standardized coordinates.
     Sassy output format:
     pat_id	text_id	cost	strand	start	end	match_region	cigar
-
     """
 
     try:
-        results = pl.read_csv(
+        results = pl.scan_csv(
             sassy_file,
             separator="\t",
-            has_header=True,
-            infer_schema_length=100000,
-            new_columns=[
-                "spacer_id",
-                "contig_id",
-                "cost",
-                "strand",
-                "start",
-                "end",
-                "slice_str",
-                "cigar",
-            ],
-        )
+            skip_lines=1,
+            schema={
+                "spacer_id":pl.Utf8,
+                "contig_id":pl.Utf8,
+                "mismatches":pl.UInt32,
+                "strand":pl.Utf8,
+                "start":pl.UInt32,
+                "end":pl.UInt32,
+                "slice_str":pl.Utf8,
+                "cigar":pl.Utf8,
+            },
+        ).drop("slice_str")
+
+        if max_gaps == 1:
+                results = results.filter(~pl.col("cigar").str.contains_any(patterns=["I","D","N"]))
+        else:
+                results = results.filter(~pl.col("cigar").str.count_matches(r"I|D|N")>max_gaps)
+
+    # Filter by max_mismatches
+        results = results.filter(pl.col("mismatches") <= max_mismatches)
+
     except Exception as e:
         print(f"Failed to read Sassy file {sassy_file}: {e}, returning empty dataframe")
         return pl.DataFrame(
@@ -875,12 +1148,6 @@ def parse_sassy(sassy_file, max_mismatches=5, spacer_lendf=None, **kwargs):
             }
         )
 
-    # Rename cost to mismatches
-    results = results.with_columns(pl.col("cost").alias("mismatches"))
-
-    # Filter by max_mismatches
-    results = results.filter(pl.col("mismatches") <= max_mismatches)
-
     # Convert strand from string to boolean
     results = results.with_columns(
         pl.when(pl.col("strand") == "-")
@@ -889,16 +1156,7 @@ def parse_sassy(sassy_file, max_mismatches=5, spacer_lendf=None, **kwargs):
         .alias("strand")
     )
 
-    # Cast other columns to appropriate types
-    results = results.with_columns(
-        [
-            pl.col("spacer_id").cast(pl.Utf8),
-            pl.col("contig_id").cast(pl.Utf8),
-            pl.col("start").cast(pl.UInt32),
-            pl.col("end").cast(pl.UInt32),
-            pl.col("mismatches").cast(pl.UInt32),
-        ]
-    )
+    results = results.collect()
 
     # Join with spacer lengths if provided
     if spacer_lendf is not None:

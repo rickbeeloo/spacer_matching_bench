@@ -190,7 +190,7 @@ def pyseff(sacct_df=None):
 
 
 
-def create_slurm_job_scripts(results_dir, slurm_opts=None, job_subdir="job_scripts"):
+def create_slurm_job_scripts(results_dir, slurm_opts=None, job_subdir="job_scripts",threads=16):
     """Create SLURM job scripts for each bash script under results_dir/bash_scripts.
 
     Args:
@@ -214,7 +214,7 @@ def create_slurm_job_scripts(results_dir, slurm_opts=None, job_subdir="job_scrip
         'mail-type': 'FAIL,END,BEGIN',
         'A': 'grp-org-sc-metagen',
         'q': 'jgi_normal',
-        'c': 16,
+        'c': threads,
         'mem': '168G',
         't': '72:00:00',
     }
