@@ -1,0 +1,50 @@
+{
+    "blastn": {
+        "color": "#7C3018",
+        "marker": "o"
+    },
+    "bowtie1": {
+        "color": "#0275DC",
+        "marker": "s"
+    },
+    "bowtie2": {
+        "color": "#70FC28",
+        "marker": "^"
+    },
+    "indelfree_bruteforce": {
+        "color": "#116B28",
+        "marker": "v"
+    },
+    "indelfree_indexed": {
+        "color": "#305566",
+        "marker": "D"
+    },
+    "lexicmap": {
+        "color": "#F021D8",
+        "marker": "P"
+    },
+    "minimap2": {
+        "color": "#172CBB",
+        "marker": "*"
+    },
+    "mmseqs2": {
+        "color": "#8B7937",
+        "marker": "X"
+    },
+    "mummer4": {
+        "color": "#F97762",
+        "marker": "h"
+    },
+    "sassy": {
+        "color": "#EBA60A",
+        "marker": "p"
+    },
+    "strobealign": {
+        "color": "#ED3415",
+        "marker": "<"
+    },
+    "x_mapper": {
+        "color": "#E1FC16",
+        "marker": ">"
+    }
+}
