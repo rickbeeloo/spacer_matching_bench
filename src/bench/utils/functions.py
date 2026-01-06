@@ -838,7 +838,7 @@ def vstack_easy(df1_to_stack, df2_to_stack):
     return df1_to_stack.vstack(df2_to_stack)
 
 
-
+from pathlib import Path
 def parse_sassy(
     sassy_file, 
     max_mismatches=5, 
@@ -854,6 +854,7 @@ def parse_sassy(
     If a valid Parquet file already exists for the given prefix/date, it is loaded directly.
     """
     import datetime
+    output_dir = Path(sassy_file).parent
     
     # 1. CONSTRUCT DETERMINISTIC PATH
     # Naming convention: {output_dir}/{prefix}_{YYYYMMDD}.parquet
