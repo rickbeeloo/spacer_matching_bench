@@ -13,7 +13,10 @@ def run_simulate(num_contigs, num_spacers, contig_length_range, spacer_length_ra
                  mismatch_range, spacer_insertions, indel_insertions, indel_deletions,
                  reverse_complement, threads, output_dir, id_prefix=None, gc_content=None,
                  contig_distribution='uniform', spacer_distribution='uniform', verify=False,
-                 contigs=None, spacers=None, a_frac=None, t_frac=None, c_frac=None, g_frac=None):
+                 contigs=None, spacers=None, a_frac=None, t_frac=None, c_frac=None, g_frac=None,
+                 contig_gc_content=None, spacer_gc_content=None,
+                 contig_a_frac=None, contig_t_frac=None, contig_c_frac=None, contig_g_frac=None,
+                 spacer_a_frac=None, spacer_t_frac=None, spacer_c_frac=None, spacer_g_frac=None):
     """
     Core simulation function that can be called from both CLI interfaces.
     
@@ -30,16 +33,26 @@ def run_simulate(num_contigs, num_spacers, contig_length_range, spacer_length_ra
         threads: Number of threads for parallel processing
         output_dir: Output directory for simulated data
         id_prefix: Prefix for sequence IDs (optional)
-        gc_content: GC content percentage (optional)
+        gc_content: GC content percentage (optional, deprecated - use contig_gc_content/spacer_gc_content)
         contig_distribution: Distribution type for contig lengths
         spacer_distribution: Distribution type for spacer lengths
         verify: Whether to verify simulation after generation
         contigs: Path to existing contigs file (optional)
         spacers: Path to existing spacers file (optional)
-        a_frac: A base fraction (optional)
-        t_frac: T base fraction (optional)
-        c_frac: C base fraction (optional)
-        g_frac: G base fraction (optional)
+        a_frac: A base fraction (optional, deprecated - use contig_a_frac/spacer_a_frac)
+        t_frac: T base fraction (optional, deprecated - use contig_t_frac/spacer_t_frac)
+        c_frac: C base fraction (optional, deprecated - use contig_c_frac/spacer_c_frac)
+        g_frac: G base fraction (optional, deprecated - use contig_g_frac/spacer_g_frac)
+        contig_gc_content: GC content percentage for contigs (optional)
+        spacer_gc_content: GC content percentage for spacers (optional)
+        contig_a_frac: A base fraction for contigs (optional)
+        contig_t_frac: T base fraction for contigs (optional)
+        contig_c_frac: C base fraction for contigs (optional)
+        contig_g_frac: G base fraction for contigs (optional)
+        spacer_a_frac: A base fraction for spacers (optional)
+        spacer_t_frac: T base fraction for spacers (optional)
+        spacer_c_frac: C base fraction for spacers (optional)
+        spacer_g_frac: G base fraction for spacers (optional)
     
     Returns:
         Tuple of (contigs, spacers, ground_truth) dictionaries/lists
@@ -76,6 +89,16 @@ def run_simulate(num_contigs, num_spacers, contig_length_range, spacer_length_ra
         t_frac=t_frac,
         c_frac=c_frac,
         g_frac=g_frac,
+        contig_gc_content=contig_gc_content,
+        spacer_gc_content=spacer_gc_content,
+        contig_a_frac=contig_a_frac,
+        contig_t_frac=contig_t_frac,
+        contig_c_frac=contig_c_frac,
+        contig_g_frac=contig_g_frac,
+        spacer_a_frac=spacer_a_frac,
+        spacer_t_frac=spacer_t_frac,
+        spacer_c_frac=spacer_c_frac,
+        spacer_g_frac=spacer_g_frac,
         verify=verify
     )
     

@@ -35,7 +35,7 @@ dependencies = [
     "pypdf2>=3.0.1,<4",
     "charset-normalizer>=3.4.2,<4",
     "click>=8.0.0,<9",
-    "polars>=1.34.0,<2",
+    "polars[rt64]>=1.36.1,<2",
     "pydustmasker>=1.0.3,<2",
     "kcounter>=0.1.1,<0.2",
     "polars-bio>=0.18.0,<0.19",
@@ -43,7 +43,8 @@ dependencies = [
     "uv>=0.9.5,<0.10",
     "rich",
     "rich-click>=1.9.4,<2",
-    "intervaltree>=3.1.0,<4", "altair>=5.5.0,<6", "duckdb>=1.4.3,<2",
+    "intervaltree>=3.1.0,<4",
+    "altair>=5.5.0,<6", "duckdb>=1.4.3,<2",
 ]
 
 [project.urls]
@@ -97,6 +98,9 @@ python = "~=3.9.0"
 [tool.pixi.environments]
 default = { features = ["build", "format", "publish", "py39", "render"] }
 
+# [tool.pixi.activation.env]
+# PYTHONBREAKPOINT = "ipdb.set_trace"
+
 [tool.pixi.feature.build.tasks]
 update-python-version = "hatch version micro && hatch build --clean "
 build-python = "hatch build --clean && pip install -e ."
@@ -112,3 +116,4 @@ lint.ignore = [
     "F403", # import * / *` used; unable to detect undefined names
     "F405", # name may be undefined, or defined from star imports: module
 ]
+

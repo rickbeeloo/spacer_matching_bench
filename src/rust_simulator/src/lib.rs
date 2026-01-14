@@ -427,7 +427,8 @@ impl Simulator {
         // New optional parameters with defaults
         contig_distribution: Option<DistributionType>,
         spacer_distribution: Option<DistributionType>,
-        base_composition: Option<BaseComposition>,
+        contig_base_composition: Option<BaseComposition>,
+        spacer_base_composition: Option<BaseComposition>,
         data_subdir: Option<String>,
     ) -> PyResult<(HashMap<String, String>, HashMap<String, String>, Vec<Vec<String>>)> {
         
@@ -487,7 +488,7 @@ impl Simulator {
                     } else {
                         rng.random_range(contig_length_range.0..=contig_length_range.1)
                     };
-                    let sequence = if let Some(ref comp) = base_composition {
+                    let sequence = if let Some(ref comp) = contig_base_composition {
                         self.generate_random_sequence_with_composition(length, comp)
                     } else {
                         self.generate_random_sequence(length)
@@ -521,7 +522,7 @@ impl Simulator {
                     } else {
                         rng.random_range(spacer_length_range.0..=spacer_length_range.1)
                     };
-                    let sequence = if let Some(ref comp) = base_composition {
+                    let sequence = if let Some(ref comp) = spacer_base_composition {
                         self.generate_random_sequence_with_composition(length, comp)
                     } else {
                         self.generate_random_sequence(length)
@@ -1005,6 +1006,10 @@ impl Simulator {
         spacers_file: Option<String>,
         data_subdir: Option<String>,
         debug: bool,
+        contig_distribution: Option<DistributionType>,
+        spacer_distribution: Option<DistributionType>,
+        contig_base_composition: Option<BaseComposition>,
+        spacer_base_composition: Option<BaseComposition>,
     ) -> PyResult<(HashMap<String, String>, HashMap<String, String>, Vec<Vec<String>>)> {
         
         // Load or generate contigs
@@ -1012,7 +1017,48 @@ impl Simulator {
             if debug {
                 println!("Reading contigs from file: {}", file_path);
             }
-            self.read_fasta_file(&file_path)?
+            let all_contigs = self.read_fasta_file(&file_path)?;
+            let file_contig_count = all_contigs.len();
+            
+            // Check if we have enough contigs in the file
+            if file_contig_count < sample_size_contigs {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    format!(
+                        "Not enough contigs in file. Requested {} contigs but file '{}' contains only {} contigs. \
+                        Please either reduce --num-contigs or provide a file with more contigs.",
+                        sample_size_contigs, file_path, file_contig_count
+                    )
+                ));
+            }
+            
+            // Subsample if we have more contigs than requested
+            if file_contig_count > sample_size_contigs {
+                if debug {
+                    println!("Subsampling {} contigs from {} total in file", sample_size_contigs, file_contig_count);
+                }
+                
+                let mut rng = rand::rng();
+                let mut contig_ids: Vec<String> = all_contigs.keys().cloned().collect();
+                
+                // Shuffle and take first sample_size_contigs
+                contig_ids.shuffle(&mut rng);
+                contig_ids.truncate(sample_size_contigs);
+                
+                // Create subsampled HashMap
+                let mut subsampled_contigs = HashMap::new();
+                for id in contig_ids {
+                    if let Some(seq) = all_contigs.get(&id) {
+                        subsampled_contigs.insert(id, seq.clone());
+                    }
+                }
+                
+                println!("Subsampled {} contigs from file (total in file: {})", sample_size_contigs, file_contig_count);
+                subsampled_contigs
+            } else {
+                // Exact match - use all contigs
+                println!("Using all {} contigs from file", file_contig_count);
+                all_contigs
+            }
         } else {
             if debug {
                 println!("Generating contigs...");
@@ -1025,8 +1071,16 @@ impl Simulator {
             let mut generated_contigs = HashMap::new();
             for i in 0..sample_size_contigs {
                 let mut rng = rand::rng();
-                let length = rng.random_range(contig_length_range.0..=contig_length_range.1);
-                let sequence = self.generate_random_sequence(length);
+                let length = if let Some(ref dist) = contig_distribution {
+                    self.generate_length_from_distribution(contig_length_range, dist)
+                } else {
+                    rng.random_range(contig_length_range.0..=contig_length_range.1)
+                };
+                let sequence = if let Some(ref comp) = contig_base_composition {
+                    self.generate_random_sequence_with_composition(length, comp)
+                } else {
+                    self.generate_random_sequence(length)
+                };
                 
                 let id = match &id_prefix {
                     Some(prefix) => format!("{}_contig_{}", prefix, i),
@@ -1045,7 +1099,48 @@ impl Simulator {
             if debug {
                 println!("Reading spacers from file: {}", file_path);
             }
-            self.read_fasta_file(&file_path)?
+            let all_spacers = self.read_fasta_file(&file_path)?;
+            let file_spacer_count = all_spacers.len();
+            
+            // Check if we have enough spacers in the file
+            if file_spacer_count < sample_size_spacers {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    format!(
+                        "Not enough spacers in file. Requested {} spacers but file '{}' contains only {} spacers. \
+                        Please either reduce --num-spacers or provide a file with more spacers.",
+                        sample_size_spacers, file_path, file_spacer_count
+                    )
+                ));
+            }
+            
+            // Subsample if we have more spacers than requested
+            if file_spacer_count > sample_size_spacers {
+                if debug {
+                    println!("Subsampling {} spacers from {} total in file", sample_size_spacers, file_spacer_count);
+                }
+                
+                let mut rng = rand::rng();
+                let mut spacer_ids: Vec<String> = all_spacers.keys().cloned().collect();
+                
+                // Shuffle and take first sample_size_spacers
+                spacer_ids.shuffle(&mut rng);
+                spacer_ids.truncate(sample_size_spacers);
+                
+                // Create subsampled HashMap
+                let mut subsampled_spacers = HashMap::new();
+                for id in spacer_ids {
+                    if let Some(seq) = all_spacers.get(&id) {
+                        subsampled_spacers.insert(id, seq.clone());
+                    }
+                }
+                
+                println!("Subsampled {} spacers from file (total in file: {})", sample_size_spacers, file_spacer_count);
+                subsampled_spacers
+            } else {
+                // Exact match - use all spacers
+                println!("Using all {} spacers from file", file_spacer_count);
+                all_spacers
+            }
         } else {
             if debug {
                 println!("Generating spacers...");
@@ -1058,8 +1153,16 @@ impl Simulator {
             let mut generated_spacers = HashMap::new();
             for i in 0..sample_size_spacers {
                 let mut rng = rand::rng();
-                let length = rng.random_range(spacer_length_range.0..=spacer_length_range.1);
-                let sequence = self.generate_random_sequence(length);
+                let length = if let Some(ref dist) = spacer_distribution {
+                    self.generate_length_from_distribution(spacer_length_range, dist)
+                } else {
+                    rng.random_range(spacer_length_range.0..=spacer_length_range.1)
+                };
+                let sequence = if let Some(ref comp) = spacer_base_composition {
+                    self.generate_random_sequence_with_composition(length, comp)
+                } else {
+                    self.generate_random_sequence(length)
+                };
                 
                 let id = match &id_prefix {
                     Some(prefix) => format!("{}_spacer_{}", prefix, i),

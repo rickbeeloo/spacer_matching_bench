@@ -4,7 +4,7 @@ Click entry point for the spacer_bencher tool.
 import click
 import logging
 import sys
-from pathlib import Path
+# from pathlib import Path
 from rich.logging import RichHandler
 
 # Configure global logger
@@ -88,7 +88,11 @@ def cli(verbose):
 @click.option('--id-prefix', '-id', type=str, default=None,
               help='Prefix for sequence IDs (default: auto-generated)')
 @click.option('--gc-content', type=float, default=None,
-              help='GC content percentage (0-100)')
+              help='GC content percentage (0-100) - DEPRECATED: use --contig-gc-content and --spacer-gc-content')
+@click.option('--contig-gc-content', type=float, default=None,
+              help='GC content percentage for contigs (0-100)')
+@click.option('--spacer-gc-content', type=float, default=None,
+              help='GC content percentage for spacers (0-100)')
 @click.option('--contig-distribution', type=click.Choice(['uniform', 'normal', 'bell']),
               default='uniform', help='Distribution for contig lengths')
 @click.option('--spacer-distribution', type=click.Choice(['uniform', 'normal', 'bell']),
@@ -102,6 +106,7 @@ def cli(verbose):
 def simulate(num_contigs, num_spacers, contig_length, spacer_length,
              mismatch_range, spacer_insertions, indel_insertions, indel_deletions,
              reverse_complement, threads, output_dir, id_prefix, gc_content,
+             contig_gc_content, spacer_gc_content,
              contig_distribution, spacer_distribution, verify, contigs, spacers):
     """
     Generate simulated CRISPR spacer and contig sequences.
@@ -173,6 +178,8 @@ def simulate(num_contigs, num_spacers, contig_length, spacer_length,
             output_dir=output_dir,
             id_prefix=id_prefix,
             gc_content=gc_content,
+            contig_gc_content=contig_gc_content,
+            spacer_gc_content=spacer_gc_content,
             contig_distribution=contig_distribution,
             spacer_distribution=spacer_distribution,
             verify=verify,

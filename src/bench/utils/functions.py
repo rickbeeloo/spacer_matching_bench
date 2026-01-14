@@ -1,35 +1,44 @@
 # some utility functions for the benchmark.
 import glob
-
 import hashlib
 import json
 import os
 import random
 import re
+from typing import Any, Optional, Union#, Dict, List, Tuple
+
 import subprocess
 import tempfile
-import ipdb
+
 import parasail as ps
 import polars as pl
+import psutil
 import pyfastx as pfx
 import pysam
-from needletail import parse_fastx_file  # , NeedletailError, normalize_seq
+from needletail import parse_fastx_file
 from tqdm import tqdm
 from collections import Counter
 import math
-import numpy as np
 import time
 import polars_bio as pb
-import duckdb
-import uuid
+import _duckdb as duckdb  # Use the C extension
 
 # so printing to stdout doesn't break, line wrap, or truncate.
 pl.Config.set_tbl_rows(123123)
-pl.Config.set_tbl_cols(123123) # should be large enough
-pl.Config.set_fmt_str_lengths(2100) 
-pl.Config.set_tbl_width_chars(2100) 
+pl.Config.set_tbl_cols(123123)  # should be large enough
+pl.Config.set_fmt_str_lengths(2100)
+pl.Config.set_tbl_width_chars(2100)
 
-def read_fasta_needletail(fasta_file):
+
+def read_fasta_needletail(fasta_file: str) -> tuple[list[str], list[str]]:
+    """Read sequences from a FASTA file using needletail.
+
+    Args:
+        fasta_file(str): Path to the FASTA file
+
+    Returns:
+        tuple: (seq_ids, seqs) where seq_ids is list of sequence IDs and seqs is list of sequences
+    """
     seqs = []
     seq_ids = []
     for record in parse_fastx_file(fasta_file):
@@ -37,7 +46,17 @@ def read_fasta_needletail(fasta_file):
         seq_ids.append(record.id)
     return seq_ids, seqs
 
-def apply_mismatches(sequence, n_mismatches):
+
+def apply_mismatches(sequence: str, n_mismatches: int) -> str:
+    """Introduce random mismatches into a DNA sequence.
+
+    Args:
+        sequence(str): The original DNA sequence
+        n_mismatches(int): Number of mismatches to introduce
+
+    Returns:
+        str: The sequence with mismatches applied
+    """
     mismatch_positions = random.sample(range(len(sequence)), n_mismatches)
     sequence_list = list(sequence)
     for pos in mismatch_positions:
@@ -46,9 +65,18 @@ def apply_mismatches(sequence, n_mismatches):
         sequence_list[pos] = new_base
     return "".join(sequence_list)
 
+
 def calculate_shannon_entropy(s: str) -> float:
+    """Calculate the Shannon entropy of a string.
+
+    Args:
+        s(str): The input string
+
+    Returns:
+        float: The Shannon entropy value
+    """
     if not s:
-        return 0.0  #here in case of NULLs so that applting over ovject of size n still returns a number.  TODO: think if 0.0 is the best place holder value...
+        return 0.0  # here in case of NULLs so that applting over ovject of size n still returns a number.  TODO: think if 0.0 is the best place holder value...
 
     # Count character frequencies
     char_counts = Counter(s)
@@ -61,76 +89,113 @@ def calculate_shannon_entropy(s: str) -> float:
         entropy -= probability * math.log2(probability)
     return entropy
 
-def count_kmers_df_explicit(df: pl.DataFrame, seq_col: str = "seq",id_col: str = "seqid", k: int = 3, relative: bool = False) -> pl.DataFrame:
+
+def count_kmers_df_explicit(
+    df: pl.DataFrame,
+    seq_col: str = "seq",
+    id_col: str = "seqid",
+    k: int = 3,
+    relative: bool = False,
+) -> pl.DataFrame:
     """Calculate ALL k-mers counts for all sequences in a DataFrame. all possible k-mers are counted, not just the complete ones."""
     # Split sequences into characters
     import itertools
-    all_kmers = [''.join(p) for p in itertools.product('ATCGN', repeat=k)]
-    count_df = df.with_columns(
-        pl.col(seq_col).str.extract_many(all_kmers, overlapping=True,ascii_case_insensitive=True).alias('kmers')
-    ).group_by(id_col).agg(
-        pl.col('kmers').explode().value_counts(normalize=relative).alias(f'kmer_{k}_relative' if relative else f'kmer_{k}_counts'),
+
+    all_kmers = ["".join(p) for p in itertools.product("ATCGN", repeat=k)]
+    count_df = (
+        df.with_columns(
+            pl.col(seq_col)
+            .str.extract_many(all_kmers, overlapping=True, ascii_case_insensitive=True)
+            .alias("kmers")
+        )
+        .group_by(id_col)
+        .agg(
+            pl.col("kmers")
+            .explode()
+            .value_counts(normalize=relative)
+            .alias(f"kmer_{k}_relative" if relative else f"kmer_{k}_counts"),
+        )
     )
     return count_df
 
 
-
-def count_kmers_df(df: pl.DataFrame, seq_col: str = "seq",id_col: str = "seqid", k: int = 3, relative: bool = False) -> pl.DataFrame:
+def count_kmers_df(
+    df: pl.DataFrame,
+    seq_col: str = "seq",
+    id_col: str = "seqid",
+    k: int = 3,
+    relative: bool = False,
+) -> pl.DataFrame:
     """Calculate k-mer counts for all sequences in a DataFrame"""
     # Split sequences into characters
-    split_chars_expr = pl.col(seq_col).str.split('').alias('chars')
-    
+    split_chars_expr = pl.col(seq_col).str.split("").alias("chars")
+
     # Create k-mers by shifting and concatenating # TODO: look if this can be down in one step or if there is some sliding window function.
     create_kmers_expr = pl.concat_str(
-        [pl.col('chars').shift(-i).over(id_col) for i in range(k)]
-    ).alias('substrings')
-    
+        [pl.col("chars").shift(-i).over(id_col) for i in range(k)]
+    ).alias("substrings")
+
     # Filter for complete k-mers only
-    filter_complete_kmers_expr = pl.col('substrings').str.len_chars() == k
-    
+    filter_complete_kmers_expr = pl.col("substrings").str.len_chars() == k
+
     # Aggregate expressions
     agg_exprs = [
         pl.first(seq_col),  # Keep the original sequence
-        pl.col('substrings').value_counts(normalize=relative).alias(f'kmer_{k}_relative' if relative else f'kmer_{k}_counts'),
-        pl.exclude(seq_col, 'chars', 'substrings').first()  # Keep all other original columns
+        pl.col("substrings")
+        .value_counts(normalize=relative)
+        .alias(f"kmer_{k}_relative" if relative else f"kmer_{k}_counts"),
+        pl.exclude(
+            seq_col, "chars", "substrings"
+        ).first(),  # Keep all other original columns
     ]
-    
+
     return (
-        df
-        .with_columns(split_chars_expr)
-        .explode('chars')
+        df.with_columns(split_chars_expr)
+        .explode("chars")
         .with_columns(create_kmers_expr)
         .filter(filter_complete_kmers_expr)
         .group_by(id_col, maintain_order=True)
         .agg(*agg_exprs)
     )
 
-def filter_repetitive_kmers(df: pl.DataFrame, seq_col: str = "seq",id_col: str = "seqid", k: int = 5, max_count: int = 4) -> pl.DataFrame:
+
+def filter_repetitive_kmers(
+    df: pl.DataFrame,
+    seq_col: str = "seq",
+    id_col: str = "seqid",
+    k: int = 5,
+    max_count: int = 4,
+) -> pl.DataFrame:
     """Filter sequences that have any k-mer appearing more than max_count times"""
     # First get k-mer counts
-    df_with_kmers = count_kmers_df(df, seq_col,id_col, k, relative=False)
-    
+    df_with_kmers = count_kmers_df(df, seq_col, id_col, k, relative=False)
+
     # Filter for sequences without highly repetitive k-mers
-    filter_repetitive_expr = ~pl.col('kmer_counts').list.eval(
-        pl.element().struct.field('count') > max_count
-    ).list.any()
-    
+    filter_repetitive_expr = (
+        ~pl.col("kmer_counts")
+        .list.eval(pl.element().struct.field("count") > max_count)
+        .list.any()
+    )
+
     return df_with_kmers.filter(filter_repetitive_expr)
 
+
 # lcc_mult and lcc_simp are sourced from the biopython library - we don't need to depend on it here just for these two functions.
-def lcc_mult(seq, wsize):
+def lcc_mult(seq: str, wsize: int) -> list[float]:
     """Calculate Local Composition Complexity (LCC) values over sliding window.
     sourced from: https://github.com/biopython/biopython/blob/e451db211bdd855a5d0f1f6bba18985ffee12696/Bio/SeqUtils/lcc.py#L13
 
-    Returns a list of floats, the LCC values for a sliding window over
-    the sequence.
+    Args:
+        seq(str): An unambiguous DNA sequence (a string or Seq object)
+        wsize(int): Window size, integer
 
-    seq - an unambiguous DNA sequence (a string or Seq object)
-    wsize - window size, integer
+    Returns:
+        list[float]: The LCC values for a sliding window over the sequence.
 
-    The result is the same as applying lcc_simp multiple times, but this
-    version is optimized for speed. The optimization works by using the
-    value of previous window as a base to compute the next one.
+    Note:
+        The result is the same as applying lcc_simp multiple times, but this
+        version is optimized for speed. The optimization works by using the
+        value of previous window as a base to compute the next one.
     """
     l4 = math.log(4)
     seq = seq.upper()
@@ -225,19 +290,21 @@ def lcc_mult(seq, wsize):
         tail = window[0]
     return lccsal
 
+
 # lcc_mult and lcc_simp are sourced from the biopython library - we don't need to depend on it here just for these two functions.
-def lcc_simp(seq):
+def lcc_simp(seq: str) -> float:
     """Calculate Local Composition Complexity (LCC) for a sequence.
     sourced from: https://github.com/biopython/biopython/blob/e451db211bdd855a5d0f1f6bba18985ffee12696/Bio/SeqUtils/lcc.py#L120
 
-    seq - an unambiguous DNA sequence (a string or Seq object)
+    Args:
+        seq(str): An unambiguous DNA sequence (a string or Seq object)
 
-    Returns the Local Composition Complexity (LCC) value for the entire
-    sequence (as a float).
+    Returns:
+        float: The Local Composition Complexity (LCC) value for the entire sequence.
 
     Reference:
-    Andrzej K Konopka (2005) Sequence Complexity and Composition
-    https://doi.org/10.1038/npg.els.0005260
+        Andrzej K Konopka (2005) Sequence Complexity and Composition
+        https://doi.org/10.1038/npg.els.0005260
     """
     wsize = len(seq)
     seq = seq.upper()
@@ -262,8 +329,15 @@ def lcc_simp(seq):
     return -(term_a + term_c + term_t + term_g)
 
 
-def reverse_complement(sequence):
-    """reverse complement non+ambiguous bases."""
+def reverse_complement(sequence: str) -> str:
+    """Compute the reverse complement of a DNA sequence, handling ambiguous bases.
+
+    Args:
+        sequence(str): The input DNA sequence
+
+    Returns:
+        str: The reverse complement sequence
+    """
     complement = {
         "A": "T",
         "T": "A",
@@ -286,15 +360,13 @@ def reverse_complement(sequence):
 
 
 from rust_simulator import Simulator, BaseComposition, DistributionType
-# import shlex
-import subprocess
 
 
-def generate_simulation_id(params):
+def generate_simulation_id(params: dict) -> str:
     """Generate a unique simulation ID based on input parameters.
 
     Args:
-        params (dict): Dictionary of simulation parameters
+        params(dict): Dictionary of simulation parameters
 
     Returns:
         str: 8-character hex string unique to these parameters
@@ -308,39 +380,92 @@ def generate_simulation_id(params):
 
 
 def simulate_data_rust(
-    contig_length_range,
-    spacer_length_range,
-    n_mismatch_range,
-    sample_size_contigs,
-    sample_size_spacers,
-    insertion_range,
-    n_insertion_range=(0, 0),
-    n_deletion_range=(0, 0),
-    contigs=None,
-    spacers=None,
-    prop_rc=0.5,
-    debug=False,
-    threads=None,
-    verify=False,
-    results_dir=None,
-    id_prefix=None,
+    contig_length_range: tuple[int, int],
+    spacer_length_range: tuple[int, int],
+    n_mismatch_range: tuple[int, int],
+    sample_size_contigs: int,
+    sample_size_spacers: int,
+    insertion_range: tuple[int, int],
+    n_insertion_range: tuple[int, int] = (0, 0),
+    n_deletion_range: tuple[int, int] = (0, 0),
+    contigs: Optional[Union[dict[str, str], str]] = None,
+    spacers: Optional[Union[dict[str, str], str]] = None,
+    prop_rc: float = 0.5,
+    debug: bool = False,
+    threads: Optional[int] = None,
+    verify: bool = False,
+    results_dir: Optional[str] = None,
+    id_prefix: Optional[str] = None,
     # New parameters for base composition and distribution
-    contig_distribution=None,
-    spacer_distribution=None,
-    base_composition=None,
-    gc_content=None,
-    a_frac=None,
-    t_frac=None,
-    c_frac=None,
-    g_frac=None,
-    data_subdir=None,
-):
+    contig_distribution: Optional[Any] = None,
+    spacer_distribution: Optional[Any] = None,
+    base_composition: Optional[Any] = None,  # Deprecated: use contig/spacer specific params
+    gc_content: Optional[float] = None,  # Deprecated: use contig/spacer specific params
+    a_frac: Optional[float] = None,  # Deprecated: use contig/spacer specific params
+    t_frac: Optional[float] = None,  # Deprecated: use contig/spacer specific params
+    c_frac: Optional[float] = None,  # Deprecated: use contig/spacer specific params
+    g_frac: Optional[float] = None,  # Deprecated: use contig/spacer specific params
+    # New separate parameters
+    contig_gc_content: Optional[float] = None,
+    spacer_gc_content: Optional[float] = None,
+    contig_a_frac: Optional[float] = None,
+    contig_t_frac: Optional[float] = None,
+    contig_c_frac: Optional[float] = None,
+    contig_g_frac: Optional[float] = None,
+    spacer_a_frac: Optional[float] = None,
+    spacer_t_frac: Optional[float] = None,
+    spacer_c_frac: Optional[float] = None,
+    spacer_g_frac: Optional[float] = None,
+    data_subdir: Optional[str] = None,
+) -> tuple:
+    """Simulate CRISPR spacer data using Rust implementation.
+
+    Args:
+        contig_length_range(tuple[int, int]): Range of contig lengths
+        spacer_length_range(tuple[int, int]): Range of spacer lengths
+        n_mismatch_range(tuple[int, int]): Range of mismatches
+        sample_size_contigs(int): Number of contigs to sample
+        sample_size_spacers(int): Number of spacers to sample
+        insertion_range(tuple[int, int]): Range for insertions
+        n_insertion_range(tuple[int, int]): Range for number of insertions
+        n_deletion_range(tuple[int, int]): Range for number of deletions
+        contigs(dict[str, str]): Pre-existing contigs
+        spacers(dict[str, str]): Pre-existing spacers
+        prop_rc(float): Proportion of reverse complement
+        debug(bool): Enable debug mode
+        threads(int): Number of threads
+        verify(bool): Verify simulation
+        results_dir(str): Results directory
+        id_prefix(str): Simulation ID prefix
+        contig_distribution: Distribution for contigs
+        spacer_distribution: Distribution for spacers
+        base_composition: Base composition (deprecated)
+        gc_content(float): GC content (deprecated)
+        a_frac(float): A fraction (deprecated)
+        t_frac(float): T fraction (deprecated)
+        c_frac(float): C fraction (deprecated)
+        g_frac(float): G fraction (deprecated)
+        contig_gc_content(float): GC content for contigs
+        spacer_gc_content(float): GC content for spacers
+        contig_a_frac(float): A fraction for contigs
+        contig_t_frac(float): T fraction for contigs
+        contig_c_frac(float): C fraction for contigs
+        contig_g_frac(float): G fraction for contigs
+        spacer_a_frac(float): A fraction for spacers
+        spacer_t_frac(float): T fraction for spacers
+        spacer_c_frac(float): C fraction for spacers
+        spacer_g_frac(float): G fraction for spacers
+        data_subdir(str): Data subdirectory
+
+    Returns:
+        tuple: (contigs_dict, spacers_dict, ground_truth_df)
+    """
     # Use the Rust implementation for input file simulation
     if contigs is not None or spacers is not None:
         if debug:
             print("Using Rust simulate_from_input_files...")
             start_time = time.time()
-        
+
         # Generate simulation ID if not provided
         if id_prefix is None:
             sim_params = {
@@ -356,9 +481,64 @@ def simulate_data_rust(
             print(f"Using generated simulation ID: {id_prefix}")
         else:
             print(f"Using provided ID prefix: {id_prefix}")
-        
+
         simulator = Simulator()
-        
+
+        # Handle base compositions for contigs and spacers separately
+        contig_comp_obj = None
+        spacer_comp_obj = None
+
+        # Contig composition (use new params if provided, fallback to legacy params)
+        if contig_gc_content is not None:
+            contig_comp_obj = BaseComposition.from_gc_content(contig_gc_content)
+        elif all(
+            x is not None
+            for x in [contig_a_frac, contig_t_frac, contig_c_frac, contig_g_frac]
+        ):
+            contig_comp_obj = BaseComposition.from_fractions(
+                contig_a_frac, contig_t_frac, contig_c_frac, contig_g_frac
+            )
+        elif gc_content is not None:  # Fallback to legacy param
+            contig_comp_obj = BaseComposition.from_gc_content(gc_content)
+        elif all(
+            x is not None for x in [a_frac, t_frac, c_frac, g_frac]
+        ):  # Fallback to legacy param
+            contig_comp_obj = BaseComposition.from_fractions(
+                a_frac, t_frac, c_frac, g_frac
+            )
+        elif base_composition is not None:  # Fallback to legacy param
+            contig_comp_obj = base_composition
+
+        # Spacer composition (use new params if provided, fallback to legacy params)
+        if spacer_gc_content is not None:
+            spacer_comp_obj = BaseComposition.from_gc_content(spacer_gc_content)
+        elif all(
+            x is not None
+            for x in [spacer_a_frac, spacer_t_frac, spacer_c_frac, spacer_g_frac]
+        ):
+            spacer_comp_obj = BaseComposition.from_fractions(
+                spacer_a_frac, spacer_t_frac, spacer_c_frac, spacer_g_frac
+            )
+        elif gc_content is not None:  # Fallback to legacy param
+            spacer_comp_obj = BaseComposition.from_gc_content(gc_content)
+        elif all(
+            x is not None for x in [a_frac, t_frac, c_frac, g_frac]
+        ):  # Fallback to legacy param
+            spacer_comp_obj = BaseComposition.from_fractions(
+                a_frac, t_frac, c_frac, g_frac
+            )
+        elif base_composition is not None:  # Fallback to legacy param
+            spacer_comp_obj = base_composition
+
+        # Handle distribution types
+        contig_dist_obj = None
+        if contig_distribution is not None:
+            contig_dist_obj = DistributionType(contig_distribution)
+
+        spacer_dist_obj = None
+        if spacer_distribution is not None:
+            spacer_dist_obj = DistributionType(spacer_distribution)
+
         contigs_dict, spacers_dict, ground_truth = simulator.simulate_from_input_files(
             tuple(contig_length_range),
             tuple(spacer_length_range),
@@ -373,12 +553,16 @@ def simulate_data_rust(
             spacers,  # Pass file path if string, None otherwise
             data_subdir,
             debug,
+            contig_dist_obj,
+            spacer_dist_obj,
+            contig_comp_obj,
+            spacer_comp_obj,
         )
-        
+
         if debug:
             end_time = time.time()
             print(f"Simulation time when using Rust: {end_time - start_time} seconds")
-        
+
         # Convert the ground truth data types before creating DataFrame
         processed_ground_truth = [
             [
@@ -391,7 +575,7 @@ def simulate_data_rust(
             ]
             for row in ground_truth
         ]
-        
+
         ground_truth_df = pl.DataFrame(
             processed_ground_truth,
             schema={
@@ -402,19 +586,26 @@ def simulate_data_rust(
                 "strand": pl.Boolean,
                 "mismatches": pl.UInt32,
             },
+            orient="row",
         )
-        
+
         if verify:
-            verrify_df = verify_simulated_data(contigs_dict, spacers_dict, ground_truth_df)
+            verrify_df = verify_simulated_data(
+                contigs_dict, spacers_dict, ground_truth_df
+            )
             if (
-                verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches")).height
+                verrify_df.filter(
+                    pl.col("alignment_test") > pl.col("mismatches")
+                ).height
                 > 0
             ):
-                print(verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches")))
+                print(
+                    verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches"))
+                )
                 raise ValueError("Simulated data is not correct")
             else:
                 print("Simulated data is correct")
-        
+
         return contigs_dict, spacers_dict, ground_truth_df
 
     if threads is None:
@@ -445,25 +636,58 @@ def simulate_data_rust(
         print(f"Using provided ID prefix: {id_prefix}")
 
     simulator = Simulator()
-    
-    # Handle base composition
-    composition_obj = None
-    if base_composition is not None:
-        composition_obj = base_composition
-    elif gc_content is not None:
-        composition_obj = BaseComposition.from_gc_content(gc_content)
-    elif all(x is not None for x in [a_frac, t_frac, c_frac, g_frac]):
-        composition_obj = BaseComposition.from_fractions(a_frac, t_frac, c_frac, g_frac)
-    
+
+    # Handle base compositions for contigs and spacers separately
+    contig_comp_obj = None
+    spacer_comp_obj = None
+
+    # Contig composition (use new params if provided, fallback to legacy params)
+    if contig_gc_content is not None:
+        contig_comp_obj = BaseComposition.from_gc_content(contig_gc_content)
+    elif all(
+        x is not None
+        for x in [contig_a_frac, contig_t_frac, contig_c_frac, contig_g_frac]
+    ):
+        contig_comp_obj = BaseComposition.from_fractions(
+            contig_a_frac, contig_t_frac, contig_c_frac, contig_g_frac
+        )
+    elif gc_content is not None:  # Fallback to legacy param
+        contig_comp_obj = BaseComposition.from_gc_content(gc_content)
+    elif all(
+        x is not None for x in [a_frac, t_frac, c_frac, g_frac]
+    ):  # Fallback to legacy param
+        contig_comp_obj = BaseComposition.from_fractions(a_frac, t_frac, c_frac, g_frac)
+    elif base_composition is not None:  # Fallback to legacy param
+        contig_comp_obj = base_composition
+
+    # Spacer composition (use new params if provided, fallback to legacy params)
+    if spacer_gc_content is not None:
+        spacer_comp_obj = BaseComposition.from_gc_content(spacer_gc_content)
+    elif all(
+        x is not None
+        for x in [spacer_a_frac, spacer_t_frac, spacer_c_frac, spacer_g_frac]
+    ):
+        spacer_comp_obj = BaseComposition.from_fractions(
+            spacer_a_frac, spacer_t_frac, spacer_c_frac, spacer_g_frac
+        )
+    elif gc_content is not None:  # Fallback to legacy param
+        spacer_comp_obj = BaseComposition.from_gc_content(gc_content)
+    elif all(
+        x is not None for x in [a_frac, t_frac, c_frac, g_frac]
+    ):  # Fallback to legacy param
+        spacer_comp_obj = BaseComposition.from_fractions(a_frac, t_frac, c_frac, g_frac)
+    elif base_composition is not None:  # Fallback to legacy param
+        spacer_comp_obj = base_composition
+
     # Handle distribution types
     contig_dist_obj = None
     if contig_distribution is not None:
         contig_dist_obj = DistributionType(contig_distribution)
-    
+
     spacer_dist_obj = None
     if spacer_distribution is not None:
         spacer_dist_obj = DistributionType(spacer_distribution)
-    
+
     contigs, spacers, ground_truth = simulator.simulate_data(
         tuple(contig_length_range),
         tuple(spacer_length_range),
@@ -480,7 +704,8 @@ def simulate_data_rust(
         id_prefix,
         contig_dist_obj,
         spacer_dist_obj,
-        composition_obj,
+        contig_comp_obj,
+        spacer_comp_obj,
         data_subdir,
     )
 
@@ -512,7 +737,7 @@ def simulate_data_rust(
             "strand": pl.Boolean,
             "mismatches": pl.UInt32,
         },
-        orient="row"
+        orient="row",
     )
     if verify:
         verrify_df = verify_simulated_data(contigs, spacers, ground_truth_df)
@@ -528,14 +753,26 @@ def simulate_data_rust(
 
 
 def verify_simulated_data(
-    contigs,
-    spacers,
-    ground_truth,
-    return_fraction=False,
-    return_bool=False,
-    return_positive_only=False,
-):
-    """Verify the simulated data by checking the ground truth against the contigs and spacers."""
+    contigs: Union[dict[str, str], str],
+    spacers: Union[dict[str, str], str],
+    ground_truth: Union[pl.DataFrame, str],
+    return_fraction: bool = False,
+    return_bool: bool = False,
+    return_positive_only: bool = False,
+) -> Any:
+    """Verify the simulated data by checking the ground truth against the contigs and spacers.
+
+    Args:
+        contigs(dict[str, str] | str): Contig sequences or path to file
+        spacers(dict[str, str] | str): Spacer sequences or path to file
+        ground_truth(pl.DataFrame | str): Ground truth dataframe or path to TSV
+        return_fraction(bool): Return fraction instead of count
+        return_bool(bool): Return boolean result
+        return_positive_only(bool): Return only positive results
+
+    Returns:
+        Verification results
+    """
     if not isinstance(ground_truth, pl.DataFrame):
         if isinstance(ground_truth, str):
             ground_truth = pl.read_csv(ground_truth, separator="\t")
@@ -592,13 +829,27 @@ def verify_simulated_data(
     return verify_df
 
 
-def write_fasta(sequences, filename):
+def write_fasta(sequences: dict[str, str], filename: str) -> None:
+    """Write sequences to a FASTA file.
+
+    Args:
+        sequences(dict[str, str]): Dictionary of sequence_id -> sequence
+        filename(str): Output filename
+    """
     with open(filename, "w") as f:
         for seq_id, seq in sequences.items():
             f.write(f">{seq_id}\n{seq}\n")
 
 
-def read_fasta(filename):
+def read_fasta(filename: str) -> dict[str, str]:
+    """Read sequences from a FASTA file.
+
+    Args:
+        filename(str): Path to the FASTA file
+
+    Returns:
+        dict[str, str]: Dictionary of sequence_id -> sequence
+    """
     sequences = {}
     with open(filename, "r") as f:
         for line in f:
@@ -610,45 +861,41 @@ def read_fasta(filename):
     return sequences
 
 
-def run_tool(tool, results_dir, debug=False):
+def run_tool(tool: dict, results_dir: str, debug: bool = False) -> dict:
     """
     Run a tool either via its bash script (with hyperfine) or directly (debug mode).
-    
+
     Args:
-        tool: Tool configuration dictionary
-        results_dir: Results directory
-        debug: If True, run command directly without hyperfine wrapper for better error messages
-    
+        tool(dict): Tool configuration dictionary
+        results_dir(str): Results directory
+        debug(bool): If True, run command directly without hyperfine wrapper for better error messages
+
     Returns:
-        Timing data dictionary (empty dict in debug mode)
+        dict: Timing data dictionary (empty dict in debug mode)
     """
     if debug:
         # Debug mode: run the actual command directly, not the hyperfine wrapper
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"DEBUG: Running {tool['name']} directly")
-        print(f"{'='*60}")
-        
+        print(f"{'=' * 60}")
+
         # Get the mamba environment if specified
         mamba_env = tool.get("mamba_env", None)
-        
+
         # Build the command
         if mamba_env:
             # Activate mamba env and run command
             cmd = f'eval "$(micromamba shell hook --shell bash)" && micromamba activate {mamba_env} && {" ".join(tool["command"])}'
         else:
             cmd = " ".join(tool["command"])
-        
+
         print(f"Command: {cmd}\n")
-        
+
         # Run the command and capture output
         result = subprocess.run(
-            cmd,
-            shell=True,
-            capture_output=True,
-            text=True,
-            executable="/bin/bash"
+            cmd, shell=True, capture_output=True, text=True, executable="/bin/bash"
         )
-        
+
         # Print stdout and stderr
         if result.stdout:
             print("STDOUT:")
@@ -656,27 +903,40 @@ def run_tool(tool, results_dir, debug=False):
         if result.stderr:
             print("STDERR:")
             print(result.stderr)
-        
+
         # Check return code
         if result.returncode != 0:
             print(f"\n❌ Command failed with exit code {result.returncode}")
-            raise RuntimeError(f"Tool {tool['name']} failed with exit code {result.returncode}")
+            raise RuntimeError(
+                f"Tool {tool['name']} failed with exit code {result.returncode}"
+            )
         else:
-            print(f"\n✓ Command succeeded")
-        
-        print(f"{'='*60}\n")
+            print("\n✓ Command succeeded")
+
+        print(f"{'=' * 60}\n")
         return {}  # No timing data in debug mode
     else:
         # Normal mode: run via bash script with hyperfine
-        print(f"Running {tool['script_name']} in {results_dir}/bash_scripts/{tool['script_name']}")
+        print(
+            f"Running {tool['script_name']} in {results_dir}/bash_scripts/{tool['script_name']}"
+        )
         subprocess.run(f"{results_dir}/bash_scripts/{tool['script_name']}", shell=True)
-        
+
         with open(f"{results_dir}/raw_outputs/{tool['script_name']}.json", "r") as f:
             data = json.load(f)
         return data
 
 
-def create_bash_script(tool, results_dir, max_runs=1, warmups=0, hyperfine=True):
+def create_bash_script(tool: dict, results_dir: str, max_runs: int = 1, warmups: int = 0, hyperfine: bool = True) -> None:
+    """Create a bash script for running a tool with optional hyperfine benchmarking.
+
+    Args:
+        tool(dict): Tool configuration dictionary
+        results_dir(str): Results directory path
+        max_runs(int): Maximum number of runs for hyperfine
+        warmups(int): Number of warmup runs for hyperfine
+        hyperfine(bool): Whether to use hyperfine for benchmarking
+    """
     script_name = tool["script_name"]
     mamba_env = tool.get("mamba_env", None)
     if hyperfine:
@@ -709,30 +969,56 @@ def create_bash_script(tool, results_dir, max_runs=1, warmups=0, hyperfine=True)
         os.chmod(f"{results_dir}/bash_scripts/{script_name}", 0o755)
 
 
-def clean_everything(results_dir):
+def clean_everything(results_dir: str) -> None:
+    """Clean all output directories in the results directory.
+
+    Args:
+        results_dir(str): Path to the results directory
+    """
     os.system(f"rm -rf {results_dir}/raw_outputs/")
     os.system(f"rm -rf {results_dir}/bash_scripts/")
     os.system(f"rm -rf {results_dir}/results/")
     os.system(f"rm -rf {results_dir}/simulated_data/")
 
 
-def clean_before_rerun(tool_name, results_dir):
+def clean_before_rerun(tool_name: str, results_dir: str) -> None:
+    """Clean output files for a specific tool before rerunning.
+
+    Args:
+        tool_name(str): Name of the tool
+        results_dir(str): Path to the results directory
+    """
     os.system(f"rm -rf {results_dir}/raw_outputs/{tool_name}*tsv")
     os.system(f"rm -rf {results_dir}/raw_outputs/{tool_name}*sam")
     # os.system(f"rm -rf {results_dir}/bash_scripts/{tool_name}*") # generating scripts moved to generate_scripts.py
     os.system(f"rm -rf {results_dir}/raw_outputs/tmp*")
 
 
-def get_aln_len_from_cigar(cigar):
+def get_aln_len_from_cigar(cigar: str) -> int:
     """Calculate reference span from CIGAR string.
     Only M, D, N, =, X consume reference positions.
-    I, S, H do not consume reference positions."""
+    I, S, H do not consume reference positions.
+
+    Args:
+        cigar(str): CIGAR string
+
+    Returns:
+        int: Length of alignment on reference
+    """
     # Match operations that consume reference: M, D, N, =, X
     ref_consuming = re.findall(r"(\d+)[MDN=X]", cigar)
     return sum(int(num) for num in ref_consuming)
 
 
-def fix_cigar_for_pysamtools(cigar):
+def fix_cigar_for_pysamtools(cigar: str) -> str:
+    """Fix CIGAR string to ensure all operations have numeric lengths for pysamtools.
+
+    Args:
+        cigar(str): CIGAR string that may have missing lengths
+
+    Returns:
+        str: Fixed CIGAR string with all operations having lengths
+    """
     # if any character is not preceded by a digit, append to it 1
     # handle both standard CIGAR operators (A-Z) and extended operators (=,X)
     t = re.sub(r"([A-Z|=|X])(?!\d)([A-Z|=|X])", r"\g<1>1\g<2>", cigar, count=0)
@@ -742,12 +1028,32 @@ def fix_cigar_for_pysamtools(cigar):
         return t
 
 
-def get_mismatches_from_cigar(cigar):
+def get_mismatches_from_cigar(cigar: str) -> int:
+    """Extract the number of mismatches from CIGAR string (X operations).
+
+    Args:
+        cigar(str): CIGAR string
+
+    Returns:
+        int: Number of mismatches
+
+    Note:
+        Cigar string should be in extended format with X for mismatches
+    """
     return sum(int(num[:-1]) for num in re.findall(r"\d+X", cigar) or [0])
 
 
-def parse_samVext(sam_file, max_mismatches=5):
-    """Parse SAM file using the version 1.4 cigar strings, where = for matches, X for mismatches, I for insertions, D for deletions."""
+def parse_samVext(sam_file: str, max_mismatches: int = 5) -> pl.DataFrame:
+
+    """Parse SAM file using the version 1.4 cigar strings, where = for matches, X for mismatches, I for insertions, D for deletions.
+
+    Args:
+        sam_file (str): Path to the SAM file.
+        max_mismatches (int): Maximum mismatches allowed.
+
+    Returns:
+        pl.DataFrame: Parsed results.
+    """
     results = []
     with open(sam_file, "r") as f:
         for line in f:
@@ -801,7 +1107,8 @@ def parse_samVext(sam_file, max_mismatches=5):
                 "start": pl.UInt32,
                 "end": pl.UInt32,
                 "mismatches": pl.UInt32,
-            }
+            },
+            orient="row",
         )  # empty dataframe, so we can still join with other results
 
     # Create lists for each column
@@ -820,11 +1127,29 @@ def parse_samVext(sam_file, max_mismatches=5):
     return df.unique()
 
 
-def order_columns_to_match(df1_to_order, df2_to_match):
+def order_columns_to_match(df1_to_order: pl.DataFrame, df2_to_match: pl.DataFrame) -> pl.DataFrame:
+    """Select columns in df1 to match the order in df2.
+
+    Args:
+        df1_to_order: Dataframe to reorder.
+        df2_to_match: Reference dataframe.
+
+    Returns:
+        pl.DataFrame: Reordered dataframe.
+    """
     return df1_to_order.select(df2_to_match.columns)
 
 
-def cast_cols_to_match(df1_to_cast, df2_to_match):
+def cast_cols_to_match(df1_to_cast: pl.DataFrame, df2_to_match: pl.DataFrame) -> pl.DataFrame:
+    """Cast columns in df1 to match types in df2.
+
+    Args:
+        df1_to_cast: Dataframe to cast.
+        df2_to_match: Reference dataframe.
+
+    Returns:
+        pl.DataFrame: Casted dataframe.
+    """
     for col in df2_to_match.columns:
         df1_to_cast = df1_to_cast.with_columns(
             pl.col(col).cast(df2_to_match.schema[col])
@@ -832,70 +1157,111 @@ def cast_cols_to_match(df1_to_cast, df2_to_match):
     return df1_to_cast
 
 
-def vstack_easy(df1_to_stack, df2_to_stack):
+def vstack_easy(df1_to_stack: pl.DataFrame, df2_to_stack: pl.DataFrame) -> pl.DataFrame:
+    """Vstack two dataframes after matching column types and order.
+
+    Args:
+        df1_to_stack: Base dataframe.
+        df2_to_stack: Dataframe to append.
+
+    Returns:
+        pl.DataFrame: Combined dataframe.
+    """
     df2_to_stack = cast_cols_to_match(df2_to_stack, df1_to_stack)
     df2_to_stack = order_columns_to_match(df2_to_stack, df1_to_stack)
     return df1_to_stack.vstack(df2_to_stack)
 
 
-from pathlib import Path
 def parse_sassy(
-    sassy_file, 
-    max_mismatches=5, 
-    spacer_lendf=None, 
-    max_gaps=2, 
-    threads=10, 
-    output_prefix="sassy_parsed",
-    output_dir=".",
-    **kwargs
-):
+    sassy_file: str,
+    max_mismatches: int = 5,
+    spacer_lendf: Optional[pl.DataFrame] = None,
+    max_gaps: int = 1,
+    threads: int = 10,
+    output_prefix: str = "sassy_parsed",
+    output_dir: str = ".",
+    memory_limit: str = "50GB",
+    **kwargs,
+) -> pl.LazyFrame:
     """
     Parses Sassy TSV using DuckDB with caching capabilities.
     If a valid Parquet file already exists for the given prefix/date, it is loaded directly.
+
+    Args:
+        sassy_file (str): Input path.
+        max_mismatches (int): Mismatch threshold.
+        spacer_lendf (pl.DataFrame): Spacer lengths.
+        max_gaps (int): Gap threshold.
+        threads (int): CPU cores.
+        output_prefix (str): Cache filename prefix.
+        output_dir (str): Cache directory.
+        memory_limit (str): DuckDB RAM limit.
+
+    Returns:
+        pl.LazyFrame: Parsed results.
     """
+    from pathlib import Path
     import datetime
+
     output_dir = Path(sassy_file).parent
-    
+
     # 1. CONSTRUCT DETERMINISTIC PATH
     # Naming convention: {output_dir}/{prefix}_{YYYYMMDD}.parquet
     date_str = datetime.datetime.now().strftime("%Y%m%d")
     parquet_filename = f"{output_prefix}_{date_str}.parquet"
     parquet_path = os.path.join(output_dir, parquet_filename)
-    
+
     # 2. CACHE CHECK (RESUME LOGIC)
     if os.path.exists(parquet_path):
         print(f"Checking existing cache at: {parquet_path}")
         try:
-            # We try to scan the file. If the footer is missing (incomplete write), 
+            # We try to scan the file. If the footer is missing (incomplete write),
             # this will throw an error immediately.
             # Using scan_parquet().schema is a very fast metadata-only check.
-            existing_schema = pl.scan_parquet(parquet_path).schema
-            
+            existing_schema = pl.scan_parquet(parquet_path).collect_schema()
+
             # (Optional) Verify essential columns exist to ensure it's not an old version
             if "spacer_id" in existing_schema and "mismatches" in existing_schema:
-                print(">> Valid cache found! Skipping DuckDB processing.")
-                return pl.read_parquet(parquet_path)
+                print(
+                    ">> Valid cache found! Returning lazy frame (no materialization)."
+                )
+                # Return lazy frame - let read_results/DuckDB handle streaming
+                return pl.scan_parquet(parquet_path)
             else:
                 print(">> Cache exists but schema is incorrect. Reprocessing...")
         except Exception as e:
-            print(f">> Cache file exists but appears corrupt/incomplete ({e}). Reprocessing...")
-    
+            print(
+                f">> Cache file exists but appears corrupt/incomplete ({e}). Reprocessing..."
+            )
+
     # =========================================================================
     # START PROCESSING (Only if Cache Miss)
     # =========================================================================
-    
-    con = duckdb.connect(database=':memory:')
-    
-    # Hardware Tuning
+
+    # STRICT thread enforcement via environment variables
+    # These are set BEFORE DuckDB connection to take effect
+    # os.environ["OMP_NUM_THREADS"] = str(threads)  # OpenMP
+    # os.environ["OPENBLAS_NUM_THREADS"] = str(threads)  # OpenBLAS
+    # os.environ["MKL_NUM_THREADS"] = str(threads)  # Intel MKL
+    # os.environ["VECLIB_MAXIMUM_THREADS"] = str(threads)  # macOS veclib
+    # os.environ["NUMEXPR_NUM_THREADS"] = str(threads)  # NumExpr
+
+    print(
+        f"\n[ThreadControl] Setting environment variables for {threads} threads (Sassy)"
+    )
+
+    con = duckdb.connect(database=":memory:")
+
+    # Hardware Tuning - Control query parallelism
     con.execute(f"SET threads TO {threads};")
-    con.execute("SET preserve_insertion_order = false;") 
-    con.execute("SET memory_limit = '50GB';")
+    con.execute("SET preserve_insertion_order = false;")
+    con.execute(f"SET memory_limit = '{memory_limit}';")
 
     # Logic Definitions
     cigar_check = "length(cigar) - length(replace(replace(replace(cigar, 'I', ''), 'D', ''), 'N', ''))"
-    
+
     if max_gaps == 1:
-        gap_logic = f"{cigar_check} = 0" 
+        gap_logic = f"{cigar_check} = 0"
     else:
         gap_logic = f"""
             (CASE 
@@ -906,7 +1272,7 @@ def parse_sassy(
         """
 
     if spacer_lendf is not None:
-        con.register('spacer_lookup', spacer_lendf)
+        con.register("spacer_lookup", spacer_lendf)
         join_step = "INNER JOIN spacer_lookup s ON g.spacer_id = s.spacer_id"
         len_selection = "s.length AS spacer_length"
     else:
@@ -915,7 +1281,7 @@ def parse_sassy(
 
     try:
         print(f"Starting DuckDB Pipeline (Writing to: {parquet_path})...")
-        
+
         query = f"""
             COPY (
                 WITH 
@@ -962,152 +1328,70 @@ def parse_sassy(
             -- Write Config
             ) TO '{parquet_path}' (FORMAT 'PARQUET', COMPRESSION 'SNAPPY', ROW_GROUP_SIZE 100000);
         """
-        
+
         # Execute the write
         con.execute(query)
-        
-        # Final Read
-        print("Reading new Parquet file into Polars...")
+
+        # Return lazy frame without materialization
+        print("Returning lazy frame (no materialization).")
         if os.path.exists(parquet_path):
-            results = pl.read_parquet(parquet_path)
+            # Return lazy frame - let read_results/DuckDB handle streaming
+            results = pl.scan_parquet(parquet_path)
         else:
-            print("Warning: DuckDB finished but no file was created (empty result set?)")
-            results = pl.DataFrame(schema={
-                "spacer_id": pl.String, "contig_id": pl.String, "spacer_length": pl.UInt32,
-                "strand": pl.Boolean, "start": pl.UInt32, "end": pl.UInt32, "mismatches": pl.UInt32,
-            })
+            print(
+                "Warning: DuckDB finished but no file was created (empty result set?)."
+            )
+            results = pl.DataFrame(
+                schema={
+                    "spacer_id": pl.String,
+                    "contig_id": pl.String,
+                    "spacer_length": pl.UInt32,
+                    "strand": pl.Boolean,
+                    "start": pl.UInt32,
+                    "end": pl.UInt32,
+                    "mismatches": pl.UInt32,
+                },
+                orient="row",
+            ).lazy()
 
     except Exception as e:
         print(f"Failed to process Sassy file: {e}")
         # If the write crashed halfway, the file might be corrupt. Clean it up?
-        # Typically better to leave it for inspection or manual deletion, 
+        # Typically better to leave it for inspection or manual deletion,
         # but you can uncomment this if you prefer auto-cleanup:
         # if os.path.exists(parquet_path): os.remove(parquet_path)
-        
-        return pl.DataFrame(schema={
-            "spacer_id": pl.String, "contig_id": pl.String, "spacer_length": pl.UInt32,
-            "strand": pl.Boolean, "start": pl.UInt32, "end": pl.UInt32, "mismatches": pl.UInt32,
-        })
+
+        return pl.DataFrame(
+            schema={
+                "spacer_id": pl.String,
+                "contig_id": pl.String,
+                "spacer_length": pl.UInt32,
+                "strand": pl.Boolean,
+                "start": pl.UInt32,
+                "end": pl.UInt32,
+                "mismatches": pl.UInt32,
+            },
+            orient="row",
+        ).lazy()
 
     return results
 
-# def parse_sassy(sassy_file, max_mismatches=5, spacer_lendf=None, max_gaps=2, threads=10, **kwargs):
-#     #checking size
-#     # os.path.(sassy_file).
-#     con = duckdb.connect(database=':memory:')
-    
-#     # 1. Hardware Tuning
-#     con.execute(f"SET threads TO {threads};")
-#     con.execute("SET preserve_insertion_order = false;") # Crucial for parallel writing
-#     con.execute("SET memory_limit = '50GB';")
-    
-#     # Use a single temp file instead of a directory
-#     temp_file = f"temp_sassy_{uuid.uuid4()}.parquet"
 
-#     # 2. Logic Definitions
-#     cigar_check = "length(cigar) - length(replace(replace(replace(cigar, 'I', ''), 'D', ''), 'N', ''))"
-    
-#     if max_gaps == 1:
-#         gap_logic = f"{cigar_check} = 0" 
-#     else:
-#         gap_logic = f"""
-#             (CASE 
-#                 WHEN (cigar LIKE '%I%' OR cigar LIKE '%D%' OR cigar LIKE '%N%') 
-#                 THEN {cigar_check} <= {max_gaps}
-#                 ELSE TRUE 
-#             END)
-#         """
-
-#     if spacer_lendf is not None:
-#         con.register('spacer_lookup', spacer_lendf)
-#         join_step = "INNER JOIN spacer_lookup s ON g.spacer_id = s.spacer_id"
-#         len_selection = "s.length AS spacer_length"
-#     else:
-#         join_step = ""
-#         len_selection = "0 AS spacer_length"
-
-#     try:
-#         print(f"parsing sassy (duckdb) (Threads: {threads})...")
-        
-#         query = f"""
-#             COPY (
-#                 WITH 
-#                 -- STEP 1: SCAN & CHEAP FILTER
-#                 -- Pushed down to the CSV reader for maximum I/O speed
-#                 fast_filter AS (
-#                     SELECT 
-#                         spacer_id, contig_id, mismatches, strand, "start", "end", cigar
-#                     FROM read_csv(
-#                         '{sassy_file}', 
-#                         sep='\t', 
-#                         header=True, 
-#                         skip=1,
-#                         parallel=true,
-#                         auto_detect=false,
-#                         hive_partitioning=false,
-#                         columns={{
-#                             'spacer_id': 'VARCHAR', 'contig_id': 'VARCHAR', 
-#                             'mismatches': 'UINTEGER', 'strand': 'VARCHAR', 
-#                             'start': 'UINTEGER', 'end': 'UINTEGER',
-#                             'slice_str': 'VARCHAR', 'cigar': 'VARCHAR'
-#                         }}
-#                     )
-#                     WHERE mismatches <= {max_mismatches}
-#                 ),
-
-#                 -- STEP 2: EXPENSIVE FILTER
-#                 -- Runs only on survivors of Step 1
-#                 gap_filter AS (
-#                     SELECT * FROM fast_filter
-#                     WHERE {gap_logic}
-#                 )
-
-#                 -- STEP 3: JOIN & SELECT
-#                 SELECT 
-#                     g.spacer_id,
-#                     g.contig_id,
-#                     {len_selection},
-#                     (g.strand = '-') AS strand,
-#                     g."start",
-#                     g."end",
-#                     g.mismatches
-#                 FROM gap_filter g
-#                 {join_step}
-
-#             -- Write to a SINGLE Parquet file. 
-#             -- DuckDB handles parallel row-group writing automatically.
-#             ) TO '{temp_file}' (FORMAT 'PARQUET', COMPRESSION 'SNAPPY', ROW_GROUP_SIZE 100000);
-#         """
-        
-#         con.execute(query)
-        
-#         print("Reading Parquet back into Polars...")
-#         if os.path.exists(temp_file):
-#             # scan_parquet is generally faster/lighter than read_parquet for large files
-#             results = pl.scan_parquet(temp_file).collect()
-#         else:
-#             print("Warning: No results generated.")
-#             results = pl.DataFrame(schema={
-#                 "spacer_id": pl.String, "contig_id": pl.String, "spacer_length": pl.UInt32,
-#                 "strand": pl.Boolean, "start": pl.UInt32, "end": pl.UInt32, "mismatches": pl.UInt32,
-#             })
-
-#     except Exception as e:
-#         print(f"Failed to process Sassy file: {e}")
-#         return pl.DataFrame(schema={
-#             "spacer_id": pl.String, "contig_id": pl.String, "spacer_length": pl.UInt32,
-#             "strand": pl.Boolean, "start": pl.UInt32, "end": pl.UInt32, "mismatches": pl.UInt32,
-#         })
-#     finally:
-#         if os.path.exists(temp_file):
-#             os.remove(temp_file)
-
-#     return results
-
-def parse_sassy_polars(sassy_file, max_mismatches=5, spacer_lendf=None, max_gaps=2, **kwargs):
+def parse_sassy_polars(
+    sassy_file: str, max_mismatches: int = 5, spacer_lendf: Optional[pl.DataFrame] = None, max_gaps: int = 2, **kwargs
+) -> pl.DataFrame:
     """Parse Sassy TSV output format and return standardized coordinates.
     Sassy output format:
     pat_id	text_id	cost	strand	start	end	match_region	cigar
+
+    Args:
+        sassy_file (str): Input path.
+        max_mismatches (int): Maximum mismatches allowed.
+        spacer_lendf (pl.DataFrame): Length info for spacers.
+        max_gaps (int): Maximum gaps allowed in CIGAR.
+
+    Returns:
+        pl.DataFrame: Cleaned results.
     """
 
     try:
@@ -1116,23 +1400,27 @@ def parse_sassy_polars(sassy_file, max_mismatches=5, spacer_lendf=None, max_gaps
             separator="\t",
             skip_lines=1,
             schema={
-                "spacer_id":pl.Utf8,
-                "contig_id":pl.Utf8,
-                "mismatches":pl.UInt32,
-                "strand":pl.Utf8,
-                "start":pl.UInt32,
-                "end":pl.UInt32,
-                "slice_str":pl.Utf8,
-                "cigar":pl.Utf8,
+                "spacer_id": pl.Utf8,
+                "contig_id": pl.Utf8,
+                "mismatches": pl.UInt32,
+                "strand": pl.Utf8,
+                "start": pl.UInt32,
+                "end": pl.UInt32,
+                "slice_str": pl.Utf8,
+                "cigar": pl.Utf8,
             },
         ).drop("slice_str")
 
         if max_gaps == 1:
-                results = results.filter(~pl.col("cigar").str.contains_any(patterns=["I","D","N"]))
+            results = results.filter(
+                ~pl.col("cigar").str.contains_any(patterns=["I", "D", "N"])
+            )
         else:
-                results = results.filter(~pl.col("cigar").str.count_matches(r"I|D|N")>max_gaps)
+            results = results.filter(
+                ~pl.col("cigar").str.count_matches(r"I|D|N") > max_gaps
+            )
 
-    # Filter by max_mismatches
+        # Filter by max_mismatches
         results = results.filter(pl.col("mismatches") <= max_mismatches)
 
     except Exception as e:
@@ -1146,7 +1434,8 @@ def parse_sassy_polars(sassy_file, max_mismatches=5, spacer_lendf=None, max_gaps
                 "start": pl.UInt32,
                 "end": pl.UInt32,
                 "mismatches": pl.UInt32,
-            }
+            },
+            orient="row",
         )
 
     # Convert strand from string to boolean
@@ -1181,12 +1470,21 @@ def parse_sassy_polars(sassy_file, max_mismatches=5, spacer_lendf=None, max_gaps
     return results
 
 
-def parse_blastn_custom(blastn_file, max_mismatches=5, spacer_lendf=None, **kwargs):
+def parse_blastn_custom(blastn_file: str, max_mismatches: int = 5, spacer_lendf: Optional[pl.DataFrame] = None, **kwargs) -> pl.DataFrame:
     """Parse a custom BLAST or mmseqs output format
     (query,target,nident,alnlen,mismatch,qlen,gapopen,qstart,qend,tstart,tend,evalue,bits)
     and return standardized coordinates (1-based).
     BLAST format uses 1-based coordinates.
-    Filter out rows with more than max_mismatches mismatches. (i.e. retain up to (including) max_mismatches mismatches)"""
+    Filter out rows with more than max_mismatches mismatches. (i.e. retain up to (including) max_mismatches mismatches)
+
+    Args:
+        blastn_file (str): Input path.
+        max_mismatches (int): Mismatch limit.
+        spacer_lendf (pl.DataFrame): Length info.
+
+    Returns:
+        pl.DataFrame: Standardized results.
+    """
     try:
         results = pl.read_csv(
             blastn_file,
@@ -1221,7 +1519,7 @@ def parse_blastn_custom(blastn_file, max_mismatches=5, spacer_lendf=None, **kwar
                 .struct.field(["tstart", "tend"])
             )
         # results = results.with_columns(
-        #     pl.col("spacer_id").cast(pl.Utf8)
+        #      pl.col("spacer_id").cast(pl.Utf8)
         # )
     except Exception as e:
         print(
@@ -1236,7 +1534,8 @@ def parse_blastn_custom(blastn_file, max_mismatches=5, spacer_lendf=None, **kwar
                 "start": pl.UInt32,
                 "end": pl.UInt32,
                 "mismatches": pl.UInt32,
-            }
+            },
+            orient="row",
         )
 
     results = results.with_columns(pl.col("spacer_id").cast(pl.Utf8))
@@ -1276,7 +1575,7 @@ def parse_blastn_custom(blastn_file, max_mismatches=5, spacer_lendf=None, **kwar
     return results
 
 
-def parse_lexicmap(tsv_file, max_mismatches=5, spacer_lendf=None, **kwargs):
+def parse_lexicmap(tsv_file: str, max_mismatches: int = 5, spacer_lendf: Optional[pl.DataFrame] = None, **kwargs) -> pl.DataFrame:
     """Parse LexicMap TSV output format and return standardized coordinates.
 
     LexicMap output columns (1-based positions):
@@ -1302,10 +1601,17 @@ def parse_lexicmap(tsv_file, max_mismatches=5, spacer_lendf=None, **kwargs):
     19. evalue,   Expect value.
     20. bitscore, Bit score.
     21. cigar,    CIGAR string of the alignment.                      (optional with -a/--all)
-    22. qseq,     Aligned part of query sequence.                     (optional with -a/--all)
-    23. sseq,     Aligned part of subject sequence.                   (optional with -a/--all)
+    22. qseq,     Aligned part of query sequence.                      (optional with -a/--all)
+    23. sseq,     Aligned part of subject sequence.                    (optional with -a/--all)
     24. align,    Alignment text ("|" and " ") between qseq and sseq. (optional with -a/--all)
 
+    Args:
+        tsv_file (str): Input path.
+        max_mismatches (int): Mismatch threshold.
+        spacer_lendf (pl.DataFrame): Length lookup.
+
+    Returns:
+        pl.DataFrame: Results in standard format.
     """
     try:
         results = pl.read_csv(
@@ -1314,11 +1620,13 @@ def parse_lexicmap(tsv_file, max_mismatches=5, spacer_lendf=None, **kwargs):
             has_header=True,
             infer_schema_length=100000,
         )
-        results = results.rename({
-            "query": "spacer_id",
-            "sseqid": "contig_id",
-            "sstr": "strand",
-        })
+        results = results.rename(
+            {
+                "query": "spacer_id",
+                "sseqid": "contig_id",
+                "sstr": "strand",
+            }
+        )
         if results.height == 0:
             raise ValueError(f"No results found in {tsv_file}")
     except Exception as e:
@@ -1334,9 +1642,10 @@ def parse_lexicmap(tsv_file, max_mismatches=5, spacer_lendf=None, **kwargs):
                 "start": pl.UInt32,
                 "end": pl.UInt32,
                 "mismatches": pl.UInt32,
-            }
+            },
+            orient="row",
         )
-        
+
     # results = results.filter(pl.col("alenHSP") >= 17, pl.col("gaps") == 0) # we don't really need this here, but keeping commented to remember it was done previously. Potentially, with a max mismatch >3 this could have over restrict the max mismatch arguments values.
     results = results.with_columns(pl.col("spacer_id").cast(pl.Utf8))
     results = results.with_columns(
@@ -1346,8 +1655,8 @@ def parse_lexicmap(tsv_file, max_mismatches=5, spacer_lendf=None, **kwargs):
     results = spacer_lendf.join(results, on="spacer_id", how="inner")
     results = results.with_columns(
         (pl.col("length") - pl.col("matches")).alias("mismatches"),
-        (pl.col("sstart") - 1).alias("start"), # 1-based
-        (pl.col("send")).alias("end"), # 1-based
+        (pl.col("sstart") - 1).alias("start"),  # 1-based
+        (pl.col("send")).alias("end"),  # 1-based
     )
     results = results.filter(pl.col("mismatches") <= max_mismatches)
     results = results.rename({"length": "spacer_length"})
@@ -1364,11 +1673,18 @@ def parse_lexicmap(tsv_file, max_mismatches=5, spacer_lendf=None, **kwargs):
     return results
 
 
-def parse_samVn_with_lens_polars(
-    sam_file, spacer_lendf, max_mismatches=5
-):
+def parse_samVn_with_lens_polars(sam_file: str, spacer_lendf: pl.DataFrame, max_mismatches: int = 5) -> pl.DataFrame:
     """Parse SAM file using spacer lengths for qlen and numerics in CIGAR for alignment length
-    uses polars to speed up things"""
+    uses polars to speed up things
+
+    Args:
+        sam_file (str): Path to SAM.
+        spacer_lendf (pl.DataFrame): Spacer lengths.
+        max_mismatches (int): Filter threshold.
+
+    Returns:
+        pl.DataFrame: Parsed alignments.
+    """
     # First read mandatory columns
     mandatory_sam_cols = [
         "spacer_id",
@@ -1423,10 +1739,10 @@ def parse_samVn_with_lens_polars(
             tags_df = tags_df.filter(~pl.col("index").is_in(unmmaped_lines_idx))
 
         # tags_df = tags_df.with_columns(
-        #     pl.col("tags").str.split( "\t").list.gather_every(n=1,offset=11).alias("tags")
+        #      pl.col("tags").str.split( "\t").list.gather_every(n=1,offset=11).alias("tags")
         # )
         # tags_df = tags_df.with_columns(
-        #     pl.col("tags").list.len().alias("tag_lengths")
+        #      pl.col("tags").list.len().alias("tag_lengths")
         # )
         nm_tag = "nm:i:" if tags_df["tags"][1].count("NM:i:") == 0 else "NM:i:"
         tags_df = tags_df.with_columns(
@@ -1446,11 +1762,12 @@ def parse_samVn_with_lens_polars(
                 "start": pl.UInt32,
                 "end": pl.UInt32,
                 "mismatches": pl.UInt32,
-            }
+            },
+            orient="row",
         )
 
     # Continue with existing processing
-    sam_df = sam_df.with_columns((pl.col("start") - 1).alias("start")) # sam is 1-based
+    sam_df = sam_df.with_columns((pl.col("start") - 1).alias("start"))  # sam is 1-based
     sam_df = sam_df.with_columns(
         [
             pl.when(pl.col("flag") == 16)
@@ -1512,12 +1829,30 @@ def parse_samVn_with_lens_polars(
 
 
 def parse_sam(
-    sam_file, spacer_lendf, max_mismatches=5, threads=4, ref_file=None, gaps_as_mismatches=False, **kwargs
-):
+    sam_file: str,
+    spacer_lendf: pl.DataFrame,
+    max_mismatches: int = 5,
+    threads: int = 4,
+    ref_file: Optional[str] = None,
+    gaps_as_mismatches: bool = False,
+    **kwargs,
+) -> pl.DataFrame:
     """Parse SAM file using pysam and spacer lengths to compute mismatches
-    RENAMED FROM parse_samVn_with_lens_pysam """
-    
-    try:  
+    RENAMED FROM parse_samVn_with_lens_pysam
+
+    Args:
+        sam_file (str): Input path.
+        spacer_lendf (pl.DataFrame): Length lookup.
+        max_mismatches (int): Filter limit.
+        threads (int): Worker threads.
+        ref_file (str): Reference FASTA.
+        gaps_as_mismatches (bool): NM calculation logic.
+
+    Returns:
+        pl.DataFrame: Parsed results.
+    """
+
+    try:
         sam_file = verify_sam_file(sam_file, ref_file)
     except Exception as e:
         print(f"Failed to verify SAM file {sam_file}: {e}, returning empty dataframe")
@@ -1530,8 +1865,9 @@ def parse_sam(
                 "start": pl.UInt32,
                 "end": pl.UInt32,
                 "mismatches": pl.UInt32,
-            }
-    )
+            },
+            orient="row",
+        )
 
     results = []
     # Create a dictionary for quick spacer length lookups - TODO: maybe there's a faster native polars way to do this.
@@ -1551,22 +1887,20 @@ def parse_sam(
             # spacer_len = read.infer_read_length() #
             # ## Get hard clipped length
             # hard_clipped = sum(length for op, length in read.cigartuples
-            #                  if op == 5)  # H operation
+            #                   if op == 5)  # H operation
             # # if hard_clipped > 0:
-            # #     print(f"Hard clipped {hard_clipped} for {read.query_name}")
-            # #     # break
+            # #      print(f"Hard clipped {hard_clipped} for {read.query_name}")
+            # #      # break
             # if spacer_len == 0: # some alignments get 0 length, maybe because some tools do not output the sequence for secondary/ambiguous alignments. I suspect pysam get's the query length from the nchar of the seq.
-            #     # print (f"spacer_len == 0 for {read.query_name}, extracting alignment info from cigar")
+            #      # print (f"spacer_len == 0 for {read.query_name}, extracting alignment info from cigar")
             # # Get spacer length from reference table instead of query sequence
-            #     spacer_len = spacer_lens.get(read.query_name)
+            #      spacer_len = spacer_lens.get(read.query_name)
             # else:
-            #     spacer_len = spacer_len + hard_clipped
-            #     # print(f"{spacer_len}")
-            #     # break
+            #      spacer_len = spacer_len + hard_clipped
+            #      # print(f"{spacer_len}")
+            #      # break
             if spacer_len is None:
-                print(
-                    f"Warning: spacer {read.query_name} not found in reference table"
-                )
+                print(f"Warning: spacer {read.query_name} not found in reference table")
                 break
             # Get alignment infto_string()
             # strand = '-' if read.is_reverse else '+'
@@ -1578,18 +1912,17 @@ def parse_sam(
                 read.get_reference_positions(full_length=False)
             )
             # aligned_length = sum(length for op, length in read.cigartuples
-            #                   if op in [0, 7, 8])  # M, =, X operations
+            #                    if op in [0, 7, 8])  # M, =, X operations
 
             # # # Get soft clipped length
             soft_clipped = sum(
                 length for op, length in read.cigartuples if op == 4
             )  # "S" operation
 
-
-            #debug
+            # debug
             # if soft_clipped > 0:
-            #     print(f"Soft clipped {soft_clipped} for {read.query_name}")
-            #     break
+                #  print(f"Soft clipped {soft_clipped} for {read.query_name}")
+                 # break
             # Get edit distance from NM tag  (counts non-identical positions including gaps)
             nm = (read.get_tag("NM") if read.has_tag("NM") else 0) + soft_clipped
 
@@ -1623,18 +1956,32 @@ def parse_sam(
             "start": pl.UInt32,
             "end": pl.UInt32,
             "mismatches": pl.UInt32,
-        },orient="row"
+        },
+        orient="row",
     ).unique()
 
 
 def plot_matrix(
-    matrix,
-    title,
-    filename,
-    hor_axis="pairs in tool",
-    vert_axis="pairs not in tool",
-    return_chart=True,
-):
+    matrix: pl.DataFrame,
+    title: str,
+    filename: str,
+    hor_axis: str = "pairs in tool",
+    vert_axis: str = "pairs not in tool",
+    return_chart: bool = True,
+) -> Any:
+    """Create a heatmap matrix plot using Altair.
+
+    Args:
+        matrix (pl.DataFrame): Input matrix data.
+        title (str): Chart title.
+        filename (str): Output file path base.
+        hor_axis (str): Horizontal axis title.
+        vert_axis (str): Vertical axis title.
+        return_chart (bool): If True, returns the altair object.
+
+    Returns:
+        Optional[alt.Chart]: The generated chart.
+    """
     import altair as alt
 
     # Rename the tool1 column to 'in_tool'
@@ -1654,21 +2001,6 @@ def plot_matrix(
     # Reorder the columns to match the sorted rows
     ordered_cols = ["in_tool"] + sorted_tools
     matrix = matrix.select([col for col in ordered_cols if col in matrix.columns])
-
-    # Convert to percentages if requested
-    # if as_percent:
-    #     # Get total matches for each tool
-    #     tool_totals = matrix.group_by('in_tool').agg(
-    #         pl.len().alias('total_matches')
-    #     ).to_dict(as_series=False)
-    #     tool_totals = dict(zip(tool_totals['in_tool'], tool_totals['total_matches']))
-
-    #     # Convert counts to percentages
-    #     for tool in sorted_tools:
-    #         if tool != 'in_tool':
-    #             matrix = matrix.with_columns(
-    #                 (pl.col(tool) * 100 / tool_totals[tool]).alias(tool)
-    #             )
 
     # Convert the matrix to long form for Altair
     melted = matrix.melt(
@@ -1736,8 +2068,18 @@ def plot_matrix(
 
 
 def parse_tab(
-    output_file, max_mismatches=5, spacer_lendf=None, **kwargs
-):  # expecting tab file with columns: spacer_id, contig_id, start, end, strand - because Antonio insists.
+    output_file: str, max_mismatches: int = 5, spacer_lendf: Optional[pl.DataFrame] = None, **kwargs
+) -> pl.DataFrame:
+    """expecting tab file with columns: spacer_id, contig_id, start, end, strand - because Antonio insists.
+
+    Args:
+        output_file (str): Input path.
+        max_mismatches (int): Ignored here as mismatches are set to 0.
+        spacer_lendf (pl.DataFrame): Length info.
+
+    Returns:
+        pl.DataFrame: Cleaned results.
+    """
     try:
         results = pl.read_csv(
             output_file,
@@ -1757,7 +2099,8 @@ def parse_tab(
                 "start": pl.UInt32,
                 "end": pl.UInt32,
                 "mismatches": pl.UInt32,
-            }
+            },
+            orient="row",
         )
 
     results = results.with_columns(
@@ -1785,7 +2128,15 @@ def parse_tab(
     ).unique()
 
 
-def parse_hyperfine_output(json_file):
+def parse_hyperfine_output(json_file: str) -> Optional[pl.DataFrame]:
+    """Parse hyperfine JSON output into a Polars DataFrame.
+
+    Args:
+        json_file (str): Path to the hyperfine results file.
+
+    Returns:
+        Optional[pl.DataFrame]: Dataframe with timing info or None on failure.
+    """
     try:
         with open(json_file, "r") as f:
             data = json.load(f)
@@ -1800,7 +2151,9 @@ def parse_hyperfine_output(json_file):
     time_info = pl.DataFrame(
         {
             "mean_time": result["mean"],
-            "stddev_time": result["stddev"] if result["stddev"] is not None else 0.0, # need to debug this
+            "stddev_time": result["stddev"]
+            if result["stddev"] is not None
+            else 0.0,  # need to debug this
             "median_time": result["median"],
             "user_time": result["user"],
             "system_time": result["system"],
@@ -1814,7 +2167,16 @@ def parse_hyperfine_output(json_file):
     return time_info
 
 
-def read_hyperfine_results(tools, results_dir):
+def read_hyperfine_results(tools: dict, results_dir: str) -> pl.DataFrame:
+    """Read and aggregate hyperfine results for all tools.
+
+    Args:
+        tools (dict): Tool configurations.
+        results_dir (str): Working directory.
+
+    Returns:
+        pl.DataFrame: Aggregated timing metrics.
+    """
     results = pl.DataFrame(
         schema={
             "mean_time": pl.Float64,
@@ -1826,7 +2188,8 @@ def read_hyperfine_results(tools, results_dir):
             "max_time": pl.Float64,
             "command": pl.Utf8,
             "tool": pl.Utf8,
-        }
+        },
+        orient="row",
     )
     for tool in tools.values():
         try:
@@ -1839,14 +2202,14 @@ def read_hyperfine_results(tools, results_dir):
     return results
 
 
-def run_tools(tools, results_dir, debug=False):
+def run_tools(tools: dict, results_dir: str, debug: bool = False) -> None:
     """
     Run multiple tools.
-    
+
     Args:
-        tools: Dictionary of tool configurations
-        results_dir: Results directory
-        debug: If True, run commands directly without hyperfine for better error messages
+        tools(dict): Dictionary of tool configurations
+        results_dir(str): Results directory
+        debug(bool): If True, run commands directly without hyperfine for better error messages
     """
     for tool in tools.values():
         try:
@@ -1859,14 +2222,28 @@ def run_tools(tools, results_dir, debug=False):
 
 
 def get_seq_from_fastx(
-    seqfile,
-    seq_ids,
-    return_dict=False,
-    return_df=True,
-    idcol="contig_id",
-    seqcol="contig_seq",
-    output_file=None,
-):
+    seqfile: str,
+    seq_ids: Union[str, list[str], pl.DataFrame],
+    return_dict: bool = False,
+    return_df: bool = True,
+    idcol: str = "contig_id",
+    seqcol: str = "contig_seq",
+    output_file: Optional[str] = None,
+) -> Any:
+    """Extract specific sequences from a FASTX file using pyfastx or seqkit.
+
+    Args:
+        seqfile (str): Input path.
+        seq_ids: Identifiers to extract.
+        return_dict (bool): Return as mapping.
+        return_df (bool): Return as Polars DF.
+        idcol (str): ID column name.
+        seqcol (str): Sequence column name.
+        output_file (str): If provided, writes to file instead of returning objects.
+
+    Returns:
+        Any: List, Dict, DataFrame, or file path.
+    """
     if isinstance(seq_ids, str):
         seq_ids = [seq_ids]
     if isinstance(seq_ids, pl.DataFrame):
@@ -1898,6 +2275,7 @@ def get_seq_from_fastx(
             return pl.DataFrame({idcol: found_ids, seqcol: seqs[1::2]})
     else:
         import pyfastx as pfx
+
         with open(output_file, "w") as f:
             fa = pfx.Fasta(seqfile)
             # load all sequence names into a set object
@@ -1909,7 +2287,19 @@ def get_seq_from_fastx(
         return output_file
 
 
-def soft_fetch_fastx(fa, id, start=None, end=None, strand=None):
+def soft_fetch_fastx(fa: pfx.Fasta, id: str, start: Optional[int] = None, end: Optional[int] = None, strand: Optional[str] = None) -> Optional[str]:
+    """Safely fetch a sequence or sub-sequence from a pyfastx Fasta object.
+
+    Args:
+        fa: Pyfastx Fasta object.
+        id (str): Sequence ID.
+        start (int): Start coordinate.
+        end (int): End coordinate.
+        strand (str): '+' or '-'.
+
+    Returns:
+        Optional[str]: Sequence string or None if not found.
+    """
     if start is not None and end is not None and strand is not None:
         try:
             return fa.fetch(id, (start, end), strand)
@@ -1923,17 +2313,17 @@ def soft_fetch_fastx(fa, id, start=None, end=None, strand=None):
 
 
 def populate_pldf_from_fastx(
-    seqfile,
+    seqfile: str,
     pldf: pl.DataFrame,
-    trim_to_region=False,
-    idcol="contig_id",
-    start_col="start",
-    end_col="end",
-    strand_col="strand",
-    seqcol="contig_seq",
-    drop_missing=True,
+    trim_to_region: bool = False,
+    idcol: str = "contig_id",
+    start_col: str = "start",
+    end_col: str = "end",
+    strand_col: str = "strand",
+    seqcol: str = "contig_seq",
+    drop_missing: bool = True,
     **kwargs,
-):
+) -> pl.DataFrame:
     """Get sequences from a fasta file using pyfastx.
     sequences will be extracted from the start-1 to the end position.
     If strand_col is provided, the extracted sequences will be reverse complemented if the strand is boolean True.
@@ -1988,7 +2378,7 @@ def populate_pldf_from_fastx(
     # time_start = time.time()
     # tmpdf = tmpdf.with_columns(
     # pl.struct(pl.col(idcol), pl.col("start_0based"), pl.col(end_col), pl.col("strand4bed")).map_elements(lambda x: soft_fetch_fastx(fa, x[idcol], x["start_0based"], x[end_col], x["strand4bed"]),strategy="threading", return_dtype=pl.Utf8).alias(seqcol)
-    #     )
+    #      )
     # time_end = time.time() # 17.89 seconds (no threading) 16.66 seconds (threading)
     # print(f"Time taken: {time_end - time_start:.2f} seconds")
 
@@ -2000,38 +2390,42 @@ def populate_pldf_from_fastx(
     return pldf
 
 
-# # # test
-# one_mismatch = pl.read_parquet('results/real_data/results/one_mismatch.parquet')
-# seqfile = 'results/real_data/results/matched_contigs.fna'
-# pldf = one_mismatch[range(10000)]
-# idcol = "contig_id"
-# seqcol = "contig_seq"
-# start_col = "start"
-# end_col = "end"
-# strand_col = "strand"
-# test = populate_pldf_from_fastx (seqfile=seqfile, pldf=pldf, idcol=idcol, start_col=start_col, end_col=end_col, strand_col=strand_col, seqcol=seqcol)
-
-
 def populate_pldf_withseqs(
     pldf: pl.DataFrame,
-    seqfile,
-    chunk_size=2000,
-    drop_missing=True,
-    trim_to_region=False,
-    reverse_by_strand_col=False,
-    idcol="contig_id",
-    seqcol="contig_seq",
-    strand_col="strand",
+    seqfile: str,
+    chunk_size: int = 2000,
+    drop_missing: bool = True,
+    trim_to_region: bool = False,
+    reverse_by_strand_col: bool = False,
+    idcol: str = "contig_id",
+    seqcol: str = "contig_seq",
+    strand_col: str = "strand",
     **kwargs,
-):
+) -> pl.DataFrame:
+    """Populate a Polars DataFrame with sequences from a FASTX file using chunked extraction.
+
+    Args:
+        pldf: Target dataframe.
+        seqfile: Sequence file path.
+        chunk_size: Processing chunk size.
+        drop_missing: Drop rows where sequence isn't found.
+        trim_to_region: Trim sequence to coordinates.
+        reverse_by_strand_col: Reverse complement if strand is True.
+        idcol: ID column name.
+        seqcol: Output sequence column name.
+        strand_col: Strand column name.
+
+    Returns:
+        pl.DataFrame: Populated dataframe.
+    """
     # Note! if a "strand" column is present, and reverse_by_strand_col is True, it will be used to get the reverse complement of the sequence.
     # If drop_missing is True, it will drop any contig_ids that are not present in the sequence file. If no seqids were found, it will return the input dataframe.
     # NOTE: trim_to_region and reverse_by_strand_col are bugged when using slice, even though it's probably much faster.
     # get the unique contig_ids and strands
     stranded = strand_col in pldf.columns and reverse_by_strand_col
     # if stranded:
-    #     nr_contigids = pldf[[idcol,strand_col]].unique()
-    #     # print("rev true")
+    #      nr_contigids = pldf[[idcol,strand_col]].unique()
+    #      # print("rev true")
     # else:
     nr_contigids = pl.DataFrame({idcol: pldf[idcol].unique()})
     # print("rev false")
@@ -2115,34 +2509,36 @@ def populate_pldf_withseqs(
 
     return pldf
 
-    # debug
-    # test = tools_results[range(100000)]
-    # test2= populate_pldf_withseqs(seqfile=seqfile,chunk_size=12000, pldf=test, drop_missing=True, reverse_by_strand_col=False)
-    # pldf=tools_results[range(10000)]
-    # and add a few a null, empty string, or nan
-    # pldf_null = pldf[range(4)].with_columns(
-    #     pl.lit(None).alias("contig_id"),
-    # )
-    # pldf_empty = pldf[range(4)].with_columns(
-    #     pl.lit("").alias("contig_id"),
-    # )
-    # pldf = pldf.vstack(pldf_null).vstack(pldf_empty)
-
-    # pldf = pldf.vstack()
-
 
 def populate_pldf_withseqs_needletail(
     pldf: pl.DataFrame,
-    seqfile,
-    chunk_size=20000000,
-    trim_to_region=True,
-    reverse_by_strand_col=True,
-    idcol="contig_id",
-    seqcol="contig_seq",
-    start_col="start",
-    end_col="end",
-    strand_col="strand",
-):
+    seqfile: str,
+    chunk_size: int = 20000000,
+    trim_to_region: bool = True,
+    reverse_by_strand_col: bool = True,
+    idcol: str = "contig_id",
+    seqcol: str = "contig_seq",
+    start_col: str = "start",
+    end_col: str = "end",
+    strand_col: str = "strand",
+) -> pl.DataFrame:
+    """Populate Polars DF using needletail for fast parsing and processing.
+
+    Args:
+        pldf: Target dataframe.
+        seqfile: Sequence file.
+        chunk_size: Max records per processing batch.
+        trim_to_region: Trim sequence.
+        reverse_by_strand_col: Rev-comp if strand is True.
+        idcol: ID col name.
+        seqcol: Output sequence col.
+        start_col: Start coordinate.
+        end_col: End coordinate.
+        strand_col: Strand boolean col.
+
+    Returns:
+        pl.DataFrame: Updated dataframe.
+    """
     merge_cols = [idcol]
     if reverse_by_strand_col:
         merge_cols.append(strand_col)
@@ -2179,7 +2575,7 @@ def populate_pldf_withseqs_needletail(
         )
     # seq_count = 0
     # for _ in parse_fastx_file(seqfile):
-    #     seq_count += 1
+    #      seq_count += 1
     print(f"Actual number of sequences in file: {seq_count}")
 
     # Reset file iterator
@@ -2203,7 +2599,15 @@ def populate_pldf_withseqs_needletail(
             if trim_to_region:
                 print("Trimming sequences")
                 # print(chunk_seqs.columns)
+                # chunk_seqs = chunk_seqs.with_columns(len_toextract=pl.col(end_col)-pl.col(start_col) + 1)
                 chunk_seqs = chunk_seqs.with_columns(
+                #     pl.col(seqcol).str.slice(
+                #         offset=pl.col(start_col) -1,
+                #         length="len_toextract"                        
+                #     ).alias(seqcol)
+                # )
+                            # ,  # is polars 0-based coordinated?
+                # print (chunk_seqs[seqcol].head(10))
                     pl.struct(pl.col(seqcol), pl.col(start_col), pl.col(end_col))
                     .map_elements(
                         lambda x: str(x[seqcol][x[start_col] : x[end_col]])
@@ -2250,9 +2654,17 @@ def populate_pldf_withseqs_needletail(
     return pldf
 
 
-def test_alignment_from_faidx(spacers_file, contigs_file, alignment, **kwargs):
+def test_alignment_from_faidx(spacers_file: str, contigs_file: str, alignment: pl.DataFrame, **kwargs) -> bool:
     """Test if an alignment matches between spacer and contig files using pyfastx.
     alignment is a single row extracted from a pl.df results  (spacer_id, contig_id, spacer_length, start, end, strand, mismatches, tool)
+
+    Args:
+        spacers_file: Path to spacer FASTA.
+        contigs_file: Path to contig FASTA.
+        alignment: Single-row dataframe.
+
+    Returns:
+        bool: True if alignment verification passes.
     """
 
     contig_seq = get_seq_from_fastx(contigs_file, alignment["contig_id"][0])
@@ -2276,20 +2688,37 @@ def test_alignment_from_faidx(spacers_file, contigs_file, alignment, **kwargs):
 
 
 def prettify_alignment(
-    spacer_seq,
-    contig_seq,
-    strand=False,
-    start=None,
-    end=None,
-    return_ref_region=False,
-    return_query_region=False,
-    return_comp_str=False,
-    gap_cost=10,
-    extend_cost=5,
-    cost_matrix=ps.nuc44,
+    spacer_seq: str,
+    contig_seq: str,
+    strand: bool = False,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    return_ref_region: bool = False,
+    return_query_region: bool = False,
+    return_comp_str: bool = False,
+    gap_cost: int = 10,
+    extend_cost: int = 5,
+    cost_matrix: Any = ps.nuc44,
     **kwargs,
-):
-    """given a spacer and contig sequence and coordinates, return | for a match and . for a mismatch."""
+) -> str:
+    """given a spacer and contig sequence and coordinates, return | for a match and . for a mismatch.
+
+    Args:
+        spacer_seq: Query sequence.
+        contig_seq: Reference sequence.
+        strand: Rev-comp if True.
+        start: Start coord.
+        end: End coord.
+        return_ref_region: Return traceback ref.
+        return_query_region: Return traceback query.
+        return_comp_str: Return comparison string (| .).
+        gap_cost: Penalty.
+        extend_cost: Penalty.
+        cost_matrix: Scoring matrix.
+
+    Returns:
+        str: Alignment string representation.
+    """
     if start is not None and end is not None:
         aligned_region = contig_seq[start:end]
     else:
@@ -2300,10 +2729,10 @@ def prettify_alignment(
     # alignment = ps.nw_stats_scan(spacer_seq,aligned_region,open=10,extend=10,matrix=ps.nuc44)
     # alignment_string = ""
     # for i in range(len(spacer_seq)):
-    #     if spacer_seq[i] == aligned_region[i]:
-    #         alignment_string += "|"
-    #     else:
-    #         alignment_string += "."
+    #      if spacer_seq[i] == aligned_region[i]:
+    #          alignment_string += "|"
+    #      else:
+    #          alignment_string += "."
     # return f"{spacer_seq}\n{alignment_string}\n{aligned_region}"
     ali = ps.nw_trace(
         spacer_seq,
@@ -2321,24 +2750,74 @@ def prettify_alignment(
     return f"{ali.query}\n{ali.comp}\n{ali.ref}"
 
 
-def test_alignment(
-    spacer_seq,
-    contig_seq,
-    strand=False,
-    start=None,
-    end=None,
-    gap_cost=10,
-    extend_cost=5,
-    gaps_as_mismatch=True,
+def test_alignment_affine(
+    spacer_seq: str,
+    contig_seq: str,
+    strand: bool = False,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    gap_cost: int = 10,
+    extend_cost: int = 5,
+    matrix: Any = ps.nuc44,
     **kwargs,
-):
+) -> int:
+    """ 
+    BROKEN!!! DOESN'T WORK DON'T USE 
+    Test if an alignment matches between a spacer and contig using smith_waterman_gotoh algorithm.
+
+    Returns:
+        int: Number of mismatches.
+    """
+    from affine_gaps import smith_waterman_gotoh_alignment
+
+    if start is not None and end is not None:
+        aligned_region = contig_seq[start:end]
+    else:
+        aligned_region = contig_seq
+    if strand:  # True means reverse strand
+        aligned_region = reverse_complement(aligned_region)
+
+    alignment = smith_waterman_gotoh_alignment(
+        # substitution_matrix=matrix.matrix,
+        str1=spacer_seq,
+        str2=aligned_region,
+        gap_opening=-gap_cost,
+        gap_extension=-extend_cost,
+        match=1,
+        mismatch=-1
+    )
+    mismatches = len(spacer_seq) - alignment[2]
+    return mismatches
+
+
+def test_alignment(
+    spacer_seq: str,
+    contig_seq: str,
+    strand: bool = False,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    gap_cost: int = 10,
+    extend_cost: int = 5,
+    gaps_as_mismatch: bool = True,
+    **kwargs,
+)-> int:
     """Test if an alignment matches between a spacer and contig using Needleman-Wunsch algorithm.
     Input is a spacer and contig sequence and coordinates, and optionally strand, start, end, gap_cost, extend_cost, and gaps_as_mismatch.
     Returns the number of mismatches.
-    
+
     Args:
-        gaps_as_mismatch: If True, count gaps as mismatches (edit distance).
+        spacer_seq (str): Query sequence.
+        contig_seq (str): Subject sequence.
+        strand (bool): Reverse complement flag.
+        start (int): Start index.
+        end (int): End index.
+        gap_cost (int): Opening penalty.
+        extend_cost (int): Extension penalty.
+        gaps_as_mismatch(bool): If True, count gaps as mismatches (similar to edit distance, but not quite).
                          If False, count only substitutions (hamming-like distance).
+
+    Returns:
+        int: Mismatch count.
     """
     if start is not None and end is not None:
         aligned_region = contig_seq[start:end]
@@ -2355,15 +2834,15 @@ def test_alignment(
         extend=extend_cost,
         matrix=ps.nuc44,
     )
-    
+
     # In parasail's comp string:
     # '|' = match
     # '.' = mismatch (substitution)
     # ' ' (space) = gap/indel
-    
+
     comp_string = alignment.traceback.comp
     matches = comp_string.count("|")
-    
+
     if gaps_as_mismatch:
         # Edit distance: spacer length minus matched positions
         # This counts all differences including substitutions and indels
@@ -2374,6 +2853,112 @@ def test_alignment(
         mismatches = comp_string.count(".")
 
     return mismatches
+
+
+def calculate_hamming_distance(
+    spacer_seq: str, contig_seq: str, strand=False, start=None, end=None
+):
+    """
+    Calculate hamming distance (substitutions only, no indels) using ungapped alignment.
+
+    Args:
+        spacer_seq(str): Query sequence
+        contig_seq(str): Target sequence (may be pre-trimmed to region)
+        strand(bool): If True, reverse complement contig_seq
+        start(int): Region start coordinate (only used for slicing if sequence is full-length)
+        end(int): Region end coordinate (only used for slicing if sequence is full-length)
+
+    Returns:
+        Hamming distance (number of substitutions only)
+    
+    Note:
+        If sequences are of different lengths, returns the length difference as an invalid alignment.
+    """
+    if start is not None and end is not None:
+        # Check if sequence is already trimmed to region
+        expected_length = end - start
+        if len(contig_seq) == expected_length:
+            # Already trimmed, use as-is
+            aligned_region = contig_seq
+        else:
+            # Full sequence, need to trim
+            aligned_region = contig_seq[start:end]
+    else:
+        aligned_region = contig_seq
+
+    if strand:
+        aligned_region = reverse_complement(aligned_region)
+
+    # If lengths don't match, can't do proper hamming distance
+    if len(spacer_seq) != len(aligned_region):
+        # Return length difference as invalid alignment
+        return max(len(spacer_seq), len(aligned_region))
+
+    # Simple character-by-character comparison (true hamming distance)
+    hamming = sum(1 for a, b in zip(spacer_seq, aligned_region) if a != b)
+    return hamming
+
+
+def calculate_edit_distance(
+    spacer_seq: str,
+    contig_seq: str,
+    strand: bool = False,
+    start: int = None,
+    end: Optional[int] = None,
+    gap_open: int = 10,
+    gap_extend: int = 5,
+):
+    """
+    Calculate edit distance (allowing indels) using Needleman-Wunsch gapped alignment.
+
+    Args:
+        spacer_seq(str): Query sequence
+        contig_seq(str): Target sequence (may be pre-trimmed to region)
+        strand(bool): If True, reverse complement contig_seq
+        start(int): Region start coordinate (only used for slicing if sequence is full-length)
+        end(int): Region end coordinate (only used for slicing if sequence is full-length)
+        gap_open(int): Gap opening penalty
+        gap_extend(int): Gap extension penalty
+
+    Returns:
+        True edit distance: count of substitutions + insertions + deletions
+    """
+    if start is not None and end is not None:
+        # Check if sequence is already trimmed to region
+        expected_length = end - start
+        if len(contig_seq) == expected_length:
+            # Already trimmed, use as-is
+            aligned_region = contig_seq
+        else:
+            # Full sequence, need to trim
+            aligned_region = contig_seq[start:end]
+    else:
+        aligned_region = contig_seq
+
+    if strand:
+        aligned_region = reverse_complement(aligned_region)
+
+    # Use Needleman-Wunsch global alignment (allows indels)
+    # NW ensures we align the full sequences, giving true edit distance
+    alignment = ps.nw_trace(
+        spacer_seq,
+        aligned_region,
+        open=gap_open,
+        extend=gap_extend,
+        matrix=ps.nuc44,
+    )
+
+    comp_string = alignment.traceback.comp
+
+    # True edit distance: count all non-match operations
+    # '|' = match (0 cost)
+    # '.' = substitution (1 cost)
+    # ' ' = gap/indel (1 cost per gap)
+    substitutions = comp_string.count(".")
+    indels = comp_string.count(" ")
+
+    edit_distance = substitutions + indels
+    return edit_distance
 
 
 def test_row(row, ignore_region_strands=False):
@@ -2422,57 +3007,361 @@ def test_alignment_polars(results: pl.DataFrame, ignore_region_strands=False, **
     return results
 
 
-def read_results(
-    tools,
-    max_mismatches=5,
-    spacer_lendf=None,
-    ref_file=None,
-    threads=4,
+def recalculate_mismatches_streaming(
+    parquet_path: str,
+    spacers_file: str,
+    contigs_file: str,
+    output_parquet: str,
+    max_mismatches: int = 3,
+    batch_size: int = 200000,
+    threads: int = 12,
+    memory_limit: str = "100GB",
+    ignore_region_strands: bool = True,
 ):
-    results_df = pl.DataFrame(
-        schema={
-            "spacer_id": pl.Utf8,
-            "contig_id": pl.Utf8,
-            "spacer_length": pl.UInt32,
-            "strand": pl.Boolean,
-            "start": pl.UInt32,
-            "end": pl.UInt32,
-            "mismatches": pl.UInt32,
-            "tool": pl.Utf8,
-        }
-    )
-    for tool in tools.values():
-        try:
-            print(f"\nReading results for {tool['name']}...")
-            parse_function = tool.get("parse_function")
-            # if the file exists, get the size of it
-            if os.path.exists(tool["output_file"]):
-                file_size = os.path.getsize(tool["output_file"])
-                print(f"File size: {file_size / 1024 / 1024:.2f} MB")
-                if file_size == 0:
-                    print(f"File {tool['output_file']} is empty, skipping")
-                    continue
-            else:
-                print(f"File {tool['output_file']} does not exist, skipping")
-                continue
-            print(" output file ", tool["output_file"], "exists")
-            parsed_results = (
-                parse_function(tool["output_file"], max_mismatches=max_mismatches)
-                if spacer_lendf is None
-                else parse_function(
-                    tool["output_file"],
-                    max_mismatches=max_mismatches,
-                    spacer_lendf=spacer_lendf,
-                    threads=threads,
-                    ref_file=ref_file,
+    """
+    Recalculate mismatches using streaming approach with DuckDB.
+    
+    This function:
+    1. Uses DuckDB to extract unique regions (streaming, no full load)
+    2. Batches sequence population and alignment validation
+    3. Joins recalculated mismatches back to original data
+    4. Filters based on recalculated mismatches
+    
+    Args:
+        parquet_path: Path to parquet file with tool results
+        spacers_file: Path to spacers FASTA file
+        contigs_file: Path to contigs FASTA file
+        output_parquet: Path to save filtered results
+        max_mismatches: Maximum mismatches to keep after recalculation
+        batch_size: Number of unique regions to process per batch
+        threads: Number of threads for DuckDB
+        memory_limit: Memory limit for DuckDB
+        ignore_region_strands: Whether to ignore strand info during alignment
+        
+    Returns:
+        None (writes to output_parquet)
+    """
+    import os
+    
+    print("\n[Streaming Mismatch Recalculation]")
+    print(f"  Input: {parquet_path}")
+    print(f"  Output: {output_parquet}")
+    print(f"  Batch size: {batch_size:,}")
+    print(f"  Memory limit: {memory_limit}")
+    
+    # Create working directory for intermediate files next to the output
+    temp_dir = os.path.join(os.path.dirname(output_parquet), "mismatch_recalc_temp")
+    os.makedirs(temp_dir, exist_ok=True)
+    # temp_dir = os.path.abspath(tempfile.mkdtemp(prefix="mismatch_recalc_"))
+    # temp_dir = tempfile.mkdtemp(prefix="mismatch_recalc_")
+    unique_regions_path = os.path.join(temp_dir, "unique_regions.parquet")
+    validated_regions_path = os.path.join(temp_dir, "validated_regions.parquet")
+    
+    try:
+        # Step 1: Extract unique regions using DuckDB (streaming, no memory load)
+        print("\n[Step 1/4] Extracting unique regions via DuckDB...")
+        con = duckdb.connect(database=":memory:")
+        con.execute(f"SET threads TO {threads};")
+        con.execute(f"SET memory_limit = '{memory_limit}';")
+        
+        # Extract unique regions and write to parquet
+        con.execute(f"""
+            COPY (
+                SELECT DISTINCT 
+                    spacer_id, contig_id, strand, "start", "end"
+                FROM read_parquet('{parquet_path}')
+            ) TO '{unique_regions_path}' (FORMAT PARQUET, COMPRESSION SNAPPY)
+        """)
+        
+        # Get count for progress tracking
+        region_count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{unique_regions_path}')").fetchone()[0]
+        print(f"  Found {region_count:,} unique regions")
+        con.close()
+        
+        # Step 2: Populate sequences in batches
+        print("\n[Step 2/4] Populating sequences in batches...")
+        
+        # Read unique regions in lazy mode
+        unique_regions = pl.scan_parquet(unique_regions_path)
+        
+        # Process in batches to avoid OOM
+        processed_batches = []
+        total_batches = (region_count + batch_size - 1) // batch_size
+        
+        for batch_num in range(total_batches):
+            offset = batch_num * batch_size
+            print(f"  Processing batch {batch_num + 1}/{total_batches} (offset={offset:,})...")
+            
+            # Read batch
+            batch = unique_regions.slice(offset, batch_size).collect()
+            
+            # Populate spacer sequences
+            batch = populate_pldf_withseqs_needletail(
+                seqfile=spacers_file,
+                pldf=batch,
+                chunk_size=500000,
+                reverse_by_strand_col=False,
+                trim_to_region=False,
+                idcol="spacer_id",
+                seqcol="spacer_seq"
+            )
+            
+            # Populate contig sequences
+            batch = populate_pldf_withseqs_needletail(
+                seqfile=contigs_file,
+                pldf=batch,
+                chunk_size=100000,
+                reverse_by_strand_col=True,
+                trim_to_region=True,
+                idcol="contig_id",
+                start_col="start",
+                end_col="end",
+                strand_col="strand",
+                seqcol="contig_seq"
+            )
+            
+            # Recalculate mismatches using parasail
+            batch = test_alignment_polars(
+                batch,
+                ignore_region_strands=ignore_region_strands
+            )
+            
+            # Keep only needed columns
+            batch = batch.select([
+                "spacer_id", "contig_id", "strand", "start", "end",
+                "alignment_test", "spacer_seq", "contig_seq"
+            ])
+            
+            processed_batches.append(batch)
+            
+            # Optional: write intermediate results to avoid memory buildup
+            if len(processed_batches) >= 10:  # Write every 10 batches
+                print("    Writing intermediate results...")
+                if os.path.exists(validated_regions_path):
+                    # Append to existing file
+                    pl.concat(processed_batches).write_parquet(
+                        validated_regions_path, 
+                        compression="snappy",
+                        row_group_size=100000
+                    )
+                else:
+                    # Create new file
+                    pl.concat(processed_batches).write_parquet(
+                        validated_regions_path,
+                        compression="snappy"
+                    )
+                processed_batches = []
+        
+        # Write any remaining batches
+        if processed_batches:
+            print("\n  Writing final batch...")
+            if os.path.exists(validated_regions_path):
+                # This is tricky - need to append properly
+                existing = pl.scan_parquet(validated_regions_path)
+                new_data = pl.concat(processed_batches)
+                pl.concat([existing.collect(), new_data]).write_parquet(
+                    validated_regions_path,
+                    compression="snappy"
                 )
-            )
-            parsed_results = parsed_results.with_columns(
-                pl.lit(tool["name"]).alias("tool")
-            )
-            tool_df = pl.DataFrame(
-                data=parsed_results,
-                orient="row",
+            else:
+                pl.concat(processed_batches).write_parquet(
+                    validated_regions_path,
+                    compression="snappy"
+                )
+        
+        print("\n[Step 3/4] Joining recalculated mismatches back to original data...")
+        
+        # Step 3: Join using DuckDB and filter
+        con = duckdb.connect(database=":memory:")
+        con.execute(f"SET threads TO {threads};")
+        con.execute(f"SET memory_limit = '{memory_limit}';")
+        
+        # Join and filter in one DuckDB query (streaming)
+        con.execute(f"""
+            COPY (
+                SELECT 
+                    t.*,
+                    v.alignment_test,
+                    v.spacer_seq,
+                    v.contig_seq
+                FROM read_parquet('{parquet_path}') t
+                LEFT JOIN read_parquet('{validated_regions_path}') v
+                    ON t.spacer_id = v.spacer_id 
+                    AND t.contig_id = v.contig_id
+                    AND t.strand = v.strand
+                    AND t."start" = v."start"
+                    AND t."end" = v."end"
+                WHERE v.alignment_test <= {max_mismatches}
+            ) TO '{output_parquet}' (FORMAT PARQUET, COMPRESSION SNAPPY)
+        """)
+        
+        final_count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{output_parquet}')").fetchone()[0]
+        print(f"  Filtered to {final_count:,} alignments (≤{max_mismatches} mismatches)")
+        
+        con.close()
+        
+        print("\n[Step 4/4] Cleanup...")
+        
+    finally:
+        # Cleanup temp files
+        import shutil
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+            print(f"  Removed temp directory: {temp_dir}")
+    
+    print(f"\n[Complete] Results written to: {output_parquet}")
+    return None
+
+
+def read_results(
+    tools: dict,
+    max_mismatches: int = 5,
+    spacer_lendf: Optional[pl.DataFrame] = None,
+    ref_file: Optional[str] = None,
+    threads: int = 10,
+    use_duckdb: bool = True,
+    output_parquet: Optional[str] = None,
+    memory_limit: str = str(min(50000, psutil.virtual_memory().available // (1024 * 1024 * 2))) + "MB", # set a default memory limit to 50gb or half of all available RAM (if less than 50gb)
+):
+    """
+    Read and combine results from multiple tools with memory-efficient processing.
+
+    Args:
+        tools(dict): Dictionary of tool configurations
+        max_mismatches(int): Maximum number of mismatches to allow
+        spacer_lendf(polars.DataFrame): Optional spacer length dataframe
+        ref_file(str): Optional reference file path
+        threads(int): Number of threads for processing
+        use_duckdb(bool): If True, use DuckDB with streaming; if False, use Polars lazy evaluation
+        output_parquet(str): If provided, save results to this Parquet file path instead of returning in-memory DF
+
+    Returns:
+        Polars DataFrame with combined results from all tools (or None if output_parquet is specified)
+    """
+
+    if use_duckdb:
+        return _read_results_duckdb(
+            tools,
+            max_mismatches,
+            spacer_lendf,
+            ref_file,
+            threads,
+            output_parquet,
+            memory_limit=memory_limit,
+        )
+    else:
+        return _read_results_polars_lazy(
+            tools, max_mismatches, spacer_lendf, ref_file, threads, output_parquet
+        )
+
+
+def _read_results_duckdb(
+    tools: dict,
+    max_mismatches: int = 5,
+    spacer_lendf: Optional[pl.DataFrame] = None,
+    ref_file: Optional[str] = None,
+    threads: int = 10,
+    output_parquet: Optional[str] = None,
+    memory_limit: str = "50GB",
+):
+    """
+    Read results using DuckDB with native Python bindings for memory efficiency.
+    Results are streamed to disk (Parquet) if output_parquet is specified.
+
+    Thread behavior:
+    - The 'threads' parameter controls query parallelism (worker threads for CPU-bound work).
+    - DuckDB may spawn additional background threads for I/O operations.
+    - This function enforces strict thread limiting via environment variables and OS controls.
+    - Additional background I/O threads may still be created but should be minimal.
+    """
+    # STRICT thread enforcement via environment variables
+    # These are set BEFORE DuckDB connection to take effect
+    # os.environ["OMP_NUM_THREADS"] = str(threads)  # OpenMP (used by DuckDB and Polars)
+    # os.environ["OPENBLAS_NUM_THREADS"] = str(threads)  # OpenBLAS
+    # os.environ["MKL_NUM_THREADS"] = str(threads)  # Intel MKL
+    # os.environ["VECLIB_MAXIMUM_THREADS"] = str(threads)  # macOS veclib
+    # os.environ["NUMEXPR_NUM_THREADS"] = str(threads)  # NumExpr
+
+    print(f"\n[ThreadControl] Setting environment variables for {threads} threads")
+    print(f"  OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS')}")
+    print(f"  OPENBLAS_NUM_THREADS={os.environ.get('OPENBLAS_NUM_THREADS')}")
+
+    # Create a temporary directory for intermediate results if needed
+    temp_dir = tempfile.mkdtemp(prefix="spacer_bench_duckdb_")
+    parquet_files = []
+
+    # Initialize DuckDB connection AFTER setting environment variables
+    con = duckdb.connect(database=":memory:")
+
+    # Set hardware tuning parameters - Control query parallelism
+    con.execute(f"SET threads TO {threads};")
+    con.execute("SET preserve_insertion_order = false;")
+    con.execute(f"SET memory_limit = '{memory_limit}';")
+
+    # Log actual thread setting
+    thread_setting = con.execute("SELECT current_setting('threads')").fetchone()[0]
+    print(f"  DuckDB query parallelism: {thread_setting} threads")
+    print(f"  DuckDB memory limit: {memory_limit}")
+
+    try:
+        for tool in tools.values():
+            try:
+                print(f"\nReading results for {tool['name']}...")
+                parse_function = tool.get("parse_function")
+
+                # Check if file exists and has content
+                if os.path.exists(tool["output_file"]):
+                    file_size = os.path.getsize(tool["output_file"])
+                    print(f"File size: {file_size / 1024 / 1024:.2f} MB")
+                    if file_size == 0:
+                        print(f"File {tool['output_file']} is empty, skipping")
+                        continue
+                else:
+                    print(f"File {tool['output_file']} does not exist, skipping")
+                    continue
+
+                # Parse results using the tool-specific parser
+                # (parsers may return Polars dataframes or lazy frames)
+                parsed_results = (
+                    parse_function(tool["output_file"], max_mismatches=max_mismatches)
+                    if spacer_lendf is None
+                    else parse_function(
+                        tool["output_file"],
+                        max_mismatches=max_mismatches,
+                        spacer_lendf=spacer_lendf,
+                        threads=threads,
+                        ref_file=ref_file,
+                    )
+                )
+
+                # Convert to lazy frame if it's eager (for consistent handling)
+                if not hasattr(parsed_results, "collect"):
+                    # It's an eager DataFrame, convert to lazy
+                    parsed_results = parsed_results.lazy()
+
+                # Add tool name column (works on lazy frames)
+                parsed_results = parsed_results.with_columns(
+                    pl.lit(tool["name"]).alias("tool")
+                )
+
+                # Write lazy frame to parquet without materializing
+                # sink_parquet handles lazy frames efficiently
+                tool_parquet = os.path.join(temp_dir, f"{tool['name']}.parquet")
+                parsed_results.sink_parquet(tool_parquet)
+                parquet_files.append(tool_parquet)
+                print(f"Saved {tool['name']} results to {tool_parquet}")
+
+            except Exception as e:
+                print(f"Failed to read results for {tool['name']}: {e}")
+                import traceback
+
+                traceback.print_exc()
+                continue
+
+        # If no results were collected, return empty dataframe
+        if not parquet_files:
+            print("No results collected from any tool")
+            return pl.DataFrame(
                 schema={
                     "spacer_id": pl.Utf8,
                     "contig_id": pl.Utf8,
@@ -2483,49 +3372,186 @@ def read_results(
                     "mismatches": pl.UInt32,
                     "tool": pl.Utf8,
                 },
+                orient="row",
             )
-            # print(parsed_results)
-            results_df = results_df.vstack(tool_df)
-        except Exception as e:
-            print(f"Failed to read results for {tool['name']}: {e}")
-            ipdb.set_trace()
-    return results_df
 
-def verify_sam_file(sam_file, ref_file=None): 
+        # Combine all parquet files using DuckDB's union operation
+        print(f"\nCombining results from {len(parquet_files)} tools using DuckDB...")
+
+        # Build union by concatenating all parquet files
+        union_query = " UNION ALL ".join(
+            [f"SELECT * FROM read_parquet('{pf}')" for pf in parquet_files]
+        )
+
+        # If output_parquet is specified, write directly to file using DuckDB's native COPY
+        if output_parquet:
+            print(
+                f"Writing combined results to {output_parquet} using DuckDB (no materialization)..."
+            )
+            # Use DuckDB's COPY command to write directly without materializing in Polars
+            copy_query = f"""
+                COPY (
+                    {union_query}
+                ) TO '{output_parquet}' (FORMAT 'PARQUET', COMPRESSION 'SNAPPY', ROW_GROUP_SIZE 100000)
+            """
+            con.execute(copy_query)
+            print(f"Results saved to {output_parquet}")
+            result_df = None
+        else:
+            # Only load to Polars if not saving to Parquet
+            print("Loading results to Polars...")
+            union_relation = con.execute(union_query).pl()
+            print("Results ready")
+            result_df = union_relation
+
+        return result_df
+
+    finally:
+        # Clean up temporary files
+        import shutil
+
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+            print(f"Cleaned up temporary directory: {temp_dir}")
+
+
+def _read_results_polars_lazy(
+    tools : dict,
+    max_mismatches: int = 5,
+    spacer_lendf: Optional[pl.DataFrame] = None,
+    ref_file: Optional[str] = None,
+    threads: int = 4,
+    output_parquet: Optional[str] = None,
+):
+    """
+    Read results using Polars lazy evaluation for memory efficiency.
+    This alternative uses Polars' lazy evaluation to defer computation.
+    """
+    lazy_frames = []
+
+    try:
+        for tool in tools.values():
+            try:
+                print(f"\nReading results for {tool['name']}...")
+                parse_function = tool.get("parse_function")
+
+                # Check if file exists and has content
+                if os.path.exists(tool["output_file"]):
+                    file_size = os.path.getsize(tool["output_file"])
+                    print(f"File size: {file_size / 1024 / 1024:.2f} MB")
+                    if file_size == 0:
+                        print(f"File {tool['output_file']} is empty, skipping")
+                        continue
+                else:
+                    print(f"File {tool['output_file']} does not exist, skipping")
+                    continue
+
+                # Parse results using the tool-specific parser
+                parsed_results = (
+                    parse_function(tool["output_file"], max_mismatches=max_mismatches)
+                    if spacer_lendf is None
+                    else parse_function(
+                        tool["output_file"],
+                        max_mismatches=max_mismatches,
+                        spacer_lendf=spacer_lendf,
+                        threads=threads,
+                        ref_file=ref_file,
+                    )
+                )
+
+                # Add tool name column and convert to lazy frame
+                parsed_results = parsed_results.with_columns(
+                    pl.lit(tool["name"]).alias("tool")
+                ).lazy()
+
+                lazy_frames.append(parsed_results)
+                print(f"Loaded {tool['name']} results (lazy evaluation)")
+
+            except Exception as e:
+                print(f"Failed to read results for {tool['name']}: {e}")
+                import traceback
+
+                traceback.print_exc()
+                continue
+
+        # If no results were collected, return empty dataframe
+        if not lazy_frames:
+            print("No results collected from any tool")
+            return pl.DataFrame(
+                schema={
+                    "spacer_id": pl.Utf8,
+                    "contig_id": pl.Utf8,
+                    "spacer_length": pl.UInt32,
+                    "strand": pl.Boolean,
+                    "start": pl.UInt32,
+                    "end": pl.UInt32,
+                    "mismatches": pl.UInt32,
+                    "tool": pl.Utf8,
+                },
+                orient="row",
+            )
+
+        # Combine using lazy concatenation
+        print(
+            f"\nCombining results from {len(lazy_frames)} tools using Polars lazy evaluation..."
+        )
+        combined_lazy = pl.concat(lazy_frames, how="vertical_relaxed")
+
+        # If output_parquet is specified, write directly to file
+        if output_parquet:
+            print(f"Writing combined results to {output_parquet}...")
+            combined_lazy.sink_parquet(output_parquet)
+            print(f"Results saved to {output_parquet}")
+            return None
+        else:
+            # Collect and return
+            print("Collecting results...")
+            result_df = combined_lazy.collect()
+            return result_df
+
+    except Exception as e:
+        print(f"Error in Polars lazy evaluation: {e}")
+        import traceback
+
+        traceback.print_exc()
+        raise
+
+
+def verify_sam_file(sam_file: str, ref_file: Optional[str] = None):
     """Verify if a SAM file is valid and add SQ lines if needed (from reference file if provided or from other sam files in the same directory)
     also potentially replaces whitespaces with tabs in the first line"""
 
     # Read the first few lines to analyze the header
-    with open(sam_file, 'r') as f:
+    with open(sam_file, "r") as f:
         lines = f.readlines()
-    
+
     if len(lines) < 2:
         print("SAM file has less than 2 lines")
         return None
-        
+
     first_line = lines[0].strip()
     second_line = lines[1].strip() if len(lines) > 1 else ""
-    
+
     print("first line of sam file", first_line)
     print("second line of sam file", second_line)
-    
+
     # Check if this is a mummer file - always rewrite HD line for mummer
     is_mummer_file = "mummer" in sam_file.lower()
-    
+
     # Check if we have a proper HD header
     has_hd_header = first_line.startswith("@HD")
-    
+
     # Check if HD line has spaces instead of tabs (malformed)
     hd_needs_fixing = False
     if has_hd_header and " " in first_line and "\t" not in first_line:
         hd_needs_fixing = True
         print("HD line has spaces instead of tabs, will fix")
-    
+
     # Check if we have SQ lines
     sq_lines = []
     pg_lines = []
     alignment_start = 0
-    
+
     for i, line in enumerate(lines):
         line = line.strip()
         if line.startswith("@SQ"):
@@ -2535,18 +3561,20 @@ def verify_sam_file(sam_file, ref_file=None):
         elif not line.startswith("@"):
             alignment_start = i
             break
-    
+
     has_sq_lines = len(sq_lines) > 0
     has_pg_lines = len(pg_lines) > 0
-    
+
     print(f"Found {len(sq_lines)} SQ lines, {len(pg_lines)} PG lines")
-    
+
     # Determine if we need to fix the file
-    needs_fixing = hd_needs_fixing or not has_sq_lines or not has_pg_lines or is_mummer_file
-    
+    needs_fixing = (
+        hd_needs_fixing or not has_sq_lines or not has_pg_lines or is_mummer_file
+    )
+
     if needs_fixing:
         print("SAM file needs fixing")
-        
+
         # Create new file with proper header
         with open(sam_file + ".new", "w") as new_sam_file:
             # Handle HD line
@@ -2557,14 +3585,16 @@ def verify_sam_file(sam_file, ref_file=None):
             elif has_hd_header:
                 if hd_needs_fixing:
                     # Replace spaces with tabs in HD line
-                    fixed_hd = first_line.replace(" VN:", "\tVN:").replace(" SO:", "\tSO:")
+                    fixed_hd = first_line.replace(" VN:", "\tVN:").replace(
+                        " SO:", "\tSO:"
+                    )
                     new_sam_file.write(fixed_hd + "\n")
                 else:
                     new_sam_file.write(first_line + "\n")
             else:
                 # Add default HD line if missing
                 new_sam_file.write("@HD\tVN:1.6\tSO:unsorted\n")
-            
+
             # Add SQ lines
             if has_sq_lines:
                 for sq_line in sq_lines:
@@ -2579,63 +3609,83 @@ def verify_sam_file(sam_file, ref_file=None):
                     print(f"Error reading reference file: {e}")
                     return None
             else:
-                print("No reference file provided, trying to find SQ lines from other SAM files")
-                present_sam_files = glob.glob(os.path.join(os.path.dirname(sam_file), "*.sam"))
-                present_sam_files = [f for f in present_sam_files if f != os.path.normpath(sam_file)]
+                print(
+                    "No reference file provided, trying to find SQ lines from other SAM files"
+                )
+                present_sam_files = glob.glob(
+                    os.path.join(os.path.dirname(sam_file), "*.sam")
+                )
+                present_sam_files = [
+                    f for f in present_sam_files if f != os.path.normpath(sam_file)
+                ]
                 # Drop mummer4 and minimap2 sam files as they don't print SQ lines when batching
-                present_sam_files = [f for f in present_sam_files if "mummer" not in f and "minimap" not in f]
-                present_sam_files = [f for f in present_sam_files if os.path.getsize(f) > 1]
-                
+                present_sam_files = [
+                    f
+                    for f in present_sam_files
+                    if "mummer" not in f and "minimap" not in f
+                ]
+                present_sam_files = [
+                    f for f in present_sam_files if os.path.getsize(f) > 1
+                ]
+
                 if len(present_sam_files) == 0:
                     print("No non-empty sam files found, returning None")
                     return None
-                
+
                 # Find a SAM file with SQ lines
                 sq_found = False
                 for sam_file_candidate in present_sam_files:
-                    with open(sam_file_candidate, 'r') as f:
+                    with open(sam_file_candidate, "r") as f:
                         for line in f:
                             if line.startswith("@SQ"):
                                 new_sam_file.write(line)
                                 sq_found = True
-                            elif line.startswith("@PG") or (not line.startswith("@") and line.strip()):
+                            elif line.startswith("@PG") or (
+                                not line.startswith("@") and line.strip()
+                            ):
                                 break
                     if sq_found:
                         break
-                
+
                 if not sq_found:
                     print("No SQ lines found in any SAM files")
                     return None
-            
+
             # Add PG lines
             if has_pg_lines:
                 for pg_line in pg_lines:
                     # Fix PG line if it has spaces instead of tabs
                     if " " in pg_line and "\t" not in pg_line:
-                        fixed_pg = pg_line.replace(" ID:", "\tID:").replace(" PN:", "\tPN:").replace(" VN:", "\tVN:").replace(" CL:", "\tCL:")
+                        fixed_pg = (
+                            pg_line.replace(" ID:", "\tID:")
+                            .replace(" PN:", "\tPN:")
+                            .replace(" VN:", "\tVN:")
+                            .replace(" CL:", "\tCL:")
+                        )
                         new_sam_file.write(fixed_pg + "\n")
                     else:
                         new_sam_file.write(pg_line + "\n")
             else:
                 # Add default PG line if missing
                 new_sam_file.write("@PG\tID:unknown\tPN:unknown\tVN:unknown\n")
-            
+
             # Add alignment lines
             for i in range(alignment_start, len(lines)):
                 line = lines[i]
                 if not line.startswith("@"):  # Keep only the alignments
                     new_sam_file.write(line)
-        
+
         # Replace original file with fixed version
         os.rename(sam_file + ".new", sam_file)
         print("SAM file has been fixed")
-    
+
     else:
         print("SAM file looks good, no changes needed")
-    
+
     return sam_file
 
-def prefilter_sam_with_sambamba(input_sam, output_sam, max_mismatches=5, threads=1):
+
+def prefilter_sam_with_sambamba(input_sam: str, output_sam: str, max_mismatches: int = 5, threads: int = 1):
     """Prefilter SAM file using sambamba to remove unmapped reads with mismatches (NM) <= max_mismatches"""
     # Filter expression:
     # - not unmapped: keep only mapped reads
@@ -2672,7 +3722,7 @@ def prefilter_sam_with_sambamba(input_sam, output_sam, max_mismatches=5, threads
     return output_sam
 
 
-def create_comparison_matrix(tools_results, n_mismatches):
+def create_comparison_matrix(tools_results: pl.DataFrame, n_mismatches: int = 3):
     # Filter for specific number of mismatches
     tmp = tools_results.filter(pl.col("mismatches") == n_mismatches)
 
@@ -2721,9 +3771,7 @@ def create_comparison_matrix(tools_results, n_mismatches):
     return matrix_df
 
 
-
-
-def get_parse_function(func_name):
+def get_parse_function(func_name: str):
     return globals()[func_name]
 
 
@@ -2743,680 +3791,649 @@ class DebugArgs:
         self.max_runs = 1
 
 
-
-def validate_intervals_with_polars_bio(planned_intervals, tool_results, max_mismatches=5):
+def validate_intervals_with_polars_bio(
+    planned_intervals: pl.DataFrame, tool_results: pl.DataFrame, max_mismatches: int = 5
+):
     """
     Validate tool results against planned intervals using polars-bio interval operations.
-    
+
     Args:
-        planned_intervals: DataFrame with planned spacer insertions (spacer_id, contig_id, start, end, strand, mismatches)
-    tool_results: DataFrame with tool results (spacer_id, contig_id, start, end, strand, mismatches)
-        max_mismatches: Maximum allowed mismatches for validation
-    
+        planned_intervals(polars.DataFrame): DataFrame with planned spacer insertions (spacer_id, contig_id, start, end, strand, mismatches)
+        tool_results(polars.DataFrame): DataFrame with tool results (spacer_id, contig_id, start, end, strand, mismatches)
+        max_mismatches(int): Maximum allowed mismatches for validation
+
     Returns:
         DataFrame with validation results
     """
     # Filter tool results by max mismatches
     tool_results_filtered = tool_results.filter(pl.col("mismatches") <= max_mismatches)
-    
+
     # Add chrom column for polars-bio compatibility (use contig_id as chrom)
-    planned_df = planned_intervals.with_columns([
-        pl.col("start").cast(pl.UInt32),
-        pl.col("end").cast(pl.UInt32),
-        pl.col("strand").cast(pl.Utf8)
-    ])
-    
-    tool_df = tool_results_filtered.with_columns([
-        pl.col("start").cast(pl.UInt32),
-        pl.col("end").cast(pl.UInt32),
-        pl.col("strand").cast(pl.Utf8)
-    ])
-    
+    planned_df = planned_intervals.with_columns(
+        [
+            pl.col("start").cast(pl.UInt32),
+            pl.col("end").cast(pl.UInt32),
+            pl.col("strand").cast(pl.Utf8),
+        ]
+    )
+
+    tool_df = tool_results_filtered.with_columns(
+        [
+            pl.col("start").cast(pl.UInt32),
+            pl.col("end").cast(pl.UInt32),
+            pl.col("strand").cast(pl.Utf8),
+        ]
+    )
+
     # Check if dataframes are empty
     if planned_df.height == 0:
         print("Warning: planned_df is empty")
-        return pl.DataFrame(schema={
-            "spacer_id_1": pl.Utf8, "contig_id_1": pl.Utf8, "start_1": pl.UInt32, "end_1": pl.UInt32, "strand_1": pl.Utf8,
-            "spacer_id_2": pl.Utf8, "contig_id_2": pl.Utf8, "start_2": pl.UInt32, "end_2": pl.UInt32, "strand_2": pl.Utf8,
-            "overlap_type": pl.Utf8
-        })
+        return pl.DataFrame(
+            schema={
+                "spacer_id_1": pl.Utf8,
+                "contig_id_1": pl.Utf8,
+                "start_1": pl.UInt32,
+                "end_1": pl.UInt32,
+                "strand_1": pl.Utf8,
+                "spacer_id_2": pl.Utf8,
+                "contig_id_2": pl.Utf8,
+                "start_2": pl.UInt32,
+                "end_2": pl.UInt32,
+                "strand_2": pl.Utf8,
+                "overlap_type": pl.Utf8,
+            }
+        )
     if tool_df.height == 0:
         print("Warning: tool_df is empty")
-        return pl.DataFrame(schema={
-            "spacer_id_1": pl.Utf8, "contig_id_1": pl.Utf8, "start_1": pl.UInt32, "end_1": pl.UInt32, "strand_1": pl.Utf8,
-            "spacer_id_2": pl.Utf8, "contig_id_2": pl.Utf8, "start_2": pl.UInt32, "end_2": pl.UInt32, "strand_2": pl.Utf8,
-            "overlap_type": pl.Utf8
-        })
-    
+        return pl.DataFrame(
+            schema={
+                "spacer_id_1": pl.Utf8,
+                "contig_id_1": pl.Utf8,
+                "start_1": pl.UInt32,
+                "end_1": pl.UInt32,
+                "strand_1": pl.Utf8,
+                "spacer_id_2": pl.Utf8,
+                "contig_id_2": pl.Utf8,
+                "start_2": pl.UInt32,
+                "end_2": pl.UInt32,
+                "strand_2": pl.Utf8,
+                "overlap_type": pl.Utf8,
+            },
+            orient="row",
+        )
+
     # Use polars-bio overlap operation
     try:
-        overlap_result = pb.overlap(planned_df, tool_df,cols1=["contig_id","start", "end"],cols2=["contig_id","start", "end"])
+        overlap_result = pb.overlap(
+            planned_df,
+            tool_df,
+            cols1=["contig_id", "start", "end"],
+            cols2=["contig_id", "start", "end"],
+        )
     except Exception as e:
         print(f"Error in pb.overlap: {e}")
         print(f"planned_df shape: {planned_df.shape}")
         print(f"tool_df shape: {tool_df.shape}")
         raise
-    
+
     # Calculate validation metrics with strand consideration
-    validation_results = overlap_result.with_columns([
-        # First check if strands match (both forward or both reverse)
-        pl.when(pl.col("strand_1") == pl.col("strand_2"))
-        .then(
-            # If strands match, check for coordinate overlaps
-            # Use symmetric overlap detection logic
-            pl.when(
-                # Exact match: intervals are identical
-                (pl.col("start_1") == pl.col("start_2")) & (pl.col("end_1") == pl.col("end_2"))
+    validation_results = overlap_result.with_columns(
+        [
+            # First check if strands match (both forward or both reverse)
+            pl.when(pl.col("strand_1") == pl.col("strand_2"))
+            .then(
+                # If strands match, check for coordinate overlaps
+                # Use symmetric overlap detection logic
+                pl.when(
+                    # Exact match: intervals are identical
+                    (pl.col("start_1") == pl.col("start_2"))
+                    & (pl.col("end_1") == pl.col("end_2"))
+                )
+                .then(pl.lit("exact_match"))
+                .when(
+                    # Partial overlap: intervals overlap but are not identical
+                    (pl.col("start_1") < pl.col("end_2"))
+                    & (pl.col("start_2") < pl.col("end_1"))
+                )
+                .then(pl.lit("partial_overlap"))
+                .otherwise(pl.lit("no_overlap"))
             )
-            .then(pl.lit("exact_match"))
-            .when(
-                # Partial overlap: intervals overlap but are not identical
-                (pl.col("start_1") < pl.col("end_2")) & (pl.col("start_2") < pl.col("end_1"))
-            )
-            .then(pl.lit("partial_overlap"))
-            .otherwise(pl.lit("no_overlap"))
-        )
-        .otherwise(pl.lit("strand_mismatch"))  # Different strands = no valid match
-        .alias("overlap_type")
-    ]).collect()
-    
+            .otherwise(pl.lit("strand_mismatch"))  # Different strands = no valid match
+            .alias("overlap_type")
+        ]
+    ).collect()
+
     return validation_results
 
 
-def validate_intervals_fallback(planned_intervals, tool_results, max_mismatches=5):
+def validate_intervals_fallback(planned_intervals: pl.DataFrame, tool_results: pl.DataFrame, max_mismatches: int = 5):
     """
     Fallback interval validation without polars-bio.
     """
     # Filter tool results by max mismatches
     tool_results_filtered = tool_results.filter(pl.col("mismatches") <= max_mismatches)
-    
+
     # Simple overlap detection using polars operations
     joined = planned_intervals.join(
         tool_results_filtered,
         on=["spacer_id", "contig_id", "strand"],
         how="inner",
-        suffix="_tool"
+        suffix="_tool",
     )
-    
+
     # Check for overlaps
     overlap_conditions = (
-        (pl.col("start") <= pl.col("start_tool")) & 
-        (pl.col("end") >= pl.col("end_tool"))
-    ) | (
-        (pl.col("start_tool") <= pl.col("start")) & 
-        (pl.col("end_tool") >= pl.col("end"))
-    ) | (
-        (pl.col("start") < pl.col("end_tool")) & 
-        (pl.col("end") > pl.col("start_tool"))
+        (
+            (pl.col("start") <= pl.col("start_tool"))
+            & (pl.col("end") >= pl.col("end_tool"))
+        )
+        | (
+            (pl.col("start_tool") <= pl.col("start"))
+            & (pl.col("end_tool") >= pl.col("end"))
+        )
+        | (
+            (pl.col("start") < pl.col("end_tool"))
+            & (pl.col("end") > pl.col("start_tool"))
+        )
     )
-    
-    validation_results = joined.with_columns([
-        pl.when(overlap_conditions)
-        .then(pl.lit("overlap"))
-        .otherwise(pl.lit("no_overlap"))
-        .alias("overlap_type")
-    ])
-    
+
+    validation_results = joined.with_columns(
+        [
+            pl.when(overlap_conditions)
+            .then(pl.lit("overlap"))
+            .otherwise(pl.lit("no_overlap"))
+            .alias("overlap_type")
+        ]
+    )
+
     return validation_results
 
 
-def detect_spurious_alignments(contigs, spacers, planned_intervals, max_mismatches=5, 
-                              alignment_threshold=0.8):
-    """
-    Detect spurious (non-planned) alignments in contigs that match spacer sequences.
-    
-    Args:
-        contigs: Dictionary of contig_id -> sequence
-        spacers: Dictionary of spacer_id -> sequence  
-        planned_intervals: DataFrame with planned insertions
-        max_mismatches: Maximum mismatches to consider
-        alignment_threshold: Minimum alignment score threshold
-    
-    Returns:
-        DataFrame with detected spurious alignments
-    """
-    spurious_alignments = []
-    
-    # Create a set of planned positions for quick lookup
-    planned_positions = set()
-    for row in planned_intervals.iter_rows(named=True):
-        key = (row['spacer_id'], row['contig_id'], row['start'], row['end'], row['strand'])
-        planned_positions.add(key)
-    
-    # Check each spacer against each contig
-    for spacer_id, spacer_seq in spacers.items():
-        for contig_id, contig_seq in contigs.items():
-            # Perform alignment using parasail
-            result = ps.sg_trace_scan_sat(
-                spacer_seq.encode('utf-8'),
-                contig_seq.encode('utf-8'),
-                1,  # gap open penalty (must be >= 0)
-                1,  # gap extend penalty (must be >= 0)
-                ps.nuc44  # substitution matrix
-            )
-            
-            # Check if alignment meets criteria
-            if result.score >= len(spacer_seq) * alignment_threshold:
-                # Find all alignment positions
-                for i in range(len(contig_seq) - len(spacer_seq) + 1):
-                    region = contig_seq[i:i + len(spacer_seq)]
-                    
-                    # Calculate mismatches
-                    mismatches = sum(1 for a, b in zip(spacer_seq, region) if a != b)
-                    
-                    if mismatches <= max_mismatches:
-                        # Check if this position was planned
-                        key = (spacer_id, contig_id, i, i + len(spacer_seq), False)
-                        if key not in planned_positions:
-                            spurious_alignments.append({
-                                'spacer_id': spacer_id,
-                                'contig_id': contig_id,
-                                'start': i,
-                                'end': i + len(spacer_seq),
-                                'strand': False,
-                                'mismatches': mismatches,
-                                'type': 'spurious'
-                            })
-    
-    return pl.DataFrame(spurious_alignments) if spurious_alignments else pl.DataFrame()
-
-
-def _calculate_match_prob_with_base_composition(base_comp):
-    """
-    Calculate probability of a random match between two bases given base composition.
-    
-    Args:
-        base_comp: BaseComposition object or dict with a_frac, t_frac, c_frac, g_frac
-    
-    Returns:
-        Probability that two random bases match
-    """
-    if isinstance(base_comp, dict):
-        a_frac = base_comp.get('a_frac', 0.25)
-        t_frac = base_comp.get('t_frac', 0.25)
-        c_frac = base_comp.get('c_frac', 0.25)
-        g_frac = base_comp.get('g_frac', 0.25)
-    else:
-        # Assume BaseComposition object
-        a_frac = base_comp.a_frac if hasattr(base_comp, 'a_frac') else 0.25
-        t_frac = base_comp.t_frac if hasattr(base_comp, 't_frac') else 0.25
-        c_frac = base_comp.c_frac if hasattr(base_comp, 'c_frac') else 0.25
-        g_frac = base_comp.g_frac if hasattr(base_comp, 'g_frac') else 0.25
-    
-    # Probability of match = sum of P(both are A) + P(both are T) + ...
-    match_prob = (a_frac ** 2 + t_frac ** 2 + c_frac ** 2 + g_frac ** 2)
-    return match_prob
-
-def _calculate_edit_distance_probability_hamming(spacer_len, max_edits, match_prob, total_db_size):
-    """
-    Calculate probability of finding a random string within Hamming distance.
-    This gives the probability per position in the database.
-    
-    Args:
-        spacer_len: Length of spacer sequence
-        max_edits: Maximum edit distance allowed
-        match_prob: Probability that two random bases match
-        total_db_size: Total size of sequence database
-    
-    Returns:
-        Probability of finding match at any given position
-    """
-    from scipy.special import comb
-    
-    mismatch_prob = 1 - match_prob
-    total_prob = 0
-    
-    # Sum probabilities for 0 to max_edits mismatches
-    for k in range(max_edits + 1):
-        # Binomial probability: choose k positions to mismatch
-        prob_k_mismatches = comb(spacer_len, k, exact=True) * \
-                           (mismatch_prob ** k) * \
-                           (match_prob ** (spacer_len - k))
-        total_prob += prob_k_mismatches
-    
-    # Multiply by total_db_size to get expected number of matches
-    return total_prob * total_db_size
-
-
-def _calculate_blast_evalue(spacer_len, max_edits, match_prob, total_db_size,
-                            match_reward=1, mismatch_penalty=-3,  # Standard BLASTN scoring
-                            k_param=0.14, lambda_param=1.28):  # Lambda for +1/-3 scoring
-    """
-    Calculate expected spurious alignments using BLAST-style E-value approach.
-    
-    This follows BLAST's statistical theory more closely:
-    1. Uses bit scores instead of raw scores
-    2. Applies proper scaling factors
-    3. Uses standard BLASTN scoring (+1/-3)
-    
-    Args:
-        spacer_len: Length of spacer sequence
-        max_edits: Maximum edit distance allowed
-        match_prob: Probability that two random bases match (not used in BLAST calculation)
-        total_db_size: Total size of sequence database in bases
-        match_reward: Score for matching base (default: +1 like BLASTN)
-        mismatch_penalty: Penalty for mismatching base (default: -3 like BLASTN)
-        k_param: BLAST K parameter (default 0.14 for DNA)
-        lambda_param: BLAST lambda parameter (default 1.28 for +1/-3 scoring)
-    
-    Returns:
-        Expected number of spurious alignments (E-value)
-    """
-    # Calculate minimum score threshold
-    min_matches = spacer_len - max_edits
-    min_score = (min_matches * match_reward) + (max_edits * mismatch_penalty)
-    
-    # Convert to bit score (BLAST's statistical framework)
-    # S_bit = (lambda * S - ln(K)) / ln(2)
-    bit_score = (lambda_param * min_score - np.log(k_param)) / np.log(2)
-    
-    # Apply length-based corrections
-    # These help account for edge effects and multiple testing
-    H = 0.5772156649  # Euler's constant
-    m_prime = spacer_len / (spacer_len - H)  # Effective query length
-    n_prime = total_db_size / (spacer_len - H)  # Effective db size
-    
-    # Calculate E-value using bit score formulation
-    # E = m'n' * 2^(-S_bit)
-    e_value = m_prime * n_prime * np.power(2, -bit_score)
-    
-    return e_value
-
-
-def calculate_expected_spurious_alignments(spacer_len, max_edits, total_db_size,
-                                          base_composition=None, method='both', blast_evalue=False):
-    """
-    Calculate expected number of spurious alignments using different methods.
-    
-    Args:
-        spacer_len: Length of spacer sequences
-        max_edits: Maximum edit distance/mismatches allowed
-        total_db_size: Total size of sequence database in bases
-        base_composition: BaseComposition object or dict with base frequencies
-        method: 'hamming', 'blast', or 'both'
-    
-    Returns:
-        Dictionary with expected spurious alignment statistics for both Hamming and Edit distance
-    """
-    # Calculate match probability
-    if base_composition is None:
-        match_prob = 0.25  # Uniform distribution
-    else:
-        match_prob = _calculate_match_prob_with_base_composition(base_composition)
-    
-    results = {'blast_evalue': blast_evalue}
-    
-    if method in ['hamming', 'both'] and not blast_evalue:
-        # Hamming distance (substitutions only) - use ungapped parameters
-        expected_matches_hamming = _calculate_edit_distance_probability_hamming(
-            spacer_len, max_edits, match_prob, total_db_size
-        )
-        results['expected_spurious_hamming'] = expected_matches_hamming
-    
-    if method in ['blast', 'both'] and not blast_evalue:
-        # BLAST E-value approach
-        expected_blast = _calculate_blast_evalue(
-            spacer_len, max_edits, match_prob, total_db_size
-        )
-        results['expected_spurious_blast_evalue'] = expected_blast
-    
-    if blast_evalue:
-        results['expected_spurious_blast_evalue'] = _calculate_blast_evalue(
-            spacer_len, max_edits, match_prob, total_db_size
-        )
-    return results
-
-
-def demonstrate_blast_based_spurious_estimation(contigs, spacers, max_edits_range=(2, 10), 
-                                              base_composition=None, verbose=True):
-    """
-    Demonstrate BLAST-based spurious alignment estimation with educational output.
-    
-    This function shows how BLAST E-values work for different distance metrics
-    and parameters, making it easier to understand the relationship between
-    edit distance and spurious alignments.
-    
-    Args:
-        contigs: Dictionary of contig_id -> sequence
-        spacers: Dictionary of spacer_id -> sequence  
-        max_edits_range: Tuple of (min, max) edit distance thresholds to test
-        base_composition: Base composition dict or None for uniform
-        verbose: Whether to print detailed output
-    
-    Returns:
-        Dictionary with results for further analysis
-    """
-    if verbose:
-        print("=== BLAST-based Spurious Alignment Demonstration ===")
-        print("This shows how E-values change with different distance metrics")
-        print()
-    
-    # Calculate total search space
-    total_contig_length = sum(len(seq) for seq in contigs.values())
-    total_spacer_length = sum(len(seq) for seq in spacers.values())
-    avg_spacer_length = total_spacer_length / len(spacers)
-    
-    if verbose:
-        print(f"Search space: {total_contig_length:,} bp in {len(contigs)} contigs")
-        print(f"Query space: {len(spacers)} spacers, avg length {avg_spacer_length:.1f} bp")
-        print()
-    
-    results = {
-        'search_space': total_contig_length,
-        'num_contigs': len(contigs),
-        'num_spacers': len(spacers),
-        'avg_spacer_length': avg_spacer_length,
-        'hamming_results': [],
-        'edit_results': [],
-        'comparisons': []
-    }
-    
-    # Test different edit distance thresholds
-    for max_edits in range(max_edits_range[0], max_edits_range[1] + 1):
-        # Hamming distance (substitutions only)
-        expected_matches_hamming = _calculate_edit_distance_probability_hamming(
-            avg_spacer_length, max_edits, 0.25, total_contig_length
-        )
-        
-        # BLAST E-value calculation
-        expected_matches_edit = _calculate_edit_distance_probability_with_indels(
-            avg_spacer_length, max_edits, 0.25, total_contig_length,
-            k_param=0.14, lambda_param=0.69  # These parameters only apply to BLAST E-value calculation
-        )
-        
-        results['hamming_results'].append({
-            'max_edits': max_edits,
-            'mean_spurious': expected_matches_hamming,
-            'std_spurious': expected_matches_hamming ** 0.5
-        })
-        
-        results['edit_results'].append({
-            'max_edits': max_edits,
-            'mean_spurious': expected_matches_edit,
-            'std_spurious': expected_matches_edit ** 0.5
-        })
-        
-        # Calculate ratio
-        ratio = (expected_matches_edit / expected_matches_hamming 
-                if expected_matches_hamming > 0 else 0)
-        
-        results['comparisons'].append({
-            'max_edits': max_edits,
-            'hamming_evalue': expected_matches_hamming,
-            'edit_evalue': expected_matches_edit,
-            'ratio': ratio
-        })
-        
-        if verbose:
-            print(f"Max edits {max_edits:2d}: Hamming={expected_matches_hamming:.2e}, "
-                  f"Edit={expected_matches_edit:.2e}, Ratio={ratio:.1f}x")
-    
-    if verbose:
-        print()
-        print("Key Insights:")
-        print("• BLAST E-values are extremely conservative (very small numbers)")
-        print("• Edit distance can be MORE restrictive than Hamming distance")
-        print("• Gap penalties make indels expensive in BLAST scoring")
-        print("• The relationship depends on edit distance to sequence length ratio")
-        print()
-    
-    return results
-
-
-def _calculate_score_range_for_edit_distance(length, max_edits, match_reward=2, mismatch_penalty=-3, 
-                                           gap_open_penalty=-5, gap_extend_penalty=-2):
-    """
-    Calculate the range of possible raw scores for a given edit distance threshold.
-    
-    This simulates all possible combinations of substitutions, insertions, and deletions
-    that result in edit distance <= max_edits.
-    
-    Args:
-        length: Length of the query sequence
-        max_edits: Maximum allowed edit distance
-        match_reward: Score for matching characters
-        mismatch_penalty: Score for mismatching base
-        gap_open_penalty: Penalty for opening a gap
-        gap_extend_penalty: Penalty for extending a gap
-    
-    Returns:
-        Tuple of (min_score, max_score) for the given edit distance threshold
-    """
-    scores = []
-    
-    # Enumerate all valid combinations of substitutions, insertions, and deletions
-    for total_ops in range(max_edits + 1):
-        for subs in range(total_ops + 1):
-            for ins in range(total_ops - subs + 1):
-                dels = total_ops - subs - ins
-                
-                # Skip impossible combinations
-                if dels > length:
-                    continue
-                
-                # Calculate aligned length after operations
-                aligned_len_source = length
-                aligned_len_target = length - dels + ins
-                
-                if aligned_len_source <= 0 or aligned_len_target <= 0:
-                    continue
-                
-                # Calculate raw score for this combination
-                # Matches: positions that are neither substituted nor deleted
-                matches = aligned_len_source - subs - dels
-                score = (
-                    matches * match_reward +           # matches
-                    subs * mismatch_penalty +          # substitutions
-                    (ins + dels) * gap_open_penalty +  # gap open penalty for each indel
-                    (ins + dels) * gap_extend_penalty  # gap extend penalty
-                )
-                scores.append(score)
-    
-    return (min(scores), max(scores)) if scores else (0, 0)
-
-def _calculate_edit_distance_probability_with_indels(spacer_len, max_edits, match_prob, 
-                                                   total_db_size,  # Total database size in bases
-                                                   match_reward=1, mismatch_penalty=-3,  # Changed to +1/-3 like BLASTN default
-                                                   gap_open_penalty=-5, gap_extend_penalty=-2,
-                                                   k_param=0.14, lambda_param=1.28):  # Lambda adjusted for +1/-3 scoring
-    """
-    Calculate expected spurious alignments using BLAST-style E-value approach for edit distance.
-    
-    This uses the Karlin-Altschul statistics to estimate the expected number of
-    spurious alignments for edit distance-based matching (with indels).
-    
-    Args:
-        spacer_len: Length of spacer
-        max_edits: Maximum allowed edit distance
-        match_prob: Probability that two random bases match
-        total_db_size: Total size of sequence database in bases
-        match_reward: Score for matching characters
-        mismatch_penalty: Penalty for mismatching base
-        gap_open_penalty: Penalty for opening a gap
-        gap_extend_penalty: Penalty for extending a gap
-        k_param: Karlin-Altschul K parameter for gapped alignments
-        lambda_param: Karlin-Altschul lambda parameter for gapped alignments
-    
-    Returns:
-        Expected number of spurious alignments for this spacer across the entire database
-    """
-    # Calculate the range of possible scores for this edit distance threshold
-    min_score, max_score = _calculate_score_range_for_edit_distance(
-        spacer_len, max_edits, match_reward, mismatch_penalty, 
-        gap_open_penalty, gap_extend_penalty
-    )
-    
-    # Convert to bit score (like BLAST does)
-    # S' = (lambda * S - ln(K)) / ln(2)
-    # where S is the raw score
-    bit_score = (lambda_param * min_score - np.log(k_param)) / np.log(2)
-    
-    # Calculate effective lengths (simplified from BLAST's approach)
-    # In BLAST, these account for edge effects and statistical adjustments
-    effective_query_len = max(1, spacer_len - 11)  # BLAST-like adjustment
-    effective_db_size = max(1, total_db_size - (11 * (total_db_size // spacer_len)))
-    
-    # Calculate E-value using bit score and effective lengths
-    # E = mn * 2^(-S')
-    # where m and n are effective lengths
-    e_value = (effective_query_len * effective_db_size) * np.power(2, -bit_score)
-    
-    return e_value
-
-def estimate_expected_spurious_alignments_fast(
-    contigs, 
-    spacers, 
-    max_mismatches=5, 
-    max_edit_distance=None,
-    base_composition=None,
-    use_edit_distance=False
+def load_multiple_fractions_duckdb(
+    fraction_parquet_files, threads=4, memory_limit="50GB"
 ):
     """
-    Fast statistical estimate of expected spurious alignments using two approaches:
-    1. Hamming distance probability calculation (theoretical number of sequences within Hamming distance)
-    2. BLAST E-value calculation (statistically expected number of alignments by chance)
-    
-    Note: BLAST E-values are typically much lower than Hamming-based estimates because:
-    - They account for gap penalties and scoring matrices
-    - They are calibrated for biological relevance
-    - They are intentionally conservative to minimize false positives
+    Load and combine results from multiple fraction parquet files using DuckDB.
+    This enables analysis of stratified subsamples without loading all data into memory.
+
+    Args:
+        fraction_parquet_files(dict): Dictionary mapping fraction values to parquet file paths
+            e.g., {0.001: 'path/to/alignments_fraction_0.001.parquet', ...}
+        threads(int): Number of threads for DuckDB to use
+        memory_limit(str): Memory limit for DuckDB operations (e.g., "50GB")
+
+    Returns
+    duckdb.DuckDBPyConnection
+        A DuckDB connection with a registered view "fractions" containing all loaded data
+    """
+    # STRICT thread enforcement via environment variables
+    os.environ["OMP_NUM_THREADS"] = str(threads)
+    os.environ["OPENBLAS_NUM_THREADS"] = str(threads)
+    os.environ["MKL_NUM_THREADS"] = str(threads)
+    os.environ["VECLIB_MAXIMUM_THREADS"] = str(threads)
+    os.environ["NUMEXPR_NUM_THREADS"] = str(threads)
+
+    print(
+        f"\n[DuckDB] Loading {len(fraction_parquet_files)} fractions with {threads} threads"
+    )
+
+    con = duckdb.connect(database=":memory:")
+    con.execute(f"SET threads TO {threads};")
+    con.execute("SET preserve_insertion_order = false;")
+    con.execute(f"SET memory_limit = '{memory_limit}';")
+
+    # Build union query for all fractions
+    union_queries = []
+    for frac, pf in sorted(fraction_parquet_files.items()):
+        if os.path.exists(pf) and os.path.getsize(pf) > 0:
+            union_queries.append(
+                f"SELECT *, {frac} as fraction FROM read_parquet('{pf}')"
+            )
+            print(f"  Fraction {frac}: {os.path.getsize(pf) / 1024 / 1024:.1f} MB")
+        else:
+            print(f"  Fraction {frac}: NOT FOUND or empty, skipping")
+
+    if not union_queries:
+        raise ValueError("No valid parquet files found")
+
+    # Create view for all fractions
+    union_query = " UNION ALL ".join(union_queries)
+    con.execute(f"CREATE VIEW fractions AS {union_query}")
+    print(f"[DuckDB] Created view 'fractions' with {len(union_queries)} fractions")
+
+    return con
+
+
+def query_fractions_duckdb(con, query_template, output_parquet=None):
+    """
+    Execute a query on the DuckDB fractions view and optionally save to parquet.
+
+    Args:
+        con(duckdb.DuckDBPyConnection): DuckDB connection from load_multiple_fractions_duckdb()
+        query_template(str): SQL query, use 'fractions' as the table name.
+            e.g., "SELECT tool, COUNT(*) as count FROM fractions GROUP BY tool"
+        output_parquet(str): Path to save results as parquet. If None, returns Polars DataFrame.
+
+    Returns
+    polars.DataFrame or None
+        If output_parquet is None, returns results as Polars DataFrame.
+        If output_parquet is specified, saves to disk and returns None.
+    """
+    print("\n[DuckDB] Executing query...")
+
+    if output_parquet:
+        copy_query = f"""
+            COPY (
+                {query_template}
+            ) TO '{output_parquet}' (FORMAT 'PARQUET', COMPRESSION 'SNAPPY', ROW_GROUP_SIZE 100000)
+        """
+        con.execute(copy_query)
+        print(f"[DuckDB] Results saved to {output_parquet}")
+        return None
+    else:
+        result = con.execute(query_template).pl()
+        return result
+
+
+def create_spacer_counts_with_tools_duckdb(
+    parquet_path: str,
+    tools_list: list,
+    mismatches: int = 3,
+    exact_or_max: str = "exact",
+    output_parquet: str = None,
+    threads: int = 12,
+    memory_limit: str = "100GB",
+):
+    """
+    DuckDB version of create_spacer_counts_with_tools.
+    Calculates occurrence counts and tool detection fractions without loading full dataset.
     
     Args:
-        contigs: Dictionary of contig_id -> sequence (or just contig count and total length)
-        spacers: Dictionary of spacer_id -> sequence
-        max_mismatches: Maximum mismatches to consider (for Hamming distance)
-        max_edit_distance: Maximum edit distance to consider (for edit distance with indels)
-                          If None and use_edit_distance=True, uses max_mismatches
-        base_composition: BaseComposition object or dict with a_frac, t_frac, c_frac, g_frac
-                         If None, assumes uniform (0.25 each)
-        use_edit_distance: If True, the 'mean_spurious' field uses edit distance
-                          If False, the 'mean_spurious' field uses Hamming distance
-                          (Both are always calculated and returned)
-    
-    Returns:
-        Dictionary with both Hamming-based and BLAST-based estimates, including:
-        - expected_spurious_hamming: Theoretical count of sequences within Hamming distance
-        - blast_evalue: BLAST E-value (expected number of chance alignments)
-        - std_spurious_hamming: Standard deviation of Hamming-based estimate
-        - std_spurious_edit: Standard deviation of BLAST-based estimate
-        - max_spurious_hamming: Upper bound for Hamming-based estimate (mean + 2*std)
-        - min_spurious_hamming: Lower bound for Hamming-based estimate (mean - 2*std)
-        - max_blast_evalue: Upper bound for BLAST-based estimate (mean + 2*std)
-        - min_blast_evalue: Lower bound for BLAST-based estimate (mean - 2*std)
-        - per_spacer_expected_hamming: List of Hamming-based estimates per spacer
-        - per_spacer_blast_evalue: List of BLAST-based estimates per spacer
-        - method: Description of the methods used
-        - base_composition: Base composition used for the calculation
-        - base_comp_note: Note on the base composition uniformity
-        - distance_type: Type of distance used for the estimate (hamming or blast_evalue)
-        - distance_note: Description of the distance metric used
-    """
-    # Handle base composition
-    if base_composition is None:
-        base_comp_dict = {'a_frac': 0.25, 't_frac': 0.25, 'c_frac': 0.25, 'g_frac': 0.25}
-    elif isinstance(base_composition, dict):
-        base_comp_dict = base_composition
-    elif hasattr(base_composition, 'a_frac'):
-        base_comp_dict = {
-            'a_frac': base_composition.a_frac,
-            't_frac': base_composition.t_frac,
-            'c_frac': base_composition.c_frac,
-            'g_frac': base_composition.g_frac
-        }
-    else:
-        base_comp_dict = {'a_frac': 0.25, 't_frac': 0.25, 'c_frac': 0.25, 'g_frac': 0.25}
-    
-    match_prob = _calculate_match_prob_with_base_composition(base_comp_dict)
-    
-    # Calculate total search space
-    if isinstance(contigs, dict):
-        total_contig_length = sum(len(seq) for seq in contigs.values())
-        num_contigs = len(contigs)
-    else:
-        # If just numbers provided
-        total_contig_length = contigs
-        num_contigs = 1
-    
-    # Calculate spacer statistics
-    if isinstance(spacers, dict):
-        spacer_lengths = [len(seq) for seq in spacers.values()]
-        num_spacers = len(spacers)
-    else:
-        # If just numbers provided
-        spacer_lengths = [spacers]
-        num_spacers = 1
-    
-    # Determine max edits for both calculations
-    max_edits = max_mismatches
-    if max_edit_distance is not None:
-        max_edits = max_edit_distance
-    
-    # For Hamming distance: Account for both strands
-    total_db_size_hamming = total_contig_length * 2
-    
-    # For BLAST E-value: Use effective database size (with length adjustments)
-    # Based on BLAST's statistical theory for local alignment
-    avg_spacer_len = sum(spacer_lengths) / len(spacer_lengths)
-    H = 0.5772156649  # Euler's constant
-    effective_db_size = total_contig_length / (avg_spacer_len - H)
-    
-    # Calculate BOTH Hamming and Edit distance estimates
-    expected_matches_hamming_per_spacer = []
-    expected_matches_edit_per_spacer = []
-    
-    for spacer_len in spacer_lengths:
-        # Hamming distance (substitutions only)
-        expected_matches_hamming = _calculate_edit_distance_probability_hamming(
-            spacer_len, max_edits, match_prob, total_db_size_hamming
-        )
-        expected_matches_hamming_per_spacer.append(expected_matches_hamming)
+        parquet_path: Path to parquet file with recalculated mismatches
+        tools_list: List of tool names
+        mismatches: Number of mismatches (exact or max depending on exact_or_max)
+        exact_or_max: "exact" for == mismatches, "max" for <= mismatches
+        output_parquet: Optional path to save results
+        threads: Number of threads for DuckDB
+        memory_limit: Memory limit for DuckDB
         
-        # BLAST E-value calculation with corrected parameters
-        # Using proper nucleotide BLAST parameters
-        expected_matches_edit = _calculate_edit_distance_probability_with_indels(
-            spacer_len, max_edits, match_prob, effective_db_size,
-            match_reward=1, mismatch_penalty=-3,  # Standard BLASTN scoring
-            k_param=0.14, lambda_param=1.28)  # Lambda adjusted for +1/-3 scoring
-        expected_matches_edit_per_spacer.append(expected_matches_edit)
+    Returns:
+        Polars DataFrame or None (if output_parquet specified)
+    """
+    con = duckdb.connect(database=":memory:")
+    con.execute(f"SET threads TO {threads};")
+    con.execute(f"SET memory_limit = '{memory_limit}';")
     
-    # Total expected spurious alignments (sum over all spacers)
-    total_expected_hamming = sum(expected_matches_hamming_per_spacer)
-    total_expected_edit = sum(expected_matches_edit_per_spacer)
-    
-    # Standard deviations
-    std_dev_hamming = np.sqrt(total_expected_hamming)
-    std_dev_edit = np.sqrt(total_expected_edit)
-    
-    base_comp_note = 'uniform' if all(abs(v - 0.25) < 1e-6 for v in base_comp_dict.values()) else 'non-uniform'
-    
-    # Return both estimates
-    result = {
-        'expected_spurious_hamming': total_expected_hamming,
-        'std_spurious_hamming': std_dev_hamming,
-        'blast_evalue': total_expected_edit,  # Renamed from expected_spurious_edit
-        'blast_evalue_std': std_dev_edit,     # Renamed from std_spurious_edit
-        'max_spurious_hamming': total_expected_hamming + 2 * std_dev_hamming,
-        'min_spurious_hamming': max(0, total_expected_hamming - 2 * std_dev_hamming),
-        'max_blast_evalue': total_expected_edit + 2 * std_dev_edit,
-        'min_blast_evalue': max(0, total_expected_edit - 2 * std_dev_edit),
-        'per_spacer_expected_hamming': expected_matches_hamming_per_spacer,
-        'per_spacer_blast_evalue': expected_matches_edit_per_spacer,  # Renamed
-        'method': 'combined_estimates',
-        'base_composition': base_comp_dict,
-        'base_comp_note': base_comp_note,
-        'note': f'Combined Hamming-based and BLAST E-value estimates with {base_comp_note} base composition'
-    }
-    
-    # For backward compatibility, also include the single estimate based on use_edit_distance
-    if use_edit_distance:
-        result['mean_spurious'] = total_expected_edit
-        result['std_spurious'] = std_dev_edit
-        result['distance_type'] = 'blast_evalue'  # Renamed from edit_distance
-        result['distance_note'] = f'BLAST E-value estimate (conservative)'
+    # Build mismatch filter
+    if exact_or_max == "max":
+        mismatch_filter = f"alignment_test <= {mismatches}"
     else:
-        result['mean_spurious'] = total_expected_hamming
-        result['std_spurious'] = std_dev_hamming
-        result['distance_type'] = 'hamming'
-        result['distance_note'] = f'Hamming distance <= {max_mismatches} (theoretical count)'
+        mismatch_filter = f"alignment_test = {mismatches}"
     
+    # Create tools list SQL
+    tools_sql = ", ".join([f"'{tool}'" for tool in tools_list])
+    
+    query = f"""
+        WITH spacer_counts AS (
+            -- Get total occurrences per spacer
+            SELECT 
+                spacer_id,
+                COUNT(DISTINCT contig_id) as n_occurrences
+            FROM read_parquet('{parquet_path}')
+            WHERE {mismatch_filter}
+            GROUP BY spacer_id
+        ),
+        tool_matches AS (
+            -- Get matches per tool and spacer
+            SELECT 
+                spacer_id,
+                tool,
+                COUNT(DISTINCT contig_id) as tool_matches
+            FROM read_parquet('{parquet_path}')
+            WHERE {mismatch_filter}
+            GROUP BY spacer_id, tool
+        ),
+        all_combinations AS (
+            -- Cross join spacers with all tools
+            SELECT 
+                sc.spacer_id,
+                sc.n_occurrences,
+                t.tool
+            FROM spacer_counts sc
+            CROSS JOIN (SELECT UNNEST([{tools_sql}]) as tool) t
+        )
+        SELECT 
+            ac.spacer_id,
+            ac.n_occurrences,
+            ac.tool,
+            COALESCE(tm.tool_matches, 0) as tool_matches,
+            COALESCE(tm.tool_matches, 0)::DOUBLE / ac.n_occurrences as fraction
+        FROM all_combinations ac
+        LEFT JOIN tool_matches tm
+            ON ac.spacer_id = tm.spacer_id 
+            AND ac.tool = tm.tool
+    """
+    
+    # Pivot to get tools as columns
+    tool_columns = ', '.join([f"MAX(CASE WHEN tool = '{tool}' THEN fraction ELSE 0 END) as \"{tool}\"" for tool in tools_list])
+    pivot_query = f"""
+        WITH base_data AS ({query})
+        SELECT 
+            spacer_id,
+            n_occurrences,
+            {tool_columns}
+        FROM base_data
+        GROUP BY spacer_id, n_occurrences
+    """
+    
+    if output_parquet:
+        con.execute(f"""
+            COPY ({pivot_query}) 
+            TO '{output_parquet}' (FORMAT PARQUET, COMPRESSION SNAPPY)
+        """)
+        con.close()
+        return None
+    else:
+        result = con.execute(pivot_query).pl()
+        con.close()
+        return result
+
+
+def get_summary_stats_duckdb(
+    parquet_path: str,
+    threads: int = 12,
+    memory_limit: str = "100GB",
+):
+    """
+    Get summary statistics from parquet file using DuckDB.
+    
+    Returns summary by tool without loading full dataset into memory.
+    """
+    con = duckdb.connect(database=":memory:")
+    con.execute(f"SET threads TO {threads};")
+    con.execute(f"SET memory_limit = '{memory_limit}';")
+    
+    query = """
+        SELECT 
+            tool,
+            AVG(alignment_test) as mean_mismatches,
+            COUNT(DISTINCT spacer_id) as n_spacers,
+            COUNT(DISTINCT contig_id) as n_contigs,
+            COUNT(*) as total_alignments
+        FROM read_parquet(?)
+        GROUP BY tool
+        ORDER BY tool
+    """
+    
+    result = con.execute(query, [parquet_path]).pl()
+    con.close()
     return result
+
+
+def create_tool_comparison_matrix_duckdb(
+    parquet_path: str,
+    tools_list: list,
+    n_mismatches: int,
+    output_csv: str = None,
+    threads: int = 12,
+    memory_limit: str = "100GB",
+):
+    """
+    Create tool comparison matrix using DuckDB.
+    Cell(i,j) = number of unique pairs in tool i but not in tool j.
+    
+    Returns Polars DataFrame with matrix.
+    """
+    import numpy as np
+    
+    con = duckdb.connect(database=":memory:")
+    con.execute(f"SET threads TO {threads};")
+    con.execute(f"SET memory_limit = '{memory_limit}';")
+    
+    # Create empty matrix
+    matrix_data = np.zeros((len(tools_list), len(tools_list)), dtype=int)
+    
+    # Get unique pairs for each tool
+    for i, tool_x in enumerate(tools_list):
+        for j, tool_y in enumerate(tools_list):
+            if tool_x == tool_y:
+                continue
+            
+            # Count pairs in x but not in y using DuckDB
+            query = f"""
+                WITH tool_x_pairs AS (
+                    SELECT DISTINCT contig_id, spacer_id, strand, "start", "end"
+                    FROM read_parquet('{parquet_path}')
+                    WHERE tool = '{tool_x}' AND alignment_test = {n_mismatches}
+                ),
+                tool_y_pairs AS (
+                    SELECT DISTINCT contig_id, spacer_id, strand, "start", "end"
+                    FROM read_parquet('{parquet_path}')
+                    WHERE tool = '{tool_y}' AND alignment_test = {n_mismatches}
+                )
+                SELECT COUNT(*) as count
+                FROM tool_x_pairs
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM tool_y_pairs
+                    WHERE tool_x_pairs.contig_id = tool_y_pairs.contig_id
+                        AND tool_x_pairs.spacer_id = tool_y_pairs.spacer_id
+                        AND tool_x_pairs.strand = tool_y_pairs.strand
+                        AND tool_x_pairs."start" = tool_y_pairs."start"
+                        AND tool_x_pairs."end" = tool_y_pairs."end"
+                )
+            """
+            
+            count = con.execute(query).fetchone()[0]
+            matrix_data[i, j] = count
+    
+    con.close()
+    
+    # Convert to DataFrame
+    matrix = pl.DataFrame(matrix_data, schema=tools_list)
+    matrix = matrix.with_columns(pl.Series(name="tool1", values=tools_list, dtype=pl.Utf8))
+    
+    if output_csv:
+        matrix.write_csv(output_csv, separator='\t')
+    
+    return matrix
+
+
+def load_fraction_results_lazy(fraction_parquet_files, add_fraction_col=True):
+    """
+    Load multiple fraction parquet files as lazy Polars frames for memory-efficient processing.
+
+    Args:
+        fraction_parquet_files(dict): Dictionary mapping fraction values to parquet file paths
+        add_fraction_col(bool): If True, add fraction column to each frame
+
+    Returns
+    polars.LazyFrame
+        Concatenated lazy frames from all fractions
+    """
+    lazy_frames = []
+
+    for frac, pf in sorted(fraction_parquet_files.items()):
+        if os.path.exists(pf) and os.path.getsize(pf) > 0:
+            lf = pl.scan_parquet(pf)
+            if add_fraction_col:
+                lf = lf.with_columns(pl.lit(frac).alias("fraction"))
+            lazy_frames.append(lf)
+            print(f"  Fraction {frac}: loaded (lazy)")
+        else:
+            print(f"  Fraction {frac}: NOT FOUND or empty, skipping")
+
+    if not lazy_frames:
+        raise ValueError("No valid parquet files found")
+
+    combined = pl.concat(lazy_frames)
+    print(f"[Polars] Concatenated {len(lazy_frames)} fractions as lazy frame")
+
+    return combined
+
+
+def analyze_sassy_edit_distance_false_positives(
+    sassy_file,
+    max_edit_distance=5,
+    spacer_lendf=None,
+    ref_file=None,
+    threads=4,
+    threads_alignment=1,
+):
+    """
+    Analyze false positive rate using sassy output (which uses edit distance only).
+    Compare actual observed false positives to expected values based on dataset statistics.
+
+    Args:
+        sassy_file(str): Path to sassy TSV output
+        max_edit_distance(int): Maximum edit distance to consider
+        spacer_lendf(polars.DataFrame): DataFrame with 'spacer_id' and 'length' columns
+        ref_file(str): Path to reference contig fasta file
+        threads(int): Threads for DuckDB operations
+        threads_alignment(int): Threads for parasail alignment calculations
+
+    Returns
+    dict
+        Analysis results including false positive rates, observed vs expected, etc.
+    """
+    # STRICT thread enforcement
+    os.environ["OMP_NUM_THREADS"] = str(threads)
+    os.environ["OPENBLAS_NUM_THREADS"] = str(threads)
+    os.environ["MKL_NUM_THREADS"] = str(threads)
+    os.environ["VECLIB_MAXIMUM_THREADS"] = str(threads)
+    os.environ["NUMEXPR_NUM_THREADS"] = str(threads)
+
+    print("\n[EditDistance] Analyzing false positives in sassy output (edit distance)")
+
+    # Parse sassy output with edit distance filter
+    sassy_results = parse_sassy(
+        sassy_file,
+        max_mismatches=max_edit_distance,
+        spacer_lendf=spacer_lendf,
+        threads=threads,
+        ref_file=ref_file,
+    )
+
+    print(
+        f"Loaded {sassy_results.height:,} sassy alignments with edit distance ≤ {max_edit_distance}"
+    )
+
+    # Load spacer and contig sequences for recalculation with hamming distance
+    print("Recalculating alignments with hamming distance for comparison...")
+
+    # Convert to eager if needed
+    if hasattr(sassy_results, "collect"):
+        sassy_results = sassy_results.collect()
+
+    # Get unique regions for verification
+    unique_regions = sassy_results.select(
+        ["spacer_id", "contig_id", "strand", "start", "end"]
+    ).unique()
+
+    print(f"Verifying {unique_regions.height:,} unique regions...")
+
+    # Load sequences
+    unique_regions = populate_pldf_withseqs_needletail(
+        seqfile=spacer_lendf.to_dict(as_series=False)
+        if isinstance(spacer_lendf, pl.DataFrame)
+        else spacer_lendf,
+        pldf=unique_regions,
+        idcol="spacer_id",
+        seqcol="spacer_seq",
+    )
+
+    # This would require more detailed implementation based on your specific needs
+    # For now, return basic structure
+    return {
+        "sassy_edit_results": sassy_results,
+        "unique_regions_analyzed": unique_regions.height,
+        "message": "Edit distance false positive analysis - detailed implementation in progress",
+    }
+
+
+def compare_tool_results_to_ground_truth(
+    tool_results, ground_truth, max_hamming=3, max_edit=5
+):
+    """
+    Compare tool alignment results to ground truth using both hamming and edit distance.
+
+    For simulated data, we have ground truth and can classify each tool result as:
+    - TRUE_POSITIVE_HAMMING: In ground truth AND hamming distance <= max_hamming
+    - TRUE_POSITIVE_EDIT: In ground truth AND edit distance <= max_edit
+    - FALSE_POSITIVE_HAMMING: NOT in ground truth BUT hamming distance <= max_hamming
+    - FALSE_POSITIVE_EDIT: NOT in ground truth BUT edit distance <= max_edit
+    - MISSED (False Negative): In ground truth BUT distance > threshold
+
+    Args:
+        tool_results(polars.DataFrame): DataFrame with tool results (spacer_id, contig_id, start, end, strand, mismatches)
+        ground_truth(polars.DataFrame): DataFrame with ground truth (spacer_id, contig_id, start, end, strand, mismatches)
+        max_hamming(int): Maximum hamming distance threshold
+        max_edit(int): Maximum edit distance threshold
+
+    Returns:
+        DataFrame with results categorized by type
+    """
+    # Create position-based keys for ground truth (accounting for possible multiple insertions)
+    gt_set = set()
+    for row in ground_truth.iter_rows(named=True):
+        key = (row["spacer_id"], row["contig_id"], row["strand"])
+        gt_set.add(key)
+
+    # Load sequences if not already present
+    if (
+        "spacer_seq" not in tool_results.columns
+        or "contig_seq" not in tool_results.columns
+    ):
+        raise ValueError("tool_results must have spacer_seq and contig_seq columns")
+
+    # Recalculate distances and categorize
+    categorized = []
+    for row in tool_results.iter_rows(named=True):
+        # Recalculate hamming and edit distance
+        hamming = calculate_hamming_distance(
+            row["spacer_seq"],
+            row["contig_seq"],
+            strand=row["strand"],
+            start=row["start"],
+            end=row["end"],
+        )
+
+        edit = calculate_edit_distance(
+            row["spacer_seq"],
+            row["contig_seq"],
+            strand=row["strand"],
+            start=row["start"],
+            end=row["end"],
+        )
+
+        # Check if in ground truth (positional)
+        key = (row["spacer_id"], row["contig_id"], row["strand"])
+        in_ground_truth = key in gt_set
+
+        # Categorize
+        if in_ground_truth:
+            hamming_cat = (
+                "TRUE_POSITIVE_HAMMING" if hamming <= max_hamming else "MISSED_HAMMING"
+            )
+            edit_cat = "TRUE_POSITIVE_EDIT" if edit <= max_edit else "MISSED_EDIT"
+        else:
+            hamming_cat = (
+                "FALSE_POSITIVE_HAMMING" if hamming <= max_hamming else "NOT_ALIGNED"
+            )
+            edit_cat = "FALSE_POSITIVE_EDIT" if edit <= max_edit else "NOT_ALIGNED"
+
+        categorized.append(
+            {
+                "spacer_id": row["spacer_id"],
+                "contig_id": row["contig_id"],
+                "start": row["start"],
+                "end": row["end"],
+                "strand": row["strand"],
+                "hamming_distance": hamming,
+                "edit_distance": edit,
+                "in_ground_truth": in_ground_truth,
+                "hamming_category": hamming_cat,
+                "edit_category": edit_cat,
+            }
+        )
+
+    return pl.DataFrame(categorized)
