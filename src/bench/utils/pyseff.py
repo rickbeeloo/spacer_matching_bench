@@ -29,12 +29,12 @@ def parse_time_to_seconds(time_str):
                 return int(hours) * 3600 + int(minutes) * 60 + int(seconds)
             return 0
     except (ValueError, AttributeError):
-        return 0
+        return float(0)
 
 
 def parse_mem(mem_str):
     if not mem_str:
-        return 0
+        return float(0)
     try:
         if mem_str.endswith("K"):
             return float(mem_str[:-1]) / 1024
@@ -45,7 +45,7 @@ def parse_mem(mem_str):
         else:
             return float(mem_str)
     except (ValueError, AttributeError):
-        return 0
+        return float(0)
 
 
 def format_seconds(seconds):
@@ -60,7 +60,7 @@ def format_seconds(seconds):
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
-def pyseff(sacct_df=None):
+def pyseff(sacct_df=None,start_date = "2025-10-01", remove_cancelled=True,remove_failed=True, calculate_memory_efficiency=True,calculate_cpu_efficiency=True):
     """
     Main function to analyze job efficiency from sacct output, similar to Slurm's seff
 
@@ -82,7 +82,7 @@ def pyseff(sacct_df=None):
             "sacct -u $USER --parsable "
             "--format=JobID,JobName,State,ExitCode,AllocCPUS,Elapsed,"
             "TotalCPU,MaxRSS,ReqMem "
-            "--starttime 2025-01-01 "
+            f"--starttime {start_date} "
             "> " + tmp_file.name
         )
         subprocess.run(sacct_cmd, shell=True, text=True, capture_output=True)
@@ -91,74 +91,105 @@ def pyseff(sacct_df=None):
     sacct_df = sacct_df.with_columns(
         pl.col("JobID").str.split(".").list.first().alias("BaseJobID")
     )
-    cancelled_jobs = (
-        sacct_df.filter(pl.col("State").str.contains_any(patterns=["CANCELLED"]))[
-            "BaseJobID"
-        ]
-        .unique()
-        .to_list()
-    )
+    # Remove cancelled jobs if specified
+    if remove_cancelled:
+        cancelled_jobs = (
+            sacct_df.filter(pl.col("State").str.contains_any(patterns=["CANCELLED"]))[
+                "BaseJobID"
+            ]
+            .unique()
+            .to_list()
+        )
 
-    # Get base job IDs and filter out cancelled jobs
-    sacct_df = sacct_df.filter(~pl.col("BaseJobID").is_in(cancelled_jobs))
+        # Get base job IDs and filter out cancelled jobs
+        sacct_df = sacct_df.filter(~pl.col("BaseJobID").is_in(cancelled_jobs))
+    # Remove failed jobs if specified
+    if remove_failed:
+        failed_jobs = (
+            sacct_df.filter(pl.col("State").str.contains_any(patterns=["FAILED"]))[
+                "BaseJobID"
+            ]
+            .unique()
+            .to_list()
+        )
 
-    # Calculate CPU times in seconds
+        # Get base job IDs and filter out failed jobs
+        sacct_df = sacct_df.filter(~pl.col("BaseJobID").is_in(failed_jobs))
+
+    if sacct_df.is_empty():
+        return sacct_df
+    
+    # convert CPU time to seconds
     sacct_df = sacct_df.with_columns(
-        [
-            pl.col("TotalCPU")
-            .map_elements(parse_time_to_seconds, return_dtype=pl.UInt32)
-            .alias("TotalCPU_Seconds"),
-            pl.col("Elapsed")
-            .map_elements(parse_time_to_seconds, return_dtype=pl.UInt32)
-            .alias("Elapsed_Seconds"),
-        ]
-    )
-
-    # Aggregate by BaseJobID
-    sacct_df = sacct_df.group_by("BaseJobID").agg(
-        [
-            pl.col("JobName").first().alias("JobName"),
-            pl.col("AllocCPUS").max().alias("AllocCPUS"),
-            pl.col("State").unique().alias("State"),
-            pl.col("ExitCode").unique().alias("ExitCode"),
-            pl.col("MaxRSS").max().alias("MaxRSS"),
-            pl.col("ReqMem").first().alias("ReqMem"),
-            pl.col("Elapsed_Seconds").sum().alias("Elapsed_Seconds"),
-            pl.col("TotalCPU_Seconds").sum().alias("TotalCPU_Seconds"),
-        ]
-    )
-
+            [
+                pl.col("TotalCPU")
+                .map_elements(parse_time_to_seconds, return_dtype=pl.UInt32)
+                .alias("TotalCPU_Seconds"),
+                pl.col("Elapsed")
+                .map_elements(parse_time_to_seconds, return_dtype=pl.UInt32)
+                .alias("Elapsed_Seconds"),
+            ]
+        )
+    
     # Calculate CPU efficiency
-    sacct_df = sacct_df.with_columns(
-        [
-            (
-                pl.col("TotalCPU_Seconds")
+    if calculate_cpu_efficiency:
+        sacct_df = sacct_df.with_columns(
+            [
+                (
+                    pl.col("TotalCPU_Seconds")
                 / (pl.col("Elapsed_Seconds") * pl.col("AllocCPUS"))
                 * 100
             )
             .round(2)
             .alias("CPU_Efficiency")
+            ]
+        )
+
+    # Always create MaxRSS_MB and ReqMem_MB columns
+    sacct_df = sacct_df.with_columns(
+        [
+            pl.col("MaxRSS").map_elements(parse_mem, return_dtype=pl.Float64,skip_nulls=True)
+            .alias("MaxRSS_MB"),
+            pl.col("ReqMem")
+            .map_elements(parse_mem, return_dtype=pl.Float64,skip_nulls=True)
+            .alias("ReqMem_MB"),
         ]
     )
 
-    # Calculate memory efficiency
-    sacct_df = sacct_df.with_columns(
-        [
-            pl.col("MaxRSS")
-            .map_elements(parse_mem, return_dtype=pl.Float64)
-            .alias("MaxRSS_MB"),
-            pl.col("ReqMem")
-            .map_elements(parse_mem, return_dtype=pl.Float64)
-            .alias("ReqMem_MB"),
+    # Calculate memory efficiency if requested
+    if calculate_memory_efficiency:
+        sacct_df = sacct_df.with_columns(
             (
-                pl.col("MaxRSS").map_elements(parse_mem, return_dtype=pl.Float64)
-                / pl.col("ReqMem").map_elements(parse_mem, return_dtype=pl.Float64)
-                * 100
+                (pl.col("MaxRSS_MB") / pl.col("ReqMem_MB")) * 100
             )
             .round(2)
-            .alias("Memory_Efficiency"),
-        ]
-    )
+            .alias("Memory_Efficiency")
+        )
+
+    # Aggregate by BaseJobID
+    agg_cols = [
+        pl.col("JobName").first().alias("JobName"),
+        pl.col("AllocCPUS").max().alias("AllocCPUS"),
+        pl.col("State").unique().alias("State"),
+        pl.col("ExitCode").unique().alias("ExitCode"),
+        pl.col("MaxRSS").max().alias("MaxRSS"),
+        pl.col("ReqMem").first().alias("ReqMem"),
+        pl.col("Elapsed_Seconds").sum().alias("Elapsed_Seconds"),
+        pl.col("TotalCPU_Seconds").sum().alias("TotalCPU_Seconds"),
+        # Always include memory columns
+        pl.col("MaxRSS_MB").max().alias("MaxRSS_MB"),
+        pl.col("ReqMem_MB").first().alias("ReqMem_MB"),
+    ]
+    
+    # Add CPU efficiency to aggregation if it was calculated
+    if calculate_cpu_efficiency:
+        agg_cols.append(pl.col("CPU_Efficiency").mean().alias("CPU_Efficiency"))
+    
+    # Add Memory efficiency to aggregation if it was calculated
+    if calculate_memory_efficiency:
+        agg_cols.append(pl.col("Memory_Efficiency").mean().alias("Memory_Efficiency"))
+    
+    sacct_df = sacct_df.group_by("BaseJobID").agg(agg_cols)
 
     # Format time columns back to human-readable format
     result_df = sacct_df.with_columns(
@@ -170,21 +201,21 @@ def pyseff(sacct_df=None):
             .map_elements(format_seconds, return_dtype=pl.Utf8)
             .alias("TotalCPU"),
         ]
-    ).select(
-        [
-            "BaseJobID",
-            "JobName",
-            "State",
-            "ExitCode",
-            "AllocCPUS",
-            "Elapsed",
-            "TotalCPU",
-            "CPU_Efficiency",
-            "MaxRSS_MB",
-            "ReqMem_MB",
-            "Memory_Efficiency",
-        ]
-    )
+    ) #.select(
+        # [
+    #         "BaseJobID",
+    #         "JobName",
+    #         "State",
+    #         "ExitCode",
+    #         "AllocCPUS",
+    #         "Elapsed",
+    #         "TotalCPU",
+    #         # "CPU_Efficiency",
+    #         "MaxRSS_MB",
+    #         "ReqMem_MB",
+    #         # "Memory_Efficiency",
+    #     ]
+    # )
 
     return result_df
 
