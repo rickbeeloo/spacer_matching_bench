@@ -51,31 +51,48 @@ Yet despite these variations, the choice of spacer-to-protospacer search or alig
 
 The choice of tool and its parameters can significantly impact the detection of these multiple matches, with some tools prioritizing speed over completeness by limiting the number of reported matches, or by other internal heuristics such as seed sequence selection from high occurring sequences being penalized. This trade-off between sensitivity and computational efficiency is especially important to consider as most available tools were designed for different tasks than spacer-protospacer matching (e.g. expression analysis, homology detection, and variant calling), and under different assumptions (such as reference and query sequence size and database size or the nature of the reference source: from a single isolate or metagenomic sample rather than from aggregation of sequences from different sources).
 
+**Algorithmic Approaches and Distance Metrics:**
+*** NOTE THIS NEEDS TO BE EXTENDED / MORE DETAILED (which heuristics, what algos, what intended uses...)
+
+A fundamental consideration in tool selection is the underlying algorithmic approach and distance metric used. Tools can be broadly categorized as:
+
+1. **Exhaustive vs Heuristic:** Exhaustive methods guarantee finding all matches within a specified distance threshold but are computationally intensive. Heuristic methods use various optimizations (seed-based indexing, chaining algorithms, k-mer filtering) to dramatically improve speed but may miss some matches. For large-scale analyses, heuristic methods are often necessary, but understanding their limitations is critical.
+
+2. **Distance Metric Type:** Tools differ fundamentally in how they measure sequence similarity:
+   - **Hamming distance** counts only substitutions (e.g., bowtie1, indelfree.sh)
+   - **Edit/affine distance** allows insertions and deletions in addition to substitutions (e.g., bowtie2, minimap2, BLAST, sassy, mmseqs)
+   - **Exact matching** requires perfect sequence identity (e.g., spacer-containment, grep, )
+
+Importantly, when comparing tools using different distance metrics with the same numeric threshold (e.g., "≤3 mismatches"), edit/affine-based algorithms will naturally report more matches than hamming-based ones. This reflects different computational problems being solved rather than differences in tool quality. From a biological perspective, the choice of distance metric should reflect the expected mutation patterns in the system being studied. For CRISPR spacer-protospacer matching, several lines of evidence suggest hamming distance is more appropriate: indels are rarer than substitutions (~4× in bacteria), most experimental escape mutations are single substitutions, and phage genomes are coding-dense making frameshift-inducing indels often lethal. Furthermore, our empirical analysis demonstrates that allowing indels dramatically increases false positive rates (>10% for edit distance >3) compared to hamming distance (≤1% for hamming ≤3), without providing substantial additional biological insight for most applications.
+
 Another potential consideration is the computational resources requirements. Memory, storage, and availability of CPU cores are factors differing between tools. Parameter choice may also impact these factors considerably, with certain tools offering tunable parameters to trade-off between sensitivity and computational efficiency. In recent years, spacer database size has been rapidly increasing - from 366,799 unique spacers in 2017 [@Shmakov_2017] to 1,173,006 unique spacers reported in 2021 [@Dion_2021] to 3,835,942 unique spacers in 2023 [@camargo_img_vr4_2023]. Similarly, public virus and MGE databases are growing rapidly, with large contributions from metagenomic samples resulting in routine fold increases in the number of predicted viral contigs [@camargo_img_vr4_2023]. Most tools require more resources as the size of the database grows, and as this trend continues, certain workflows and tools may become prohibitively expensive to run in a reasonable time frame.
 
 
 ## Methods {#sec-methods}
 
 ### Tool Selection {#sec-tool-selection}
-
+*** TODO - THIS NEEDS FACT CHECKIN AND MORE DETAILS ***
 We evaluated several widely-used sequence alignment and search tools, alongside an implementation of basic string containment. The tools were selected based on their availability and historical use, and were chosen to span a range of different algorithmic approaches. It is important to note that these tools were not specifically designed for spacer-protospacer matching, but rather for more general sequence search tasks (mmseqs2, blastn-short and lexicmap), or alignment/mapping of short reads to reference genomes (bowtie1, bowtie2, minimap2, nucmer, bbmap-skimmer, strobealign). Additionally, our focus here is specifically on spacer-protospacer matching, and so we did not evaluate general host-prediction tools (even those that may perform spacer-protospacer matching), like SpacePHARER [@Zhang_2021] or iPHoP [@Roux2023_iphop], which may perform additional analyses based on prior additional information, such as evaluating the LCA from multiple spacer-protospacer matches.
 
 
-| Aligner | Indexing* | Publication Year | Notes |
-|:--------|:---------:|:---------------:|:-------|
-| [Bowtie1](https://github.com/BenLangmead/bowtie) | Yes | 2009 | Last updated 2017, optimized for short sequences (25-50 bp, max 1kbp) |
-| [Bowtie2](https://github.com/BenLangmead/bowtie2) | Yes | 2012 | FM Index, supports longer reads (>50bp) than v1. |
-| [Minimap2](https://github.com/lh3/minimap2) | Optional | 2018 | Versatile, supports various sequence types |
-| [BBMap-skimmer](https://sourceforge.net/projects/bbmap/) | Optional | 2014 | Part of BBTools suite |
-| [StrobeAlign](https://github.com/ksahlin/StrobeAlign) | Yes | 2022 | strobemer-based indexing. |
-| [BLAST+](https://blast.ncbi.nlm.nih.gov/doc/blast-help/downloadblastdata.html) | Optional | 2009 | BLASTN-short is a mode (task parameter), optimized for short sequences. |
-| [MMseqs2](https://github.com/soedinglab/MMseqs2) | Optional | 2017 | Fast protein/nucleotide search |
-| [spacer-containment](https://github.com/apcamargo/spacer-containment) | No | - | Simple string containment. FASTA parsing with needletail, parallel processing with rayon, and string matching with memchr::memmem::Finder |
-| [mummer4](https://github.com/mummer4/mummer) | Optional | 2005 | Fast protein/nucleotide search |
-| [LexicMap](https://github.com/shenwei356/LexicMap) | Yes | 2024 | **Preprint** - Highly scalable, designed for fast querying of genes, genomes and long reads (>100bp) |
+| Aligner | Indexing* | Algorithm Type | Distance Metric | Publication Year | Original Purpose | Notes |
+|:--------|:---------:|:--------------|:----------------|:---------------:|:-----------------|:------|
+| [Bowtie1](https://github.com/BenLangmead/bowtie) | Yes | Heuristic | Hamming | 2009 | Short read mapping | Optimized for short sequences (25-50 bp, max 1kbp), supports up to 3 mismatches |
+| [Bowtie2](https://github.com/BenLangmead/bowtie2) | Yes | Heuristic | Affine/Edit | 2012 | Read mapping | FM Index, supports longer reads (>50bp) than v1, allows gaps |
+| [Minimap2](https://github.com/lh3/minimap2) | Optional | Heuristic | Edit | 2018 | Long read mapping | Versatile, supports various sequence types, chaining-based |
+| [BBMap-skimmer](https://sourceforge.net/projects/bbmap/) | Optional | Heuristic | Edit | 2014 | Read mapping | Part of BBTools suite |
+| [StrobeAlign](https://github.com/ksahlin/StrobeAlign) | Yes | Heuristic | Edit | 2022 | Read mapping | Strobemer-based indexing |
+| [BLAST+](https://blast.ncbi.nlm.nih.gov/doc/blast-help/downloadblastdata.html) | Optional | Heuristic | Affine | 2009 | Sequence search | BLASTN-short mode optimized for short sequences |
+| [MMseqs2](https://github.com/soedinglab/MMseqs2) | Optional | Heuristic | Affine | 2017 | Sequence search | Fast protein/nucleotide search |
+| [Indelfree.sh](https://github.com/shenwei356/seqkit) | Optional | Exhaustive | Hamming | - | Exact k-mer matching | Bruteforce and indexed modes, supports up to 5 substitutions |
+| [Sassy](https://github.com/TravisWheelerLab/sassy) | No | Exhaustive | Edit | 2024 | Sensitive alignment | Perfect recall, supports arbitrary edit distances, computationally intensive |
+| [X-mapper](https://github.com/bo1929/X-mapper) | Yes | Heuristic | Edit | 2024 | Read mapping | **Preprint** - Optimized for accuracy |
+| [spacer-containment](https://github.com/apcamargo/spacer-containment) | No | Exact match | Exact | - | String matching | Simple string containment, no mismatches |
+| [mummer4](https://github.com/mummer4/mummer) | Optional | Heuristic | Edit | 2018 | Genome alignment | Fast nucleotide alignment |
+| [LexicMap](https://github.com/shenwei356/LexicMap) | Yes | Heuristic | Edit | 2024 | Gene/genome search | **Preprint** - Highly scalable, designed for genes, genomes and long reads (>100bp) |
 
 
-: Evaluated Tools and Their Characteristics. *Indexing: "_Optional_" - A persistent index can be generated (and used across multiple mapping/alignment runs) but a one-off command can also do this 'on the fly'. *"Yes"* - A precomputed index is required, *"No"* - Indexing or building the database is not required. All tools were run with default parameters unless otherwise specified. As a general rule, parameters for each tool were chosen to maximize sensitivity or avoid limiting the ability to detect multiple matches. For more details about the exact configuration and version of each tool, see the code availability below or supplementary table 1. {#tbl-tools}
+: Evaluated Tools and Their Characteristics. *Indexing: "_Optional_" - A persistent index can be generated (and used across multiple mapping/alignment runs) but a one-off command can also do this 'on the fly'. *"Yes"* - A precomputed index is required, *"No"* - Indexing or building the database is not required. **Algorithm Type:** Exhaustive methods guarantee finding all matches within the specified distance threshold; heuristic methods use various optimizations (seed-based indexing, chaining, filtering) to improve speed but may miss some matches. **Distance Metric:** Hamming distance counts only substitutions; Edit/Affine distance allows insertions and deletions; Exact requires perfect match. Importantly, edit/affine-based algorithms will naturally report more matches than hamming-based ones when both are run with the same numeric threshold - this reflects different computational problems being solved rather than tool quality. All tools were run with default parameters unless otherwise specified. As a general rule, parameters for each tool were chosen to maximize sensitivity or avoid limiting the ability to detect multiple matches. For more details about the exact configuration and version of each tool, see the code availability below or supplementary table 1. {#tbl-tools}
 
 
 ### Data Generation and acquisition
@@ -98,19 +115,64 @@ We evaluated several widely-used sequence alignment and search tools, alongside 
 
 ### Synthetic dataset
 
-In order to examine each tool's performance on diverse spacer-to-target matches scenario (i.e. different number of match, similarity between spacer and target, etc), we created a simplistic command-line interface Python script automating the simulation of spacer-protospacer pairs given a set of parameters (see code and data availability). These parameters include target contig length, GC content, spacer length, number of occurrences in the target(s), range of mismatches, reverse complement frequency. This allows for fine grain control over the simulated spacer and target sequences, while recording the ground truth for later validation. See supplementary figure 1 for a visual representation of the data generation workflow.
+To examine each tool's performance across diverse spacer-to-target matching scenarios (i.e., different numbers of matches, varying sequence similarity, etc.), we developed a Python-based simulation framework with fine-grained control over sequence characteristics. The simulator allows specification of target contig length distributions (uniform or normal), GC content variation, spacer length, number of planned occurrences in targets, range of mismatches (substitutions), and reverse complement frequency. Critically, this approach records the ground truth of all planned insertions, enabling differentiation between true positives (planned matches) and false positives (spurious matches in unplanned regions).
+
+**Enhanced Realism:** To better approximate real-world datasets, we configured the synthetic data generation to match key characteristics of the IMG/VR4 dataset:
+
+- **GC content:** Matched to iPHoP spacer data (~49% for spacers, ~46% for contigs)
+- **Length distributions:** Contig lengths follow realistic distributions based on IMG/VR4 viral contig characteristics (range: 1,501-200,000 bp, median: ~100,831 bp)  
+- **Sequence complexity:** We verified that k-mer distributions and other sequence characteristics are comparable between synthetic and real spacer sequences (see supplementary notebook: real_spacer_inspection.ipynb)
+
+**False Positive Estimation:** Importantly, the synthetic dataset allows us to estimate false positive rates as a function of distance threshold and search space size. Matches occurring in regions where we did not plan insertions but that meet the distance threshold are considered spurious matches arising by chance. The fraction of these spurious matches provides a proxy for expected false positive rate, conceptually similar to an e-value: "given this sequence length and target database size, what is the expected number of matches with ≤k mismatches by chance?"
+
+See supplementary figure 1 for a visual representation of the data generation workflow.
 
 
 ### Real datasets
 
-To evaluate the same tools in a "real-life" scenario, We used the predicted viral contigs and CRISPR spacers from IMG/VR4 [@camargo_img_vr4_2023]. IMG/VR4 was chosen for several reasons: 1) it is one of the most comprehensive databases of uncultured phage and viral genomes, and 2) the associated CRISPR database contains a large number of CRISPR spacer data from various genomes and metagenomes, 3) the original database released included an existing attempt at spacer-protospacer matching using one of the tools evaluated (blastn, albeit with different parameters, namely the "--max-target-seqs"), allowing for a direct comparison to historical results. Briefly, the viral contigs in IMG/VR4 are predicted using a combination of tools (primarily genomad [@camargo_genomad_2024]) supplemented with existing databases such as NCBI's RefSeq and GenBank, while the CRISPR spacers were compiled from previously predicted CRISPR arrays identified in IMG/M genomes and metagenomes (primarily via piler-cr [@edgar_piler_cr_2007] and CRT [@bland_crt_2007]). For more information, please refer to the IMG/VR4 paper [@camargo_img_vr4_2023].
+To evaluate tool performance in real-world scenarios, we used predicted viral contigs and CRISPR spacers from recent comprehensive databases. 
+
+**Viral contigs:** We used the IMG/VR4 v1.1 high-confidence viral contigs [@camargo_img_vr4_2023], one of the most comprehensive databases of uncultured phage and viral genomes. The viral contigs were predicted using multiple tools (primarily genomad [@camargo_genomad_2024]) and supplemented with sequences from NCBI's RefSeq and GenBank.
+
+**CRISPR spacers:** We used the curated spacer dataset from iPHoP (June 2025 release) [@Roux2023_iphop], which combines CRISPR spacers from both reference genomes and metagenomes. This dataset represents an updated and more comprehensive collection compared to the original IMG/VR4 spacer predictions, containing 3,835,942 unique spacers compiled from CRISPR arrays identified primarily via piler-cr [@edgar_piler_cr_2007] and CRT [@bland_crt_2007] across IMG/M genomes and metagenomes.
+
+**Subsampling strategy:** Due to computational constraints and to evaluate tool behavior at different scales, we employed a stratified subsampling approach for the IMG/VR4 contigs. We created subsamples at varying fractions (0.001, 0.005, 0.01, 0.05, and 0.1) that maintain the distributions of taxonomic class labels from the full dataset. This approach allows us to assess whether tool performance patterns remain consistent across different database sizes, which is particularly relevant as public databases continue to grow rapidly.
+
+**Historical comparison:** The original IMG/VR4 release included spacer-protospacer matching results using blastn with different parameters (specifically `--max-target-seqs`), enabling direct comparison with historical analyses and highlighting the impact of parameter choices on detection outcomes.
+
+For more information about the datasets, please refer to the IMG/VR4 [@camargo_img_vr4_2023] and iPHoP [@Roux2023_iphop] publications.
 
 
 ### Alignment and Recalculation of Mismatches {#sec-alignment-recalc}
 
-For comparing alignments across tools, we used the Levenshtein distance [@levenshtein1966] (a.k.a edit distance) as our main scoring metric. For any two sequences, this metric sums both substitutions and gaps (i.e. insertions and deletions) into a single value. This choice was made to ensure consistent comparison across tools that may handle gaps differently, and because in the context of CRISPR-based defense, both substitutions and gaps can affect the efficiency of target recognition.
+For comparing alignments across tools, we use hamming distance (counting only substitutions) as our primary distance metric, with biological and computational justification provided below. However, to enable comparison with tools using different alignment strategies, we also calculate edit distance (allowing insertions and deletions) for reported matches.
 
-To ensure consistent mismatch calculation across tools, we realigned all reported matches using parasail [@Daily2016_parasail], specifically the `nw_stats_scan` i.e. Needleman-Wunsch global alignment with gap opening and extension penalties of 10, and a scoring matrix of `nuc44`. This allowed us to calculate edit distances independently of tool-specific scoring schemes, verify the reported matches and their orientations, and generate standardized alignment visualizations for manual comparison.
+**Biological Justification for Hamming Distance:**
+
+Several lines of evidence support the use of hamming distance over edit distance for CRISPR spacer-protospacer matching:
+
+1. **Mutation rates:** Indels are approximately 4× rarer than substitutions in bacteria. While quantitative measurements in phages are limited, this trend is expected to be similar or more pronounced in phage genomes.
+
+2. **Experimental escape mutations:** Most experimental phage-host studies report that escape mutations are predominantly single substitutions, particularly in the PAM-proximal "seed" region. While indels have been reported, quantitative comparisons across mutation types are lacking in literature.
+
+3. **Phage genome structure:** Phage genomes are coding-dense, with most of the genome covered by coding sequences. A single indel in a coding sequence causes a frameshift mutation, which is often lethal. Substitutions may only affect a single amino acid residue. Frame-preserving indels (multiples of 3 bp) are extremely rare but when observed may be particularly strong indicators of selection.
+
+4. **False positive rates:** Our empirical analysis using synthetic data demonstrates that edit distance >3 leads to >10% false positives, while hamming distance ≤3 maintains <1% false positive rate. This dramatic increase in false positives is not justified by the minimal additional biological information gained.
+
+5. **Sequencing vs biological indels:** With sufficient sequencing depth, sequencing-induced indels should be rare in assembled contigs for Illumina-based datasets. For low-accuracy technologies (e.g., Oxford Nanopore R9 chemistry) or low-depth raw reads, some tolerance for indels may be necessary, though alignment quality cannot exceed underlying sequencing accuracy.
+
+6. **Large-scale rearrangements:** While large genomic rearrangements exist (e.g., gene order changes affecting spacer targets at gene boundaries), these won't be captured by edit distance searches and are not well quantified in literature.
+
+We acknowledge that most existing literature focuses on substitutions, potentially creating an "assumption bias" where indels are underexplored. Future experimental work could systematically compare escape mutation types.
+
+**Distance Calculation:**
+
+To ensure consistent distance calculation across tools, we realigned all reported matches using parasail [@Daily2016_parasail], specifically the `nw_stats_scan` (Needleman-Wunsch global alignment). For hamming distance calculations, we use gap opening and extension penalties of 10 with scoring matrix `nuc44`, which strongly penalizes gaps. For edit distance calculations (used only for comparative analysis), we use standard parameters allowing indels. This approach allows us to:
+
+- Calculate hamming distances independently of tool-specific scoring schemes
+- Verify reported matches and their orientations  
+- Generate standardized alignment visualizations for manual comparison
+- Compare hamming vs edit distance effects empirically
 
 
 ### Performance definition and calculation {#sec-performance-calc}
@@ -173,11 +235,83 @@ The pairwise comparison of the tool results suggests (@fig-pairwise), reinforces
 
 ## Discussion
 
-Our findings reveal that within the mismatch thresholds tested (less or equal to 3), no single tool was able to identify all spacer occurrences. While we observe variations across tools, the main difference appears to be the effect of the abundance of the spacer in the target set on the recall rate. Of specific concern is the relatively high number of alignments missed by blastn-short, which is the common method currently used. In this context, missing potential spacer-protospacer pairs can significantly impact downstream conclusions, e.g. about host range of a given MGE. Overall, Bowtie1 presented the highest recall, although still imperfect for non exact matches. It should be noted that bowtie1 is not designed to identify >3 mismatches, and so a truly exhaustive approach might be to utilize a combination of tools to increase the recall rate, and use a post-search verification method (such as the score recalculation performed here using parasail) to remove potential false positives. Potentially, low complexity sequence filtering (or masking) could be performed prior to the search.
+### Tool Performance and Recommendations
 
-It should be noted that experimental and analytical context may have to be considered when deciding on a specific tool, especially in settings where a higher level of sequence dissimilarity could be considered. On one hand, spacer and virus databases can be expected to continue to increase in size, and our results suggest that large-scale meta-analysis studies (in which spacers from multiple samples are compared to a many potential targets that may include similar or identical regions), should favour tools with high recall, to circumvent potential reporting limitations other tools might have. This is especially important as in such meta-analysis, it should not be assumed the spacer and the potential target co-occur (from the same biological sample) and though the similarity may imply a past encounter between the ancestors of the sequences, caution is due in inferring that the current MGE sequence is capable of infecting the host sequence. In contrast, in experimental designs where potential CRISPR-target pairs are constrained by prior knowledge, tools with higher tolerance for sequence mismatches such as bowtie2 or BLASTn may be more appropriate (e.g. when studying known phage-host pairs from isolates, or when investigating temporally resolved samples (e.g. time-series)).
+Our analysis, combining synthetic datasets with known ground truth and real-world metagenomic data, reveals critical insights for CRISPR spacer-protospacer matching tool selection.
+
+**Primary Finding - Hamming Distance vs Edit Distance:**
+
+Our synthetic dataset analysis demonstrates that the choice between hamming distance (substitutions only) and edit distance (allowing indels) has profound implications for false positive rates. Using sassy, the only tool with perfect recall supporting arbitrary edit distances, we found that:
+
+- **Hamming distance ≤3:** <1% false positive rate, maintaining high biological relevance
+- **Hamming distance >3:** >1% false positive rate
+- **Edit distance >3:** >10% false positive rate, dramatically higher than hamming distance
+
+This dramatic increase in false positives when allowing indels is not justified by minimal additional biological information gained. Our biological justification for preferring hamming distance includes: (1) indels are ~4× rarer than substitutions in bacteria, (2) most experimental escape mutations are single substitutions, particularly in PAM-proximal regions, (3) phage genomes are coding-dense making frameshift-inducing indels often lethal, and (4) with sufficient sequencing depth, sequencing-induced indels should be rare in assembled contigs from Illumina data.
+
+**Tool Recommendations by Use Case:**
+
+Based on our comprehensive benchmarking, we provide the following evidence-based recommendations:
+
+1. **Primary recommendation for most applications - Bowtie1 (hamming ≤3):**
+   - **Use for:** Large-scale metagenomic analyses, routine host-virus prediction, high-throughput spacer-protospacer matching
+   - **Performance:** >95% recall for 0-3 mismatch spacers, <1% false positive rate
+   - **Advantages:** Excellent computational efficiency, scales well to millions of spacers and billions of bases, maintains high performance even for high-abundance targets
+   - **Limitations:** Maximum 3 substitutions, does not support indels
+   - **Biological justification:** Most experimental escape mutations are ≤3 substitutions; higher thresholds increase false positives without substantial biological gain
+
+2. **Extended hamming distance - Indelfree.sh indexed mode (hamming ≤5):**
+   - **Use for:** Scenarios requiring detection up to 5 substitutions while maintaining hamming distance
+   - **Performance:** Good recall for 4-5 mismatch spacers without the false positive explosion of edit distance
+   - **Advantages:** Extends beyond bowtie1's 3-mismatch limitation while avoiding indel-associated false positives
+   - **Limitations:** More computationally intensive than bowtie1, still limited to substitutions only
+   - **When to use:** When analyzing divergent sequences or when increased sensitivity is needed beyond 3 mismatches
+
+3. **Sassy (edit distance) - Specific applications only:**
+   - **Use for:** 
+     - Small datasets where computational cost is acceptable
+     - Experimental setups where mutation type (substitution vs indel) is of research interest
+     - Comparative studies of escape mutation types in controlled systems
+     - Methodological validation and establishing baseline performance
+     - Low-accuracy sequencing (e.g., Oxford Nanopore R9) where indel tolerance may be necessary
+   - **Performance:** Perfect recall (100%), supports arbitrary edit distances
+   - **Limitations:** Massive computational requirements (~1M CPU seconds for IMG/VR4), enormous output size (4.7TB for 5% subsample with ≤5 edits), prohibitive for large-scale analysis
+   - **Critical note:** We recommend sassy only for specialized applications where its unique capabilities (perfect recall + arbitrary edit distance) are essential and computational resources are available
+
+4. **BLASTn-short - Parameter-dependent performance:**
+   - **Use for:** Legacy compatibility, when familiarity with BLAST ecosystem is important
+   - **Critical considerations:** Performance heavily dependent on `-max_target_seqs` parameter; default value significantly impacts high-abundance spacer detection
+   - **Our analysis:** Used most sensitive parameters (lowest word size, high e-value, `-max_target_seqs 100000`)
+   - **Advantages:** Familiar to many researchers, well-documented
+   - **Limitations:** Lower recall than bowtie1, especially for high-abundance targets; parameter sensitivity requires careful configuration
+
+**Algorithmic Insights:**
+
+A key finding is that tools differ not because they are "bad" but because their algorithms solve different computational problems. Edit/affine-based algorithms (bowtie2, minimap2, BLAST, sassy) naturally report more matches than hamming-based ones (bowtie1, indelfree.sh) when using the same numeric threshold - this reflects fundamental algorithmic differences rather than tool quality. For CRISPR spacer-protospacer matching, where biological evidence strongly supports substitution-dominant mutation patterns, hamming-based approaches are more appropriate.
+
+**Abundance Effects:**
+
+Our findings reveal that within the mismatch thresholds tested (≤3), no single tool identified all spacer occurrences. The main performance differentiator is how tools handle high-abundance spacers (>1000 occurrences). Bowtie1 maintains >97% recall even for highly repetitive sequences, while other tools show systematic decline (e.g., strobealign drops to <5% for >1000 occurrences). This abundance sensitivity likely reflects tool-specific heuristics designed for different use cases (e.g., read mapping assumes reference sequences are not highly redundant).
+
+**Practical Implications:**
+
+Of specific concern is the relatively high number of alignments missed by blastn-short at default parameters, which is currently common in published analyses. Missing genuine spacer-protospacer pairs can significantly impact downstream conclusions about MGE host range, virus-host networks, and CRISPR system evolution. Our analysis suggests that many published studies using blastn-short may have substantially underestimated the number of spacer-protospacer matches, particularly for high-abundance targets.
+
+**Context-Dependent Considerations:**
+
+Experimental and analytical context must be considered when selecting tools:
+
+- **Large-scale meta-analyses:** Favor bowtie1 for high recall and computational efficiency. In these studies where spacers and targets may not co-occur (from different samples/environments), high recall is critical while acknowledging that similarity implies ancestral encounters rather than current infectivity.
+
+- **Experimental isolate studies:** When studying known phage-host pairs from isolates or temporally resolved samples, tools allowing higher mismatch tolerance may be appropriate, though biological justification for edit distance remains weak.
+
+- **CRISPR array context:** Spacers from complete arrays provide additional information (order, genomic location, host genome origin). Recent studies (Mitrofanov et al., Vink et al.) reveal system-specific spacer loss patterns and mismatch tolerance, which may inform post-search verification.
+
+- **Low-complexity filtering:** Regardless of tool choice, applying DUST masking or similar complexity filtering (e.g., ldust from minimap2, BBDuk from bbmap) prior to searching is prudent to reduce spurious matches from repetitive regions.
 
 Another consideration should be the source of the spacer data: spacers sequences extracted from raw NGS data and spacers extracted from assembled CRISPR arrays (either from assembled or long read sequencing). Specifically, spacers from complete arrays present additional information, namely the location and order of the spacers within the array, and the observation they originate from the same host genome. Notably, a recent in-depth study by Mitrofanov et al @Mitrofanov2025, investigating the mutational landscape of repeats across many isolate prokaryote genomes, have identified patterns of spacer loss based on system sub/type and location. A similar meta-analysis of spacer mutations by Vink et al @Vink2021, have revealed that different CRISPR subtypes exhibit varying tolerance for mismatches within the spacer sequences, with most matched spacers containing three or fewer mismatched nucleotides. This aligns with our current general recommendation of using Bowtie1. Additionally, Vink et al observed that Type I-E and Type II systems preferentially target template strands while Type I-A, I-B, and Type III systems prefer coding strands, emphasizing system-specific characteristics which may also inform post-search verification methods (albeit this may require additional information, such as the sequences orientation or coding potential, and the CRISPR subtype of the spacer).
+
+### Biological Interpretation and Potential False Positives
 
 While our technical comparison focuses on tool performance, the biological interpretation of identified matches also requires careful consideration. The arms race between prokaryotes and MGEs creates a complex landscape where simple sequence matching may not directly translate to genuine host-parasite relationships. We identified several scenarios that could lead to false positive assignments:
 
@@ -192,14 +326,65 @@ While our technical comparison focuses on tool performance, the biological inter
 
 ### Study Limitations
 
-The synthetic data was generated with uniform distributions of spacer and contig lengths and base composition (where each nucleotide is chosen independently and at random). While the simulation scripts do allow user-specified base composition (or use of real data via the --contigs or --spacers parameters), real biological sequence composition is not usually uniformly distributed, and may be biased towards certain nucleotide frequencies, which could be region or loci specific. This can be clearly observed comparing the spacer attributes distributions in the synthetic and real datasets (see supplementary figure 6), and table 1. While the simulated dataset sample size is relatively small, the high level of control over the spacer and contig sequences allowed testing rare or yet-unobserved scenarios, like ultra high spacer occurrence rates. This difference in sample size and features should be considered when interpreting the results.
+**Synthetic Dataset Characteristics:**
 
-Furthermore, we focused on a specific distance metric (Levenshtein distance), thus the synthetic sequences only have substitutions simulated into them. While insertions and deletions were not simulated, and although these might be relatively rare in short evolutionary time, they are still possible and could inform real and recent MGE-host interactions (e.g an indel that does not disrupt the encoded sequence reading frame). This could be further explored in future work, and might affect overall tool suggestion to use bowtie1 for general-case spacer-protospacer matching, as it is not designed with gaps in mind.
-Finally, we note that tools were not tested for all possible combinations of their available tunable parameters, and it is possible some might be further tweaked to improve their performance. Similarly, variation in parameters during index construction may further affect this (e.g. offset rate, seed selection). Similarly, not all major versions of all tools were tested. Of specific note are MMseqs2 (where the latest release version at the time of execution resulted in frequent crashes, hence we used the latest commit version from github), and Lexicmap which does not have a formal "v1" release at the time of writing, and since the benchmark was run, a new minor version was released, which is a good candidate for future testing.
+The synthetic data was generated with sequence characteristics matched to real biological sequences, including:
+- GC content matched to iPHoP spacer data (~49%)
+- Simulated Contig GC% and length distributions based on IMG/VR4 characteristics (~46% GC)
+- Verification that k-mer distributions and sequence complexity match real data (see supplementary notebook: real_spacer_inspection.ipynb)
+
+However, real biological sequences have additional complexities not fully captured, including locus-specific composition biases and regional variation in nucleotide frequencies. These differences should be considered when interpreting results, though our enhanced synthetic dataset provides substantially improved realism compared to purely random sequences.
+
+**Distance Metric Focus:**
+
+Our analysis primarily focuses on hamming distance (substitutions only) which we argue aligns with the underlying biological question. While we demonstrate that edit distance dramatically increases false positives (>10% for edit >3 vs <1% for hamming ≤3), we acknowledge that rare cases exist where frame-preserving indels (multiples of 3 bp) could indicate genuine interactions under strong selection.  We used sassy to comprehensively test edit distances up to 5, confirming our recommendation against routine use of edit distance for most applications due to prohibitive computational costs and false positive rates.
+
+For specialized applications requiring indel detection (e.g., low-accuracy long-read sequencing, experimental mutation-type studies), sassy provides perfect recall but at massive computational cost (~1M CPU seconds, 4.7TB output for 5% subsample). We note that while long-read technologies are attractive for CRISPR arrays (which are repetitive and prone to short-read misassembly), alignment quality cannot exceed underlying sequencing accuracy.
+
+**Sequencing Technology Considerations:**
+
+Our recommendations are primarily based on Illumina-derived assembled sequences where sequencing-induced indels are rare with sufficient depth. For other technologies (Oxford Nanopore R9, PacBio CLR) or low-depth datasets using raw reads, different considerations may apply. However, we argue that even in these cases, biological indels remain rare compared to substitutions, and the false positive explosion with edit distance must be carefully weighed against potential benefits.
+
+**Parameter Space:**
+
+Tools were not exhaustively tested across all possible parameter combinations, and further optimization may be possible. Notably:
+- MMseqs2: Latest release version had frequent crashes; we used latest GitHub commit
+- LexicMap: No formal v1 release at time of testing; newer versions available
+- Index construction parameters (offset rate, seed selection) may affect performance
+
+We focused on parameters maximizing sensitivity and avoiding artificial limitations on multiple match detection, representing realistic use cases rather than exhaustive parameter sweeps.
+
+**Sample Size and Scale:**
+
+The synthetic dataset is smaller than the real dataset, though this enabled controlled testing of rare scenarios like ultra-high spacer occurrence rates. We employed stratified subsampling of real data (IMG/VR4 contigs at 0.001, 0.005, 0.01, 0.05, 0.1 fractions) to assess tool behavior across different scales, finding consistent performance patterns suggesting our recommendations are robust across database sizes.
 
 ## Conclusion
 
-Our comparison of spacer-protospacer search tools reveals variations in their ability to detect unique putative CRISPR-target matches, which is a key and common input for current host-MGE interaction tools and studies. The main tool-derived difference we report is the ability to detect multiple matches - most tools show a sharp decline in detection rates as the total number of occurrences increases. This can directly impact the downstream interpretation of microbial relationships, such as under estimation of potential hosts-range, or over reliance on seemingly unique matches which may actually be due to non-direct intercations resulting from common sequence motifs or high tolerance for mismatches. While Bowtie1 demonstrates superior performance in detecting multiple matches under the threshold of 3 mismatches, the interpretation of spacer-protospacer matches requires careful consideration of biological context and potential interfering factors, especially when comparing large databases of CRISPR spacers and potential targets collected from a broad range of samples and ecosystems. Our findings also emphasize the importance of recalculating alignment metrics in a tool-agnostic manner, to ensure consistent comparison across tools. Finally, we provide general recommendations and experimental design considerations of potential interfering factors for future studies.
+Our comprehensive comparison of spacer-protospacer search tools, combining synthetic datasets with known ground truth and real-world metagenomic data, reveals critical insights for tool selection and establishes evidence-based recommendations.
+
+**Key Findings:**
+
+1. **Distance metric choice is critical:** Hamming distance (≤3 substitutions) maintains <1% false positive rate while edit distance (>3 edits) leads to >10% false positives. Biological evidence strongly supports hamming distance: indels are ~4× rarer than substitutions, most escape mutations are single substitutions, and phage coding-dense genomes make frameshift-inducing indels often lethal.
+
+2. **Tool performance varies by algorithmic approach:** Tools differ not in quality but in the computational problems they solve. Edit/affine-based algorithms naturally report more matches than hamming-based ones - understanding these algorithmic differences is essential for appropriate tool selection.
+
+3. **Abundance sensitivity distinguishes tools:** The primary performance differentiator is handling high-abundance spacers (>1000 occurrences). Bowtie1 maintains >97% recall for highly repetitive sequences, while other tools show systematic decline due to heuristics designed for different use cases.
+
+4. **Current practices may miss many matches:** BLASTn-short at default parameters misses substantially more matches than bowtie1, particularly for high-abundance targets. Many published studies likely underestimate spacer-protospacer matches.
+
+**Evidence-Based Recommendations:**
+
+- **Most applications:** Bowtie1 with hamming ≤3 (high recall, low false positives, excellent computational efficiency)
+- **Extended mismatches (4-5):** Indelfree.sh indexed mode (avoids edit distance false positive explosion)
+- **Specialized only:** Sassy for small datasets when mutation type matters or perfect recall is essential (computationally prohibitive for large-scale analysis)
+
+**Broader Implications:**
+
+The interpretation of spacer-protospacer matches requires careful consideration of biological context beyond tool performance: low-complexity sequences, horizontal gene transfer, self-targeting, and mobile element-encoded CRISPRs can all complicate straightforward interpretation. Proper workflow should include complexity filtering, post-search verification of alignment quality, and contextual analysis of genomic location and phylogeny.
+
+Our findings emphasize that tool selection should be guided by understanding algorithmic assumptions and their alignment with biological expectations. As CRISPR spacer and viral databases continue growing rapidly (from 366,799 spacers in 2017 to 3,835,942 in 2023), choosing appropriate tools becomes increasingly critical for accurate host-MGE interaction inference.
+
+We provide not just tool performance metrics but a framework for understanding why tools differ and how to select appropriate methods for specific research contexts. This work enables more accurate inference of virus-host relationships and CRISPR system evolution across diverse microbial ecosystems.
  
 ## Code and data availability
 
@@ -209,4 +394,4 @@ All code generated for this study can be found in the git repository: [code.jgi.
 Work conducted by the U.S. DOE Joint Genome Institute (https://ror.org/04xm1d337) (SR, UN, APC and BB), a DOE Office of Science User Facility, is supported by the Office of Science of the U.S. DOE operated under Contract DE-AC02-05CH11231.  
 
 We would like to thank the following people for their helpful feedback and suggestions:
-Uri Gophna and Georg Rath.
+Uri Gophna, Georg Rath, and Ragnar Groot Koerkamp for valuable discussions on distance metrics and tool performance.

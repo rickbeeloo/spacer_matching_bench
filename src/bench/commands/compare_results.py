@@ -3,16 +3,16 @@ Results comparison and validation command (compares the tool outpus against the 
 """
 import os
 import logging
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 
 import polars as pl
-import polars_bio as pb
+# import polars_bio as pb
 from rich.console import Console
 
 from bench.utils.functions import (
     read_fasta, read_results, read_hyperfine_results,
     validate_intervals_with_polars_bio, test_alignment,
-    populate_pldf_withseqs_needletail, reverse_complement,
+    populate_pldf_withseqs_needletail, 
     estimate_expected_spurious_alignments_fast, prettify_alignment,
     get_seq_from_fastx
 )
@@ -95,9 +95,9 @@ def validate_unique_alignments_across_tools(
     if exact_matches.height > 0:
         unique_exact_alignments = exact_matches[index_col_temp].n_unique()
         if unique_exact_alignments != exact_matches.height:
-            logger.warning(f"[yellow]Validation created duplicate exact matches:[/yellow]")
+            logger.warning("Validation created duplicate exact matches:")
             logger.warning(f"  {exact_matches.height} exact match rows, but only {unique_exact_alignments} unique alignments")
-            logger.warning(f"  This means some alignments matched multiple GT entries (shouldn't happen!)")
+            logger.warning("  This means some alignments matched multiple GT entries (shouldn't happen!)")
     
     # The polars-bio overlap adds "_2" suffix to the second dataframe (unique_alignments) columns
     index_col = "alignment_idx_2" if "alignment_idx_2" in validation_results.columns else "alignment_idx"
@@ -169,12 +169,12 @@ def validate_unique_alignments_across_tools(
             )
             
             logger.debug("Verifying false positive alignments...")
-            logger.debug(f"  Algorithm: [cyan]Needleman-Wunsch (parasail)[/cyan]")
-            logger.debug(f"  Gap open penalty: [bold]{gap_open_penalty}[/bold]")
-            logger.debug(f"  Gap extend penalty: [bold]{gap_extend_penalty}[/bold]")
-            logger.debug(f"  Distance metric: [bold]{distance_metric}[/bold] ({'substitutions + indels' if distance_metric == 'edit' else 'substitutions only'})")
-            logger.debug(f"  Max allowed mismatches: [bold]{max_mismatches}[/bold]")
-            logger.debug(f"  Alignments to verify: [bold]{fps_with_seqs.height}[/bold]")
+            logger.debug("  Algorithm: Needleman-Wunsch (parasail)")
+            logger.debug(f"  Gap open penalty: {gap_open_penalty}")
+            logger.debug(f"  Gap extend penalty: {gap_extend_penalty}")
+            logger.debug(f"  Distance metric: {distance_metric} ({'substitutions + indels' if distance_metric == 'edit' else 'substitutions only'})")
+            logger.debug(f"  Max allowed mismatches: {max_mismatches}")
+            logger.debug(f"  Alignments to verify: {fps_with_seqs.height}")
             
             # Test each FP alignment
             gaps_as_mismatches = (distance_metric == 'edit')
@@ -248,7 +248,7 @@ def validate_unique_alignments_across_tools(
     )
     
     # Log classification summary
-    classification_counts = result.group_by("classification").agg(pl.count()).sort("count", descending=True)
+    classification_counts = result.group_by("classification").agg(pl.len()).sort("count", descending=True)
     logger.info("Classification summary:")
     for row in classification_counts.iter_rows(named=True):
         logger.info(f"  {row['classification']}: {row['count']}")
@@ -422,12 +422,11 @@ def display_example_alignments(
                     num_indels = edit_distance - hamming_distance
                     logger.debug(f"  Indels (gap positions): [yellow]{num_indels}[/yellow]")
                 else:
-                    logger.debug(f"  Indels (gap positions): [green]0[/green]")
+                    logger.debug("  Indels (gap positions): [green]0[/green]")
                 
                 if tool_names:
                     logger.debug(f"  Found by tools: [magenta]{', '.join(tool_names)}[/magenta]")
             
-    logger.debug("[bold]" + "="*80 + "[/bold]")
 
 
 def calculate_all_tool_performance(
@@ -581,7 +580,7 @@ def calculate_all_tool_performance(
         if tools_over_gt.height > 0:
             for row in tools_over_gt.iter_rows(named=True):
                 logger.debug(f"  [yellow]{row['tool']}:[/yellow] {row['true_positives']} TPs > {row['ground_truth_total']} augmented GT (recall capped at 1.0)")
-                logger.debug(f"    This indicates the tool reported overlapping/redundant positions for some targets")
+                logger.debug("    This indicates the tool reported overlapping/redundant positions for some targets")
     else:
         # Standard mode: recall based only on planned GT entries found
         performance = performance.with_columns([
@@ -890,7 +889,7 @@ def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4
         logger.debug(f"Saved performance results to {perf_output}")
         
         # Print a sorted, slimmer summary table to screen
-        print("\n" + "="*80)
+        
         logger.info("PERFORMANCE SUMMARY (sorted by recall score)")
         if augment_ground_truth:
             logger.debug("  Note: augment_ground_truth=True, verified non-planned alignments count as TPs")

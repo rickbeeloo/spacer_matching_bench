@@ -94,6 +94,14 @@ impl BaseComposition {
     }
 }
 
+// Structure to hold insertion parameters for each spacer (shared between simulation functions)
+#[derive(Debug, Clone)]
+struct SpacerInsertionPlan {
+    spacer_id: String,
+    n_insertions: usize,
+    total_length: usize,
+    insertion_plans: Vec<(bool, usize, usize, usize)>, // (is_rc, n_mismatches, n_insertions, n_deletions)
+}
 
 #[pyclass]
 struct Simulator {
@@ -543,66 +551,33 @@ impl Simulator {
             // Predetermine insertion parameters for each spacer
             println!("Predetermining spacer insertion parameters...");
             
-            // Structure to hold insertion parameters for each spacer
-            #[derive(Debug, Clone)]
-            struct SpacerInsertionPlan {
-                spacer_id: String,
-                n_insertions: usize,
-                total_length: usize,
-                insertion_plans: Vec<(bool, usize, usize, usize)>, // (is_rc, n_mismatches, n_insertions, n_deletions) tuples
-            }
+            // ========================================================================
+            // CRITICAL: Understanding the two types of "insertion"
+            // ========================================================================
+            // 
+            // 1. SPACER INSERTION (n_insertions in insertion_range):
+            //    - How many TIMES this spacer gets placed into contigs
+            //    - Controlled by `insertion_range` parameter
+            //    - Example: n_insertions=2 means this spacer appears in 2 different locations
+            //    - This creates the ground truth data we're trying to find
+            //
+            // 2. INSERTION MUTATION (n_insertions in n_insertion_range):
+            //    - How many insertion INDELS (added bases) within the spacer sequence
+            //    - Controlled by `n_insertion_range` parameter  
+            //    - Example: n_insertions=1 means add 1 extra base to the spacer
+            //    - This is a sequence-level mutation that makes alignment harder
+            // (these were clear to us but in the paper and in a few other places, we call these "occurrences". But as occurrences is passive, and here we are explicitly creating them, I use "insertions" instead.)
+            // Similarly, `n_deletions` refers to deletion MUTATIONS (removed bases)
+            // ========================================================================
             
-            let mut insertion_plans: Vec<SpacerInsertionPlan> = Vec::with_capacity(spacers.len());
-            let mut total_insertion_length = 0;
-            let mut rng = rand::rng();
-            
-            for (id, seq) in &spacers {
-                // ========================================================================
-                // CRITICAL: Understanding the two types of "insertion"
-                // ========================================================================
-                // 
-                // 1. SPACER INSERTION (n_insertions below):
-                //    - How many TIMES this spacer gets placed into contigs
-                //    - Controlled by `insertion_range` parameter
-                //    - Example: n_insertions=2 means this spacer appears in 2 different locations
-                //    - This creates the ground truth data we're trying to find
-                //
-                // 2. INSERTION MUTATION (n_insertions in the loop below):
-                //    - How many insertion INDELS (added bases) within the spacer sequence
-                //    - Controlled by `n_insertion_range` parameter  
-                //    - Example: n_insertions=1 means add 1 extra base to the spacer
-                //    - This is a sequence-level mutation that makes alignment harder
-                // (these were clear to us but in the paper and in a few other places, we call these "occurrences". But as occurrences is passive, and here we are explicitly creating them, I use "insertions" instead.)
-                // Similarly, `n_deletions` refers to deletion MUTATIONS (removed bases)
-                // ========================================================================
-                
-                // Determine number of TIMES to insert this spacer (placement count)
-                let n_insertions = rng.random_range(insertion_range.0..=insertion_range.1);
-                
-                // Create insertion plans - one plan per spacer placement
-                let mut plans = Vec::with_capacity(n_insertions);
-                for _ in 0..n_insertions {
-                    // For each placement, determine:
-                    let is_rc = rng.random_bool(prop_rc);  // Reverse complement
-                    let n_mismatches = rng.random_range(n_mismatch_range.0..=n_mismatch_range.1);  // Substitutions
-                    let n_insertions = rng.random_range(n_insertion_range.0..=n_insertion_range.1);  // Insertion MUTATIONS
-                    let n_deletions = rng.random_range(n_deletion_range.0..=n_deletion_range.1);    // Deletion MUTATIONS
-                    plans.push((is_rc, n_mismatches, n_insertions, n_deletions));
-                }
-                
-                let total_length = seq.len() * n_insertions;
-                total_insertion_length += total_length;
-                
-                insertion_plans.push(SpacerInsertionPlan {
-                    spacer_id: id.clone(),
-                    n_insertions,
-                    total_length,
-                    insertion_plans: plans,
-                });
-            }
-            
-            // Sort spacers by total length (descending)
-            insertion_plans.sort_by(|a, b| b.total_length.cmp(&a.total_length));
+            let (insertion_plans, total_insertion_length) = self.create_insertion_plans(
+                &spacers,
+                insertion_range,
+                n_mismatch_range,
+                n_insertion_range,
+                n_deletion_range,
+                prop_rc,
+            );
             
             println!("Total planned insertion length: {} bp", total_insertion_length);
             println!("Average insertions per spacer: {:.1}", 
@@ -649,26 +624,8 @@ impl Simulator {
             }
 
             // Distribute spacers and contigs to threads more intelligently
-            let mut thread_spacer_plans: Vec<Vec<SpacerInsertionPlan>> = vec![Vec::new(); effective_threads];
+            let (thread_spacer_plans, thread_lengths) = Simulator::distribute_plans_to_threads(&insertion_plans, effective_threads);
             let mut thread_contigs: Vec<HashMap<String, String>> = vec![HashMap::new(); effective_threads];
-            
-            // Calculate total insertion length per thread (target)
-            let _target_length_per_thread = total_insertion_length / effective_threads;
-            
-            // First, distribute spacers to balance total insertion length
-            let mut thread_lengths = vec![0; effective_threads];
-            
-            for plan in &insertion_plans {
-                // Find the thread with the least total length
-                let min_thread = thread_lengths.iter()
-                    .enumerate()
-                    .min_by_key(|(_, &len)| len)
-                    .map(|(idx, _)| idx)
-                    .unwrap_or(0);
-                
-                thread_spacer_plans[min_thread].push(plan.clone());
-                thread_lengths[min_thread] += plan.total_length;
-            }
             
             // First, ensure all threads with spacers get at least one contig
             let mut thread_indices: Vec<usize> = (0..effective_threads)
@@ -897,81 +854,8 @@ impl Simulator {
                 ));
             }
             
-            // Write contigs to FASTA file
-            println!("Writing contigs to FASTA file...");
-            let contig_path = format!("{}/simulated_contigs.fa", data_dir);
-            let contig_file = match File::create(&contig_path) {
-                Ok(file) => file,
-                Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-                    format!("Could not create contigs file: {}", e)
-                )),
-            };
-            
-            let mut contig_writer = fasta::Writer::new(contig_file);
-            for (id, seq) in &final_contigs {
-                if let Err(e) = contig_writer.write(id, None, seq.as_bytes()) {
-                    return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-                        format!("Error writing contig {}: {}", id, e)
-                    ));
-                }
-            }
-
-            // Write spacers to FASTA file
-            println!("Writing spacers to FASTA file...");
-            let spacer_path = format!("{}/simulated_spacers.fa", data_dir);
-            let spacer_file = match File::create(&spacer_path) {
-                Ok(file) => file,
-                Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-                    format!("Could not create spacers file: {}", e)
-                )),
-            };
-            
-            let mut spacer_writer = fasta::Writer::new(spacer_file);
-            for (id, seq) in &spacers {
-                if let Err(e) = spacer_writer.write(id, None, seq.as_bytes()) {
-                    return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-                        format!("Error writing spacer {}: {}", id, e)
-                    ));
-                }
-            }
-
-            // Write planned ground truth to TSV file
-            println!("Writing planned ground truth to TSV file...");
-            let planned_ground_truth_path = format!("{}/planned_ground_truth.tsv", data_dir);
-            let planned_ground_truth_file = match File::create(&planned_ground_truth_path) {
-                Ok(file) => file,
-                Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-                    format!("Could not create planned ground truth file: {}", e)
-                )),
-            };
-            
-            let mut planned_ground_truth_writer = BufWriter::new(planned_ground_truth_file);
-            
-            // Write header
-            if let Err(e) = writeln!(planned_ground_truth_writer, "spacer_id\tcontig_id\tstart\tend\tstrand\tmismatches") {
-                return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-                    format!("Error writing planned ground truth header: {}", e)
-                ));
-            }
-            
-            // Write data rows
-            for row in &final_ground_truth {
-                if row.len() != 6 {
-                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                        format!("Invalid planned ground truth row length: {}", row.len())
-                    ));
-                }
-                
-                let line = format!("{}\t{}\t{}\t{}\t{}\t{}\n", 
-                    row[0], row[1], row[2], row[3], 
-                    row[4].to_lowercase(), row[5]);
-                    
-                if let Err(e) = write!(planned_ground_truth_writer, "{}", line) {
-                    return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
-                        format!("Error writing planned ground truth line: {}", e)
-                    ));
-                }
-            }
+            // Use helper to write files
+            self.write_simulation_files(&final_contigs, &spacers, &final_ground_truth, &data_dir)?;
 
             // Verify the simulation if requested
             if verify {
@@ -1010,6 +894,7 @@ impl Simulator {
         spacer_distribution: Option<DistributionType>,
         contig_base_composition: Option<BaseComposition>,
         spacer_base_composition: Option<BaseComposition>,
+        threads: usize,
     ) -> PyResult<(HashMap<String, String>, HashMap<String, String>, Vec<Vec<String>>)> {
         
         // Load or generate contigs
@@ -1061,35 +946,38 @@ impl Simulator {
             }
         } else {
             if debug {
-                println!("Generating contigs...");
+                println!("Generating contigs in parallel...");
             }
             let pb = ProgressBar::new(sample_size_contigs as u64);
             pb.set_style(ProgressStyle::default_bar()
                 .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
                 .unwrap());
             
-            let mut generated_contigs = HashMap::new();
-            for i in 0..sample_size_contigs {
-                let mut rng = rand::rng();
-                let length = if let Some(ref dist) = contig_distribution {
-                    self.generate_length_from_distribution(contig_length_range, dist)
-                } else {
-                    rng.random_range(contig_length_range.0..=contig_length_range.1)
-                };
-                let sequence = if let Some(ref comp) = contig_base_composition {
-                    self.generate_random_sequence_with_composition(length, comp)
-                } else {
-                    self.generate_random_sequence(length)
-                };
-                
-                let id = match &id_prefix {
-                    Some(prefix) => format!("{}_contig_{}", prefix, i),
-                    None => format!("contig_{}", i),
-                };
-                
-                generated_contigs.insert(id, sequence);
-                pb.inc(1);
-            }
+            // Generate contigs in parallel
+            let generated_contigs: HashMap<String, String> = (0..sample_size_contigs)
+                .into_par_iter()
+                .map(|i| {
+                    let mut rng = rand::rng();
+                    let length = if let Some(ref dist) = contig_distribution {
+                        self.generate_length_from_distribution(contig_length_range, dist)
+                    } else {
+                        rng.random_range(contig_length_range.0..=contig_length_range.1)
+                    };
+                    let sequence = if let Some(ref comp) = contig_base_composition {
+                        self.generate_random_sequence_with_composition(length, comp)
+                    } else {
+                        self.generate_random_sequence(length)
+                    };
+                    pb.inc(1);
+                    
+                    let id = match &id_prefix {
+                        Some(prefix) => format!("{}_contig_{}", prefix, i),
+                        None => format!("contig_{}", i),
+                    };
+                    
+                    (id, sequence)
+                })
+                .collect();
             pb.finish_with_message("Contigs generated");
             generated_contigs
         };
@@ -1143,166 +1031,249 @@ impl Simulator {
             }
         } else {
             if debug {
-                println!("Generating spacers...");
+                println!("Generating spacers in parallel...");
             }
             let pb = ProgressBar::new(sample_size_spacers as u64);
             pb.set_style(ProgressStyle::default_bar()
                 .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
                 .unwrap());
             
-            let mut generated_spacers = HashMap::new();
-            for i in 0..sample_size_spacers {
-                let mut rng = rand::rng();
-                let length = if let Some(ref dist) = spacer_distribution {
-                    self.generate_length_from_distribution(spacer_length_range, dist)
-                } else {
-                    rng.random_range(spacer_length_range.0..=spacer_length_range.1)
-                };
-                let sequence = if let Some(ref comp) = spacer_base_composition {
-                    self.generate_random_sequence_with_composition(length, comp)
-                } else {
-                    self.generate_random_sequence(length)
-                };
-                
-                let id = match &id_prefix {
-                    Some(prefix) => format!("{}_spacer_{}", prefix, i),
-                    None => format!("spacer_{}", i),
-                };
-                
-                generated_spacers.insert(id, sequence);
-                pb.inc(1);
-            }
+            // Generate spacers in parallel
+            let generated_spacers: HashMap<String, String> = (0..sample_size_spacers)
+                .into_par_iter()
+                .map(|i| {
+                    let mut rng = rand::rng();
+                    let length = if let Some(ref dist) = spacer_distribution {
+                        self.generate_length_from_distribution(spacer_length_range, dist)
+                    } else {
+                        rng.random_range(spacer_length_range.0..=spacer_length_range.1)
+                    };
+                    let sequence = if let Some(ref comp) = spacer_base_composition {
+                        self.generate_random_sequence_with_composition(length, comp)
+                    } else {
+                        self.generate_random_sequence(length)
+                    };
+                    pb.inc(1);
+                    
+                    let id = match &id_prefix {
+                        Some(prefix) => format!("{}_spacer_{}", prefix, i),
+                        None => format!("spacer_{}", i),
+                    };
+                    
+                    (id, sequence)
+                })
+                .collect();
             pb.finish_with_message("Spacers generated");
             generated_spacers
         };
         
-        // Check for empty insertion range
-        if insertion_range.0 == 0 && insertion_range.1 == 0 {
-            if debug {
-                println!("No insertions requested, returning empty ground truth");
-            }
-            return Ok((contigs, spacers, Vec::new()));
-        }
-        
-        // Track used positions per contig to avoid overlaps
-        let mut used_positions: HashMap<String, HashSet<usize>> = HashMap::new();
-        for contig_id in contigs.keys() {
-            used_positions.insert(contig_id.clone(), HashSet::new());
-        }
-        
         let mut ground_truth: Vec<Vec<String>> = Vec::new();
-        let mut rng = rand::rng();
         
-        if debug {
-            println!("Starting spacer insertions...");
-        }
+        // Check for empty insertion range
+        let skip_insertions = insertion_range.0 == 0 && insertion_range.1 == 0;
         
-        let pb = ProgressBar::new(spacers.len() as u64);
-        pb.set_style(ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-            .unwrap());
-        
-        // Process each spacer
-        for (spacer_id, spacer_seq) in &spacers {
-            let n_insertions = rng.random_range(insertion_range.0..=insertion_range.1);
-            
-            // For each insertion of this spacer
-            for _ in 0..n_insertions {
-                // Select random contig
-                let contig_ids: Vec<&String> = contigs.keys().collect();
-                let target_contig_id = contig_ids[rng.random_range(0..contig_ids.len())].clone();
-                
-                // Decide on reverse complement
-                let is_rc = rng.random_bool(prop_rc);
-                let spacer_to_insert = if is_rc {
-                    self.reverse_complement(spacer_seq)
-                } else {
-                    spacer_seq.to_string()
-                };
-                
-                // Apply mismatches (only substitutions, no indels)
-                let n_mismatches = rng.random_range(n_mismatch_range.0..=n_mismatch_range.1);
-                let mut spacer_with_errors = self.apply_mutations(&spacer_to_insert, n_mismatches, 0, 0);
-                
-                // Find non-overlapping position
-                let target_contig = contigs.get(&target_contig_id).unwrap();
-                let max_attempts = 1000;
-                let mut attempt = 0;
-                let mut position_found = false;
-                let mut start_pos = 0;
-                let mut end_pos = 0;
-                
-                while attempt < max_attempts {
-                    let max_pos = target_contig.len().saturating_sub(spacer_with_errors.len());
-                    if max_pos == 0 {
-                        // Spacer is longer than contig, skip
-                        if debug {
-                            println!("Warning: spacer {} is longer than contig {}, skipping", 
-                                spacer_id, target_contig_id);
-                        }
-                        break;
-                    }
-                    
-                    start_pos = rng.random_range(0..=max_pos);
-                    end_pos = start_pos + spacer_with_errors.len();
-                    
-                    // Check if this range overlaps with any used positions
-                    let position_range: HashSet<usize> = (start_pos..end_pos).collect();
-                    let used = used_positions.get(&target_contig_id).unwrap();
-                    
-                    if position_range.is_disjoint(used) {
-                        // Found non-overlapping position
-                        position_found = true;
-                        break;
-                    }
-                    
-                    attempt += 1;
-                }
-                
-                if !position_found {
-                    if debug {
-                        println!("Could not find non-overlapping position for spacer {} in contig {} after {} attempts", 
-                            spacer_id, target_contig_id, max_attempts);
-                    }
-                    continue;
-                }
-                
-                // Mark positions as used
-                for pos in start_pos..end_pos {
-                    used_positions.get_mut(&target_contig_id).unwrap().insert(pos);
-                }
-                
-                // Insert spacer into contig
-                let contig = contigs.get_mut(&target_contig_id).unwrap();
-                let mut contig_chars: Vec<char> = contig.chars().collect();
-                let spacer_chars: Vec<char> = spacer_with_errors.chars().collect();
-                
-                // Replace the region
-                for (i, &c) in spacer_chars.iter().enumerate() {
-                    if start_pos + i < contig_chars.len() {
-                        contig_chars[start_pos + i] = c;
-                    }
-                }
-                *contig = contig_chars.into_iter().collect();
-                
-                // Record ground truth
-                ground_truth.push(vec![
-                    spacer_id.clone(),
-                    target_contig_id.clone(),
-                    start_pos.to_string(),
-                    end_pos.to_string(),
-                    if is_rc { "true".to_string() } else { "false".to_string() },
-                    n_mismatches.to_string(),
-                ]);
+        if skip_insertions {
+            if debug {
+                println!("No insertions requested, skipping insertion phase");
+            }
+        } else {
+            if debug {
+                println!("Starting spacer insertions (parallel)...");
             }
             
-            pb.inc(1);
-        }
-        pb.finish_with_message("Spacer insertions completed");
+            // Pre-calculate insertion plans for each spacer (no indels for input files)
+            let (insertion_plans, total_insertion_length) = self.create_insertion_plans(
+                &spacers,
+                insertion_range,
+                n_mismatch_range,
+                (0, 0),  // No insertions in simulate_from_input_files
+                (0, 0),  // No deletions in simulate_from_input_files
+                prop_rc,
+            );
+            
+            println!("Total planned insertion length: {} bp", total_insertion_length);
+            println!("Average insertions per spacer: {:.1}", 
+                     insertion_plans.iter().map(|p| p.n_insertions).sum::<usize>() as f64 / insertion_plans.len() as f64);
+            
+            // Calculate total contig size
+            let total_contig_size: usize = contigs.iter().map(|(_, seq)| seq.len()).sum();
+            let utilization_percentage = (total_insertion_length as f64 / total_contig_size as f64) * 100.0;
+            
+            println!("Total contig size: {} bp", total_contig_size);
+            println!("Expected contig utilization: {:.1}%", utilization_percentage);
+            
+            // Use the provided threads parameter
+            let effective_threads = std::cmp::min(threads, std::cmp::max(1, contigs.len() / 10));
+            
+            if debug {
+                println!("Using {} threads for parallel insertion (requested: {})", effective_threads, threads);
+            }
+            
+            // Distribute spacers to threads to balance workload
+            let (thread_spacer_plans, _thread_lengths) = Simulator::distribute_plans_to_threads(&insertion_plans, effective_threads);
+            
+            // Distribute contigs to threads
+            let mut thread_contigs: Vec<HashMap<String, String>> = vec![HashMap::new(); effective_threads];
+            let mut sorted_contigs: Vec<(String, String)> = contigs.iter()
+                .map(|(id, seq)| (id.clone(), seq.clone()))
+                .collect();
+            sorted_contigs.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+            
+            // Round-robin distribution
+            for (i, (id, seq)) in sorted_contigs.into_iter().enumerate() {
+                let thread_idx = i % effective_threads;
+                thread_contigs[thread_idx].insert(id, seq);
+            }
+            
+            // Print thread workload
+            for i in 0..effective_threads {
+                let spacer_count = thread_spacer_plans[i].len();
+                let contig_count = thread_contigs[i].len();
+                let spacer_length: usize = thread_spacer_plans[i].iter().map(|p| p.total_length).sum();
+                let contig_length: usize = thread_contigs[i].values().map(|s| s.len()).sum();
+                
+                println!("Thread {}: {} spacers ({} bp planned) / {} contigs ({} bp)",
+                         i, spacer_count, spacer_length, contig_count, contig_length);
+            }
+            
+            // Calculate total insertion attempts
+            let total_insertions: u64 = insertion_plans.iter()
+                .map(|p| p.insertion_plans.len())
+                .sum::<usize>() as u64;
+            
+            println!("Processing spacer insertions...");
+            let pb = ProgressBar::new(total_insertions);
+            pb.set_style(ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+                .unwrap());
+            
+            let pb = Arc::new(pb);
+            
+            // Parallel processing
+            let results: Vec<_> = thread_contigs.into_par_iter()
+                .enumerate()
+                .map(|(thread_idx, mut group_contigs)| {
+                    let thread_pb = pb.clone();
+                    let mut local_ground_truth: Vec<Vec<String>> = Vec::new();
+                    
+                    // Track available ranges for overlap avoidance
+                    let mut contig_available_ranges: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
+                    for (contig_id, contig) in &group_contigs {
+                        contig_available_ranges.insert(contig_id.clone(), vec![(0, contig.len())]);
+                    }
+                    
+                    let thread_plans = &thread_spacer_plans[thread_idx];
+                    
+                    for plan in thread_plans {
+                        let spacer_id = &plan.spacer_id;
+                        let spacer = spacers.get(spacer_id).unwrap();
+                        let spacer_len = spacer.len();
+                        
+                        for &(is_rc, n_mismatches, _, _) in &plan.insertion_plans {
+                            let spacer_variant = if is_rc {
+                                self.reverse_complement(spacer)
+                            } else {
+                                spacer.to_string()
+                            };
+                            let spacer_variant = self.apply_mutations(&spacer_variant, n_mismatches, 0, 0);
+                            
+                            // Find available positions across all contigs
+                            let mut available_ranges: Vec<(String, usize, usize)> = Vec::new();
+                            let mut total_range_length = 0;
+                            
+                            for (contig_id, ranges) in &contig_available_ranges {
+                                for &(start, end) in ranges {
+                                    if end - start >= spacer_len {
+                                        let viable_length = end - start - spacer_len + 1;
+                                        total_range_length += viable_length;
+                                        available_ranges.push((contig_id.clone(), start, end));
+                                    }
+                                }
+                            }
+                            
+                            if available_ranges.is_empty() {
+                                thread_pb.inc(1);
+                                continue;
+                            }
+                            
+                            // Choose a random position weighted by available space
+                            let mut rng = rand::rng();
+                            let r = rng.random_range(0..total_range_length);
+                            let mut cumulative_length = 0;
+                            let mut selected_range = None;
+                            
+                            for (contig_id, start, end) in &available_ranges {
+                                let viable_length = end - start - spacer_len + 1;
+                                cumulative_length += viable_length;
+                                if r < cumulative_length {
+                                    selected_range = Some((contig_id.clone(), *start, *end));
+                                    break;
+                                }
+                            }
+                            
+                            if let Some((target_contig_id, range_start, range_end)) = selected_range {
+                                let max_start = range_end - spacer_len;
+                                let start_pos = rng.random_range(range_start..=max_start);
+                                let end_pos = start_pos + spacer_len;
+                                
+                                // Update available ranges
+                                let ranges = contig_available_ranges.get_mut(&target_contig_id).unwrap();
+                                for i in 0..ranges.len() {
+                                    let (r_start, r_end) = ranges[i];
+                                    
+                                    if start_pos >= r_start && end_pos <= r_end {
+                                        ranges.remove(i);
+                                        if start_pos > r_start {
+                                            ranges.push((r_start, start_pos));
+                                        }
+                                        if end_pos < r_end {
+                                            ranges.push((end_pos, r_end));
+                                        }
+                                        break;
+                                    }
+                                }
+                                
+                                // Insert spacer into contig
+                                let target_contig = group_contigs.get_mut(&target_contig_id).unwrap();
+                                let mut chars: Vec<char> = target_contig.chars().collect();
+                                let spacer_chars: Vec<char> = spacer_variant.chars().collect();
+                                chars.splice(start_pos..end_pos, spacer_chars);
+                                *target_contig = chars.into_iter().collect();
+                                
+                                // Record ground truth
+                                local_ground_truth.push(vec![
+                                    spacer_id.to_string(),
+                                    target_contig_id,
+                                    start_pos.to_string(),
+                                    end_pos.to_string(),
+                                    if is_rc { "true".to_string() } else { "false".to_string() },
+                                    n_mismatches.to_string()
+                                ]);
+                            }
+                            
+                            thread_pb.inc(1);
+                        }
+                    }
+                    
+                    (group_contigs, local_ground_truth)
+                })
+                .collect();
+            
+            pb.finish_with_message("Spacer insertions completed");
+            
+            // Combine results
+            let mut final_contigs = HashMap::new();
+            for (group_contigs, group_ground_truth) in results {
+                final_contigs.extend(group_contigs);
+                ground_truth.extend(group_ground_truth);
+            }
+            
+            contigs = final_contigs;
+            println!("Successfully inserted {} spacer instances", ground_truth.len());
         
-        println!("Successfully inserted {} spacer instances", ground_truth.len());
+        } // End of else block for !skip_insertions
         
-        // Create data subdirectory if it doesn't exist
+        // Create data subdirectory if it doesn't exist (always create files)
         let data_subdir_name = data_subdir.unwrap_or_else(|| "simulated_data".to_string());
         let data_dir = format!("{}/{}", output_dir, data_subdir_name);
         if let Err(e) = std::fs::create_dir_all(&data_dir) {
@@ -1311,6 +1282,23 @@ impl Simulator {
             ));
         }
         
+        // Use helper to write files
+        self.write_simulation_files(&contigs, &spacers, &ground_truth, &data_dir)?;
+        
+        Ok((contigs, spacers, ground_truth))
+    }
+}
+
+// Private helper methods (not exposed to Python)
+impl Simulator {
+    // Helper: Write output files (contigs, spacers, ground truth)
+    fn write_simulation_files(
+        &self,
+        contigs: &HashMap<String, String>,
+        spacers: &HashMap<String, String>,
+        ground_truth: &Vec<Vec<String>>,
+        data_dir: &str,
+    ) -> PyResult<()> {
         // Write contigs to FASTA file
         println!("Writing contigs to FASTA file...");
         let contig_path = format!("{}/simulated_contigs.fa", data_dir);
@@ -1322,7 +1310,7 @@ impl Simulator {
         };
         
         let mut contig_writer = fasta::Writer::new(contig_file);
-        for (id, seq) in &contigs {
+        for (id, seq) in contigs {
             if let Err(e) = contig_writer.write(id, None, seq.as_bytes()) {
                 return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
                     format!("Error writing contig {}: {}", id, e)
@@ -1341,7 +1329,7 @@ impl Simulator {
         };
         
         let mut spacer_writer = fasta::Writer::new(spacer_file);
-        for (id, seq) in &spacers {
+        for (id, seq) in spacers {
             if let Err(e) = spacer_writer.write(id, None, seq.as_bytes()) {
                 return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(
                     format!("Error writing spacer {}: {}", id, e)
@@ -1369,7 +1357,7 @@ impl Simulator {
         }
         
         // Write data rows
-        for row in &ground_truth {
+        for row in ground_truth {
             if row.len() != 6 {
                 return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
                     format!("Invalid ground truth row length: {}", row.len())
@@ -1387,7 +1375,73 @@ impl Simulator {
             }
         }
         
-        Ok((contigs, spacers, ground_truth))
+        Ok(())
+    }
+    
+    // Helper: Create insertion plans for spacers
+    fn create_insertion_plans(
+        &self,
+        spacers: &HashMap<String, String>,
+        insertion_range: (usize, usize),
+        n_mismatch_range: (usize, usize),
+        n_insertion_range: (usize, usize),
+        n_deletion_range: (usize, usize),
+        prop_rc: f64,
+    ) -> (Vec<SpacerInsertionPlan>, usize) {
+        let mut insertion_plans: Vec<SpacerInsertionPlan> = Vec::with_capacity(spacers.len());
+        let mut total_insertion_length = 0;
+        let mut rng = rand::rng();
+        
+        for (id, seq) in spacers {
+            let n_insertions = rng.random_range(insertion_range.0..=insertion_range.1);
+            
+            let mut plans = Vec::with_capacity(n_insertions);
+            for _ in 0..n_insertions {
+                let is_rc = rng.random_bool(prop_rc);
+                let n_mismatches = rng.random_range(n_mismatch_range.0..=n_mismatch_range.1);
+                let n_insertions = rng.random_range(n_insertion_range.0..=n_insertion_range.1);
+                let n_deletions = rng.random_range(n_deletion_range.0..=n_deletion_range.1);
+                plans.push((is_rc, n_mismatches, n_insertions, n_deletions));
+            }
+            
+            let total_length = seq.len() * n_insertions;
+            total_insertion_length += total_length;
+            
+            insertion_plans.push(SpacerInsertionPlan {
+                spacer_id: id.clone(),
+                n_insertions,
+                total_length,
+                insertion_plans: plans,
+            });
+        }
+        
+        // Sort spacers by total length (descending)
+        insertion_plans.sort_by(|a, b| b.total_length.cmp(&a.total_length));
+        
+        (insertion_plans, total_insertion_length)
+    }
+    
+    // Helper: Distribute spacer plans to threads for load balancing
+    fn distribute_plans_to_threads(
+        insertion_plans: &[SpacerInsertionPlan],
+        num_threads: usize,
+    ) -> (Vec<Vec<SpacerInsertionPlan>>, Vec<usize>) {
+        let mut thread_spacer_plans: Vec<Vec<SpacerInsertionPlan>> = vec![Vec::new(); num_threads];
+        let mut thread_lengths = vec![0; num_threads];
+        
+        for plan in insertion_plans {
+            // Find the thread with the least total length
+            let min_thread = thread_lengths.iter()
+                .enumerate()
+                .min_by_key(|(_, &len)| len)
+                .map(|(idx, _)| idx)
+                .unwrap_or(0);
+            
+            thread_spacer_plans[min_thread].push(plan.clone());
+            thread_lengths[min_thread] += plan.total_length;
+        }
+        
+        (thread_spacer_plans, thread_lengths)
     }
 }
 

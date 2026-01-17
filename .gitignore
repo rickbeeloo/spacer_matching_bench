@@ -213,7 +213,7 @@ results_mismatches/*
 IMGVR4_SEQUENCES.fna.zst
 
 # temporary - will comment this once done
-draft/
+# draft/
 src/tests/
 tests/
 src/bench/obsolete/
@@ -222,3 +222,4 @@ temp_sassy_partitioned_*/*
 .tmp/
 sassy_parsed_*.parquet
 .nfs3*
+draft/reviewers_comments.txt

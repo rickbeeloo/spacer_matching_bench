@@ -557,6 +557,7 @@ def simulate_data_rust(
             spacer_dist_obj,
             contig_comp_obj,
             spacer_comp_obj,
+            threads if threads is not None else 1,  # Add threads parameter
         )
 
         if debug:
@@ -2622,7 +2623,7 @@ def populate_pldf_withseqs_needletail(
                 print("Reversing sequences")
                 # print(chunk_seqs.columns)
                 chunk_seqs = chunk_seqs.with_columns(
-                    pl.when(pl.col(strand_col))
+                    pl.when(pl.col(strand_col) == "-")
                     .then(
                         pl.col(seqcol).map_elements(
                             lambda x: reverse_complement(x) if x is not None else None,
@@ -3043,6 +3044,23 @@ def recalculate_mismatches_streaming(
     """
     import os
     
+    # Check if output already exists and is valid
+    if os.path.exists(output_parquet):
+        try:
+            with open(output_parquet, 'rb') as f:
+                f.seek(-4, 2)  # Seek to last 4 bytes
+                footer = f.read()
+                if footer == b'PAR1':
+                    print(f"\n✓ Valid parquet file already exists: {output_parquet}")
+                    print("  Skipping recalculation. Delete the file to recompute.")
+                    return None
+                else:
+                    print("\n⚠ Output file exists but appears corrupted (missing PAR1 footer)")
+                    print("  Rerunning recalculation...")
+        except Exception as e:
+            print(f"\n⚠ Error checking output file: {e}")
+            print("  Rerunning recalculation...")
+    
     print("\n[Streaming Mismatch Recalculation]")
     print(f"  Input: {parquet_path}")
     print(f"  Output: {output_parquet}")
@@ -3059,24 +3077,55 @@ def recalculate_mismatches_streaming(
     
     try:
         # Step 1: Extract unique regions using DuckDB (streaming, no memory load)
-        print("\n[Step 1/4] Extracting unique regions via DuckDB...")
-        con = duckdb.connect(database=":memory:")
-        con.execute(f"SET threads TO {threads};")
-        con.execute(f"SET memory_limit = '{memory_limit}';")
+        # Check if unique_regions already exists and is valid
+        region_count = None
+        if os.path.exists(unique_regions_path):
+            try:
+                # Check if file is large enough to contain PAR1 footer
+                file_size = os.path.getsize(unique_regions_path)
+                if file_size >= 4:
+                    with open(unique_regions_path, 'rb') as f:
+                        f.seek(-4, 2)  # Seek to last 4 bytes
+                        footer = f.read()
+                        if footer == b'PAR1':
+                            print("\n[Step 1/4] ✓ Valid unique_regions.parquet found, reusing...")
+                            # Get count for progress tracking
+                            con = duckdb.connect(database=":memory:")
+                            con.execute(f"SET threads TO {threads};")
+                            con.execute(f"SET memory_limit = '{memory_limit}';")
+                            region_count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{unique_regions_path}')").fetchone()[0]
+                            print(f"  Found {region_count:,} unique regions")
+                            con.close()
+                        else:
+                            print("\n[Step 1/4] ⚠ unique_regions.parquet exists but appears corrupted (invalid footer)")
+                            print("  Re-extracting unique regions...")
+                else:
+                    print(f"\n[Step 1/4] ⚠ unique_regions.parquet exists but is too small ({file_size} bytes)")
+                    print("  Re-extracting unique regions...")
+            except Exception as e:
+                print(f"\n[Step 1/4] ⚠ Error checking unique_regions.parquet: {e}")
+                print("  Re-extracting unique regions...")
         
-        # Extract unique regions and write to parquet
-        con.execute(f"""
-            COPY (
-                SELECT DISTINCT 
-                    spacer_id, contig_id, strand, "start", "end"
-                FROM read_parquet('{parquet_path}')
-            ) TO '{unique_regions_path}' (FORMAT PARQUET, COMPRESSION SNAPPY)
-        """)
-        
-        # Get count for progress tracking
-        region_count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{unique_regions_path}')").fetchone()[0]
-        print(f"  Found {region_count:,} unique regions")
-        con.close()
+        # Only extract if we didn't find a valid file
+        if region_count is None:
+            print("\n[Step 1/4] Extracting unique regions via DuckDB...")
+            con = duckdb.connect(database=":memory:")
+            con.execute(f"SET threads TO {threads};")
+            con.execute(f"SET memory_limit = '{memory_limit}';")
+            
+            # Extract unique regions and write to parquet
+            con.execute(f"""
+                COPY (
+                    SELECT DISTINCT 
+                        spacer_id, contig_id, strand, "start", "end"
+                    FROM read_parquet('{parquet_path}')
+                ) TO '{unique_regions_path}' (FORMAT PARQUET, COMPRESSION SNAPPY)
+            """)
+            
+            # Get count for progress tracking
+            region_count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{unique_regions_path}')").fetchone()[0]
+            print(f"  Found {region_count:,} unique regions")
+            con.close()
         
         # Step 2: Populate sequences in batches
         print("\n[Step 2/4] Populating sequences in batches...")
