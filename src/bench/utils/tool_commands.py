@@ -22,6 +22,7 @@ def load_tool_configs(
     threads: int = 1,
     contigs_file: Optional[str] = None,
     spacers_file: Optional[str] = None,
+    max_mismatches: int = 5,
 ) -> Dict[str, Any]:
     """
     Load and configure tool configurations from JSON files.
@@ -34,6 +35,7 @@ def load_tool_configs(
         threads: Number of threads to use for tool execution
         contigs_file: Path to contigs file (optional, will use default if not provided)
         spacers_file: Path to spacers file (optional, will use default if not provided)
+        max_mismatches: Maximum number of mismatches/distance for tools that support it (default: 5)
     
     Returns:
         Dictionary mapping tool names to their configuration dictionaries
@@ -85,6 +87,7 @@ def load_tool_configs(
                         spacers_file=spacers_file,
                         output_dir=output_dir,
                         results_dir=results_dir,
+                        max_mismatches=max_mismatches,
                     )
                     for cmd in tool_config["command"]
                 ]

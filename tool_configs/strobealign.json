@@ -5,6 +5,6 @@
   "script_name": "strobealign.sh",
   "mamba_env": "strobealign_env",
   "command": [
-    "strobealign --eqx -k 15 -N 1000 -t {threads} {contigs_file} {spacers_file} -o {output_dir}/strobealign_output.sam"
+    "strobealign --eqx -k 15 -N 10000 -M 200 -t {threads} {contigs_file} {spacers_file} -o {output_dir}/strobealign_output.sam"
   ]
 }

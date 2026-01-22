@@ -326,7 +326,7 @@ def lcc_simp(seq: str) -> float:
         term_g = 0
     else:
         term_g = (seq.count("G") / wsize) * math.log(seq.count("G") / wsize) / l4
-    return -(term_a + term_c + term_t + term_g)
+    return -(float(term_a + term_c + term_t + term_g))
 
 
 def reverse_complement(sequence: str) -> str:

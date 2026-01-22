@@ -361,6 +361,9 @@ def subsample_dataset(
     # Write subsampled contigs
     contigs_output = f"{output_dir}/subsampled_contigs.fa"
     logger.info(f"Writing selected contigs to {contigs_output}")
+    # with open(os.path.join(output_dir, "temp.lst"), 'w') as f:
+    #     f.write("")  # create/clear the file
+    #     f.writelines("\n".join(selected_contigs)) # this is fastest with paraseq_filt...
     written_contigs = write_subsampled_sequences(contigs_file, selected_contigs, contigs_output, extract_method)
     logger.info(f"Written {written_contigs} subsampled contigs")
     

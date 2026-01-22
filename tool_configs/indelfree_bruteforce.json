@@ -5,6 +5,6 @@
     "script_name": "indelfree_bruteforce.sh",
     "mamba_env": "bbmap_env",
     "command": [
-        "indelfree.sh subs=5 in={spacers_file} ref={contigs_file} out={output_dir}/indelfree_bruteforce_output.sam index=f threads={threads} simd"
+        "indelfree.sh subs={max_mismatches} in={spacers_file} ref={contigs_file} out={output_dir}/indelfree_bruteforce_output.sam index=f threads={threads} simd"
     ]
 }

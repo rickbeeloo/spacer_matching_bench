@@ -141,6 +141,8 @@ def simulate(num_contigs, num_spacers, contig_length, spacer_length,
       - Testing tools on real CRISPR sequences
       - Creating synthetic insertions in real metagenomic contigs
       - Validating tool performance on known sequences
+      - Note: that the number of contigs/spacers parameters will be used to subsample that many sequences from the files, or fail if not enough are present.
+      - Note2: the subsampled/non-synthetic files will still be called "simulated_contigs.fa" and "simulated_spacers.fa" in the output, for consistency.
     
     \b
     Perfect Match Example:
@@ -213,7 +215,9 @@ def simulate(num_contigs, num_spacers, contig_length, spacer_length,
               help='Comma-separated list of tools to skip')
 @click.option('--only-tools', '-rt', type=str, default=None,
               help='Comma-separated list of tools to run (overrides skip-tools)')
-def generate_scripts(input_dir, output_dir, contigs, spacers, threads, max_runs, warmups, skip_tools, only_tools):
+@click.option('--max-mismatches', '-mm', type=int, default=5,
+              help='Maximum number of mismatches/edit-distance parameter for tools that support it (i.e. subs in indelfree.sh, k in sassy, -v in bowtie1)')
+def generate_scripts(input_dir, output_dir, contigs, spacers, threads, max_runs, warmups, skip_tools, only_tools, max_mismatches):
     """
     Generate execution scripts for alignment tools.
     
@@ -245,7 +249,8 @@ def generate_scripts(input_dir, output_dir, contigs, spacers, threads, max_runs,
             skip_tools=skip_tools,
             only_tools=only_tools,
             contigs=contigs,
-            spacers=spacers
+            spacers=spacers,
+            max_mismatches=max_mismatches
         )
         logger.info("Script generation completed successfully")
         click.echo(click.style("✓ Scripts generated successfully", fg='green'))

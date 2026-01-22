@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_generate_scripts(input_dir=None, output_dir=None, threads=4, max_runs=1, warmups=0, 
-                        skip_tools='', only_tools=None, contigs=None, spacers=None):
+                        skip_tools='', only_tools=None, contigs=None, spacers=None, max_mismatches=5):
     """
     Core script generation function.
     
@@ -26,6 +26,7 @@ def run_generate_scripts(input_dir=None, output_dir=None, threads=4, max_runs=1,
         only_tools: Comma-separated list of tools to run (overrides skip_tools)
         contigs: Path to custom contigs file (optional)
         spacers: Path to custom spacers file (optional)
+        max_mismatches: Maximum number of mismatches/distance for tools that support it (default: 5)
     """
     # Determine output directory
     if output_dir is None and input_dir is None:
@@ -47,7 +48,8 @@ def run_generate_scripts(input_dir=None, output_dir=None, threads=4, max_runs=1,
         results_dir=output_dir,
         threads=threads,
         contigs_file=contigs,
-        spacers_file=spacers
+        spacers_file=spacers,
+        max_mismatches=max_mismatches
     )
     logger.debug(f"Loaded {len(tools)} tool configurations")
     

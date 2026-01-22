@@ -5,6 +5,6 @@
   "script_name": "bowtie2.sh",
   "mamba_env": "bowtie2_env",
   "command": [
-    "bowtie2-build --large-index --threads {threads} {contigs_file} {output_dir}/contigs_bt2indx && bowtie2 --all --xeq --very-sensitive -x {output_dir}/contigs_bt2indx -f {spacers_file} -S {output_dir}/bowtie2_output.sam --threads {threads}"
+    "bowtie2-build --large-index --threads {threads} {contigs_file} {output_dir}/contigs_bt2indx && bowtie2 -N 1 -L 15 --all --xeq --very-sensitive -x {output_dir}/contigs_bt2indx -f {spacers_file} -S {output_dir}/bowtie2_output.sam --threads {threads}"
   ]
 }
