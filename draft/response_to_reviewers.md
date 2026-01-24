@@ -2,7 +2,7 @@
 
 ## General Response
 
-We thank both reviewers for their thorough and constructive feedback on our manuscript "Tool Choice drastically Impacts CRISPR Spacer-Protospacer Detection." The comments significantly improve the quality and impact of our work, and have addressed all concerns raised in the revised manuscript. We note due to scope and format constraints not all of the suggestions are described in the main-text, and are instead described in this letter and added as an appendix to the supplementary material. 
+We thank both reviewers for their thorough and constructive feedback on our manuscript "Tool Choice drastically Impacts CRISPR Spacer-Protospacer Detection" The comments significantly improve the quality and impact of our work, and have addressed all concerns raised in the revised manuscript. We note due to scope and format constraints not all of the suggestions are described in the main-text, and are instead described in this letter and added as an appendix to the supplementary material. 
 
 Briefly, in addition to the reviewer suggestions, we modified the analyses:  
 
@@ -13,8 +13,8 @@ Briefly, in addition to the reviewer suggestions, we modified the analyses:
 3. **Hamming vs Edit Distance Analysis:** We conducted comprehensive analysis comparing hamming distance (substitutions only) versus edit distance (allowing indels). For the edit distance measurements, we used sassy - the only tool supporting arbitrary edit distances with perfect recall, and bowtie1 (for hamming distance mesurment of very large sequence set) as previously demonstrated to have perfect recall. Using both the synthetic and semi-synthetic datasets, we demonstrate with these tools that:
    - Edit distance >3 leads to >10% false positives in synthetic data with approximately matched sequence characteristics (and similar number of expected spacers/protospacers).
    - Hamming distance >3 leads to >1% false positives in the synthetic data (compared to the total planned proto-spacer occurrences).
-   - Hamming distance ≤3 provides optimal balance of recall and precision, with <1% false positives in the synthetic data (also compared to total planned proto-spacer occurrences), and we demonstrate that with the semi-synthetic dataset (measuring the occurnce of the full real spacer sequence set (~3.7M) in simulated contigs), with hamming <=3, 
-   - Edit distance incurs massive computational costs (e.g., 4.7TB output for 5% subsample of the full IMG/VR contig set (~400k sequences) with ≤5 edits, ~1M CPU seconds).
+   - Hamming distance ≤3 provides optimal balance of recall and precision, with <1% false positives in the synthetic data (also compared to total planned proto-spacer occurrences), and we demonstrate that with the semi-synthetic dataset (measuring the occurnce of the full real spacer sequence set (~3.7M) in 400k simulated contigs), approx. nnnn of the real spacers are able to form xxxx alignemnts with the simulated 
+   - Exhusative search allowing for edit distance incurs massive computational costs (e.g., 4.7TB output for 5% subsample of the full IMG/VR contig set (~400k sequences) with ≤5 edits, ~1M CPU seconds).
 
 4. **Revised false positive definition:** We corrected and clarified the terminology around distance metrics and redefined the false-positive and true-positive sets. The "spurious alignments" in the synthetic set (matches occurring in regions where we did not plan insertions) are now considered false-positives. We use their relative abundance as a proxy for expected false positive rate given a distance threshold (hamming or edit), similar in concept to an e-value: 'given this sequence length and target size, what is the expected number of matches with ≤ k mismatches by chance'.
 
@@ -164,7 +164,7 @@ The reviewer emphasizes that "blastn results are most relevant to many current t
 
 The reviewer suggests testing "the effect of DUST" and asks "are the sequences with high abundance being missed of low complexity."
 
-**Response:** We have implemented a comprehensive pre-filtering step (real_spacer_inspection.ipynb), where we used several metrics to pre-emptively measure and discard (prior to any mapping/alignment/benchmarking) low-complexity, repetitive, or homo-polymer spacers. We added a paragraph regarding this to the methods section, and we now explicitly note this as a crucial recommendation for future analyses. We further note that while some tools employ internal complexity filtering (e.g., DUST in blastn, tantan in mmseqs2), not all tools do so consistently. Therefore, applying such pre-filtering uniformly across all tools ensures comparable results and may affect downstream analysis.
+**Response:** We have implemented a comprehensive pre-filtering step (spacer_inspection.ipynb), where we used several metrics to pre-emptively measure and discard (prior to any mapping/alignment/benchmarking) low-complexity, repetitive, or homo-polymer spacers. We added a paragraph regarding this to the methods section, and we now explicitly note this as a crucial recommendation for future analyses. We further note that while some tools employ internal complexity filtering (e.g., DUST in blastn, tantan in mmseqs2), not all tools do so consistently. Therefore, applying such pre-filtering uniformly across all tools ensures comparable results and may affect downstream analysis.
 
 **4. Tool Recommendations and Guidelines**
 

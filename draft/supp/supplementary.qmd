@@ -213,9 +213,9 @@ IMG/VR v4 based results in a tool vs tool comparison. Unlike the similar matrix 
 ### Supplementary figure 3
 
 Simulated dataset performance metrics.  
-Percision = True Positives / (True Positives + False Positives)  
+Precision = True Positives / (True Positives + False Positives)  
 Recall = True Positives / (True Positives + False Negatives)  
-F1 = 2 * (Percision * Recall) / (Percision + Recall)  
+F1 = 2 * (Precision * Recall) / (Precision + Recall)  
 Note: Because of the various prefiltering steps, the number of False Negatives and False Positives may not be indicative of the actual raw tool-reported results. As such, we recommend focusing on the recall rate between tools, which is equivalent to the fraction of detected spacer-protospacer pairs out of all the spacer-protospacer pairs in the reference file.
 
 ![](figures/supp/simulated_tool_performance_by_mismatches.svg)

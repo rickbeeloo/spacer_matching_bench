@@ -1,10 +1,11 @@
 ---
-title: "Tool Choice drastically Impacts CRISPR Spacer-Protospacer Detection"
+title: "Tool Choice Impacts CRISPR Spacer-Protospacer Detection"
 author:
   - name: Uri Neri*^1^
     corresponding: true
   - name: Antonio Pedro Camargo^1^
   - name: Brian Bushnell^1^
+  - name: Rick Beeloo^2^
   - name: Simon Roux^1^
 format:
   pdf:
@@ -29,6 +30,7 @@ execute:
   warning: false
 ---
 1: DOE Joint Genome Institute, Berkeley, CA, USA  
+2: Utrecht University, Padualaan 8, Utrecht, NL 3584 CH  
 * Uri Neri (uneri@lbl.gov)
 
 
@@ -51,6 +53,13 @@ Yet despite these variations, the choice of spacer-to-protospacer search or alig
 
 The choice of tool and its parameters can significantly impact the detection of these multiple matches, with some tools prioritizing speed over completeness by limiting the number of reported matches, or by other internal heuristics such as seed sequence selection from high occurring sequences being penalized. This trade-off between sensitivity and computational efficiency is especially important to consider as most available tools were designed for different tasks than spacer-protospacer matching (e.g. expression analysis, homology detection, and variant calling), and under different assumptions (such as reference and query sequence size and database size or the nature of the reference source: from a single isolate or metagenomic sample rather than from aggregation of sequences from different sources).
 
+**Sequence Alignment Methods and Their Design Constraints:**
+
+Modern sequence alignment/search tools were developed to address diverse computational challenges in genomics, such as protein domain function inference, taxonomic profiling, abundance calculation, quantitative/compartive expression analyses and so on.  
+These different use caseare often optimized (or have optimized variants) for specific use cases with distinct assumptions and performance trade-offs.  
+For example, tools designed for homology detection and  (e.g. PSI-BLAST, MMseqs2 profile) may prioritise (or be used when) high sensitivity even at low sequence identity levels.  
+    specificity through multi-stage filtering and statistical scoring (e-values, bit scores), aiming to distinguish true homologs from spurious matches across evolutionary timescales. Read mappers for differential expression analysis (Bowtie2, STAR) assume single-source references and optimize for unique best-hit reporting, using mapping quality scores to reflect alignment confidence. Variant callers and genome assemblers require exhaustive local exploration but can tolerate higher computational costs for small, targeted regions. These tools employ various heuristics—seed-based indexing (FM-index in Bowtie, minimizers in Minimap2, strobemers in StrobeAlign), k-mer filtering (MMseqs2's double k-mer matches), chaining algorithms (collinear chaining in Minimap2), and early termination strategies—to achieve practical performance on large datasets. Common reporting metrics include alignment scores (reflecting match/mismatch penalties), e-values (expected number of matches by chance given database size), mapping quality (phred-scaled probability of correct placement), and distance thresholds (edit distance allowing indels, hamming distance for substitutions only, or exact matching). Critically, these design choices reflect the intended application: BLAST's e-value framework assumes searching for distant homologs across diverse sequences, while read mappers assume low divergence from a single reference assembly. Understanding these algorithmic assumptions is essential when repurposing tools for spacer-protospacer matching, where the biological constraints (short sequences, moderate divergence, potentially high target abundance) differ substantially from the original design specifications.
+
 **Algorithmic Approaches and Distance Metrics:**
 *** NOTE THIS NEEDS TO BE EXTENDED / MORE DETAILED (which heuristics, what algos, what intended uses...)
 
@@ -59,7 +68,7 @@ A fundamental consideration in tool selection is the underlying algorithmic appr
 1. **Exhaustive vs Heuristic:** Exhaustive methods guarantee finding all matches within a specified distance threshold but are computationally intensive. Heuristic methods use various optimizations (seed-based indexing, chaining algorithms, k-mer filtering) to dramatically improve speed but may miss some matches. For large-scale analyses, heuristic methods are often necessary, but understanding their limitations is critical.
 
 2. **Distance Metric Type:** Tools differ fundamentally in how they measure sequence similarity:
-   - **Hamming distance** counts only substitutions (e.g., bowtie1, indelfree.sh)
+   - **Hamming distance** counts only substitutions (e.g., bowtie1, indelfree.sh). Requires query and subject string to be of same length (albeit some tools using hamming distance may support partial alignments made by clipping/truncating terminal bases)
    - **Edit/affine distance** allows insertions and deletions in addition to substitutions (e.g., bowtie2, minimap2, BLAST, sassy, mmseqs)
    - **Exact matching** requires perfect sequence identity (e.g., spacer-containment, grep, )
 
@@ -75,42 +84,41 @@ Another potential consideration is the computational resources requirements. Mem
 We evaluated several widely-used sequence alignment and search tools, alongside an implementation of basic string containment. The tools were selected based on their availability and historical use, and were chosen to span a range of different algorithmic approaches. It is important to note that these tools were not specifically designed for spacer-protospacer matching, but rather for more general sequence search tasks (mmseqs2, blastn-short and lexicmap), or alignment/mapping of short reads to reference genomes (bowtie1, bowtie2, minimap2, nucmer, bbmap-skimmer, strobealign). Additionally, our focus here is specifically on spacer-protospacer matching, and so we did not evaluate general host-prediction tools (even those that may perform spacer-protospacer matching), like SpacePHARER [@Zhang_2021] or iPHoP [@Roux2023_iphop], which may perform additional analyses based on prior additional information, such as evaluating the LCA from multiple spacer-protospacer matches.
 
 
-| Aligner | Indexing* | Algorithm Type | Distance Metric | Publication Year | Original Purpose | Notes |
-|:--------|:---------:|:--------------|:----------------|:---------------:|:-----------------|:------|
-| [Bowtie1](https://github.com/BenLangmead/bowtie) | Yes | Heuristic | Hamming | 2009 | Short read mapping | Optimized for short sequences (25-50 bp, max 1kbp), supports up to 3 mismatches |
-| [Bowtie2](https://github.com/BenLangmead/bowtie2) | Yes | Heuristic | Affine/Edit | 2012 | Read mapping | FM Index, supports longer reads (>50bp) than v1, allows gaps |
-| [Minimap2](https://github.com/lh3/minimap2) | Optional | Heuristic | Edit | 2018 | Long read mapping | Versatile, supports various sequence types, chaining-based |
-| [BBMap-skimmer](https://sourceforge.net/projects/bbmap/) | Optional | Heuristic | Edit | 2014 | Read mapping | Part of BBTools suite |
-| [StrobeAlign](https://github.com/ksahlin/StrobeAlign) | Yes | Heuristic | Edit | 2022 | Read mapping | Strobemer-based indexing |
-| [BLAST+](https://blast.ncbi.nlm.nih.gov/doc/blast-help/downloadblastdata.html) | Optional | Heuristic | Affine | 2009 | Sequence search | BLASTN-short mode optimized for short sequences |
-| [MMseqs2](https://github.com/soedinglab/MMseqs2) | Optional | Heuristic | Affine | 2017 | Sequence search | Fast protein/nucleotide search |
-| [Indelfree.sh](https://github.com/shenwei356/seqkit) | Optional | Exhaustive | Hamming | - | Exact k-mer matching | Bruteforce and indexed modes, supports up to 5 substitutions |
-| [Sassy](https://github.com/TravisWheelerLab/sassy) | No | Exhaustive | Edit | 2024 | Sensitive alignment | Perfect recall, supports arbitrary edit distances, computationally intensive |
-| [X-mapper](https://github.com/bo1929/X-mapper) | Yes | Heuristic | Edit | 2024 | Read mapping | **Preprint** - Optimized for accuracy |
-| [spacer-containment](https://github.com/apcamargo/spacer-containment) | No | Exact match | Exact | - | String matching | Simple string containment, no mismatches |
-| [mummer4](https://github.com/mummer4/mummer) | Optional | Heuristic | Edit | 2018 | Genome alignment | Fast nucleotide alignment |
-| [LexicMap](https://github.com/shenwei356/LexicMap) | Yes | Heuristic | Edit | 2024 | Gene/genome search | **Preprint** - Highly scalable, designed for genes, genomes and long reads (>100bp) |
+| Aligner | Indexing | Main Algorithm | Heuristic/Exhaustive | Reporting/Limiting Threshold Used in Benchmark| Year | Original Purpose | Notes |
+|:--------|:---------:|:---------------|:---------------------|:-----------------------------|:----:|:-----------------|:------|
+| [Bowtie1](https://github.com/BenLangmead/bowtie) | Yes | FM-Index (BWT) | Yes (backtracking) | Hamming distance | 2009 | Short read mapping | Optimized for 25-50 bp reads (max 1kbp); ungapped alignment only; backtracking heuristic limits to 3 mismatches |
+| [Bowtie2](https://github.com/BenLangmead/bowtie2) | Yes | FM-Index (BWT) | Yes (multiseed + extend) | Affine/Edit distance | 2012 | Read mapping | Uses FM-index for seeding with SIMD-accelerated DP extension; supports gapped, local, and end-to-end alignment |
+| [Minimap2](https://github.com/lh3/minimap2) | Optional | Minimizer + chaining | Yes (minimizer seeding) | Edit distance | 2018 | Long read mapping | Lexicographically smallest k-mer per window; collinear chaining with gap penalties; versatile across read types |
+| [indelfree.sh](https://github.com/bbushnell/BBTools/) | No | Multi-kmer matching | Bruteforce mode is exhaustive, while ion "Indexed" mode this can be limited by selected kmer length, query length, and number of substitutions | Hamming distance | Publically introduced to bbtools September 2025 | Read mapping | BBTools suite is Java based, and will use available memory - so the peak memory reported herein (sourced from SLURM logs) does not equate with "minimal required memory" |
+| [StrobeAlign](https://github.com/ksahlin/StrobeAlign) | Yes | Randstrobes | Yes (syncmer thinning) | Edit distance | 2022 | Read mapping | Uses hash-based linked strobes (randstrobes) with multi-context seeds (MCS) for hierarchical search |
+| [BLAST+](https://blast.ncbi.nlm.nih.gov/doc/blast-help/downloadblastdata.html) | Optional | Hit-and-extend | Yes (contiguous word) | E-value, bit score | 2009 | Sequence search | BLASTN-short mode uses 11-mer seeds; reports matches based on e-value (expected hits by chance given DB size) |
+| [MMseqs2](https://github.com/soedinglab/MMseqs2) | Optional | K-mer prefiltering | Yes (3-stage cascade) | E-value, bit score | 2017 | Sequence search | Double k-mer matching → vectorized ungapped → gapped SW; optimized for many-against-many searches |
+| [Sassy](https://github.com/RagnarGrootKoerkamp/sassy) | No | Uses a bit-parallel algorithm based on Myers' bitpacking to perform exhaustive approximate string matching (ASM) | Exhaustive | Edit distance | 2024/5 | Versatile pattern matching, suggested for use in CRISPR (gene-editing) off target detection and raw-read alignments| Guarantees perfect recall; explores full edit distance landscape; supports arbitrary distances; high computational cost, requires SIMD instructions (AVX2 and NEON), which most modern CPUs support |
+| [X-mapper](https://github.com/mathjeff/Mapper) | Yes | Gapped x-mer pyramid | Yes (dynamic seeds) | Edit distance | 2024 | Read mapping | **Preprint** - Dynamic-length gapped x-mers with "pyramid walking" to optimize seed specificity |
+| [mummer4](https://github.com/mummer4/mummer) | Optional | 48-bit suffix array | Yes (MUM-based) | Edit distance | 2018 | Genome alignment | Identifies Maximal Unique Matches (MUMs) using enhanced suffix array; handles genomes up to 141 Tbp |
+| [spacer-containment](https://github.com/apcamargo/spacer-containment) | No | String containment | Exhaustive (exact) | Exact match | - | String matching | Basic exact substring matching without mismatch or indel tolerance |
+| [LexicMap](https://github.com/shenwei356/LexicMap) | Yes | LexicHash + WFA | Yes (hierarchical index) | Edit distance | 2024 | Gene/genome search | **Preprint** - Window-guaranteed seeding with 15-bp prefix/suffix matching; uses Wavefront Alignment algorithm |
 
 
-: Evaluated Tools and Their Characteristics. *Indexing: "_Optional_" - A persistent index can be generated (and used across multiple mapping/alignment runs) but a one-off command can also do this 'on the fly'. *"Yes"* - A precomputed index is required, *"No"* - Indexing or building the database is not required. **Algorithm Type:** Exhaustive methods guarantee finding all matches within the specified distance threshold; heuristic methods use various optimizations (seed-based indexing, chaining, filtering) to improve speed but may miss some matches. **Distance Metric:** Hamming distance counts only substitutions; Edit/Affine distance allows insertions and deletions; Exact requires perfect match. Importantly, edit/affine-based algorithms will naturally report more matches than hamming-based ones when both are run with the same numeric threshold - this reflects different computational problems being solved rather than tool quality. All tools were run with default parameters unless otherwise specified. As a general rule, parameters for each tool were chosen to maximize sensitivity or avoid limiting the ability to detect multiple matches. For more details about the exact configuration and version of each tool, see the code availability below or supplementary table 1. {#tbl-tools}
+: Evaluated Tools and Their Characteristics. **Indexing:** "Yes" indicates a precomputed index is required (in our benchmark, if an index has to be pre-created the time to construct it is measured along the search/alignment step); "Optional" means a persistent index can be generated for reuse but the tool can also build it on-the-fly for single runs; "No" means no indexing is required or supported. **Heuristic/Exhaustive:** Exhaustive methods guarantee finding all matches within the specified distance threshold; heuristic methods use optimizations (seed-based indexing, chaining, k-mer filtering) to improve speed but may miss some matches. **Reporting/Limiting Threshold:** The primary metric used to report or filter alignments. Hamming distance counts only substitutions; Edit distance allows insertions and deletions; Affine distance uses gap penalties; E-value represents expected matches by chance given database size; Exact match requires perfect identity. Note that edit/affine-based algorithms will naturally report more matches than hamming-based ones when both use the same numeric threshold—this reflects different computational problems being solved rather than tool quality differences. **Tool Configuration:** All tools were configured to maximize sensitivity and avoid artificial limitations on multiple match detection. Exact commands, parameters, and tool versions are provided in Supplementary Table S1. {#tbl-tools}
 
 
 ### Data Generation and acquisition
+*** TODO: Update numbers based on the notebooks and the filtered iphop + img/vr sets (and semi-synthetic sets).
+| Dataset | Fully Synthetic - random sequences | Semi-Synthetic - real spacers, synthetic contigs | IMG/VR4 (v1.1) - high confidence viral contigs |
+|:--------|:-----------------------------|:------------------------------------------------|:----------------------------------------------|
+| Spacer Sequence Count | 9,020 | 3,835,942 | 3,835,942 |
+| Total Spacer size (bp) | 618,663 | 132,094,902 | 132,094,902 |
+| Spacer Length Range | 18 - 120 | 25 - 100 | 25 - 100 |
+| Spacer GC% | 50 | 46.73 | 46.73 |
+| Spacer Median length | 68.6 | 34.4 | 34.4 |
+| Target Length Range | 1,501 - 200,000 | 1,501 - 200,000 | 165 - 2,473,870 |
+| Target GC% | 50 | 46 | 44.45 |
+| Target Median Length | 100,831.50 | 100,831.50 | 7664 |
+| Target Sequence Count | 320,000 | 400,000 | 5,465,076 |
+| Target size (bp) | 32,266,068,302 | 40,332,585,378 | 79,049,118,084 |
 
-| Dataset | Synthetic - random sequences | IMG/VR4 (v1.1) - high confidence viral contigs |
-|:--------|:-----------------------------|:----------------------------------------------|
-| Spacer Sequence Count | 9,020 | 3,835,942 |
-| Total Spacer size (bp) | 618,663 | 132,094,902 |
-| Spacer Length Range | 18 - 120 | 25 - 100 |
-| Spacer GC% | 50 | 46.73 |
-| Spacer Median length | 68.6 | 34.4 |
-| Target Length Range | 1,501 - 200,000 | 165 - 2,473,870 |
-| Target GC% | 50 | 44.45 |
-| Target Median Length | 100,831.50 | 7664 |
-| Target Sequence Count | 320,000 | 5,465,076 |
-| Target size (bp) | 32,266,068,302 | 79,049,118,084 |
-
-: Dataset characteristics. Target is interchangeable with "contig". {#tbl-datasets}
+: Dataset characteristics. Target is interchangeable with "contig". The semi-synthetic dataset combines real spacers from iPHoP with synthetic contigs that match IMG/VR4 contig characteristics, enabling estimation of false positive rates in a more realistic setting. {#tbl-datasets}
 
 
 ### Synthetic dataset
@@ -121,7 +129,7 @@ To examine each tool's performance across diverse spacer-to-target matching scen
 
 - **GC content:** Matched to iPHoP spacer data (~49% for spacers, ~46% for contigs)
 - **Length distributions:** Contig lengths follow realistic distributions based on IMG/VR4 viral contig characteristics (range: 1,501-200,000 bp, median: ~100,831 bp)  
-- **Sequence complexity:** We verified that k-mer distributions and other sequence characteristics are comparable between synthetic and real spacer sequences (see supplementary notebook: real_spacer_inspection.ipynb)
+- **Sequence complexity:** We verified that k-mer distributions and other sequence characteristics are comparable between synthetic and real spacer sequences (see supplementary notebook: spacer_inspection.ipynb)
 
 **False Positive Estimation:** Importantly, the synthetic dataset allows us to estimate false positive rates as a function of distance threshold and search space size. Matches occurring in regions where we did not plan insertions but that meet the distance threshold are considered spurious matches arising by chance. The fraction of these spurious matches provides a proxy for expected false positive rate, conceptually similar to an e-value: "given this sequence length and target database size, what is the expected number of matches with ≤k mismatches by chance?"
 
@@ -149,7 +157,9 @@ For comparing alignments across tools, we use hamming distance (counting only su
 
 **Biological Justification for Hamming Distance:**
 
-Several lines of evidence support the use of hamming distance over edit distance for CRISPR spacer-protospacer matching:
+**Important Note - Scope of This Analysis:** This benchmark addresses spacer-protospacer matching for inferring historical phage-host interactions, which is fundamentally different from predicting CRISPR off-target effects in gene editing. When considering mismatches between spacers and viral sequences, we explicitly aim to identify evolutionary relationships since protospacer acquisition, where sequence divergence indicates selective pressure to mutate and escape host defenses. For gene editing, even partial base-pairing (including alignments with indels) can cause unwanted off-target cleavage. In contrast, for phage-host evolutionary analysis, known escape mutations reflect selection that occurred before escaping detection by the host defense system. Penalizing indels aligns with the assumption that over short evolutionary timescales, most indels cause lethal frameshifts in coding-dense phage genomes. Additionally, phage targeting by CRISPR systems in natural environments likely operates far from excess or saturation conditions, requiring high sequence complementarity for functional base-pairing. Therefore, our recommendation to prioritize hamming distance applies specifically to the question "was this spacer acquired from this sequence and has it evolved under selective pressure?" rather than "could this guide cause off-target effects in gene editing?"
+
+Several lines of evidence support the use of hamming distance over edit distance for CRISPR spacer-protospacer matching in the context of phage-host interactions:
 
 1. **Mutation rates:** Indels are approximately 4× rarer than substitutions in bacteria. While quantitative measurements in phages are limited, this trend is expected to be similar or more pronounced in phage genomes.
 
@@ -331,7 +341,7 @@ While our technical comparison focuses on tool performance, the biological inter
 The synthetic data was generated with sequence characteristics matched to real biological sequences, including:
 - GC content matched to iPHoP spacer data (~49%)
 - Simulated Contig GC% and length distributions based on IMG/VR4 characteristics (~46% GC)
-- Verification that k-mer distributions and sequence complexity match real data (see supplementary notebook: real_spacer_inspection.ipynb)
+- Verification that k-mer distributions and sequence complexity match real data (see supplementary notebook: spacer_inspection.ipynb)
 
 However, real biological sequences have additional complexities not fully captured, including locus-specific composition biases and regional variation in nucleotide frequencies. These differences should be considered when interpreting results, though our enhanced synthetic dataset provides substantially improved realism compared to purely random sequences.
 

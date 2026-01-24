@@ -21,7 +21,8 @@ from collections import Counter
 import math
 import time
 import polars_bio as pb
-import _duckdb as duckdb  # Use the C extension
+import _duckdb as duckdb
+
 
 # so printing to stdout doesn't break, line wrap, or truncate.
 pl.Config.set_tbl_rows(123123)
@@ -980,7 +981,6 @@ def clean_everything(results_dir: str) -> None:
     os.system(f"rm -rf {results_dir}/bash_scripts/")
     os.system(f"rm -rf {results_dir}/results/")
     os.system(f"rm -rf {results_dir}/simulated_data/")
-
 
 def clean_before_rerun(tool_name: str, results_dir: str) -> None:
     """Clean output files for a specific tool before rerunning.
