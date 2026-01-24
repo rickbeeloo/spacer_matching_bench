@@ -290,6 +290,18 @@ def create_slurm_job_scripts(results_dir, slurm_opts=None, job_subdir="job_scrip
     return created
 
 
+
+def print_dataset_slurm_summary(results_dict, title):
+    """Print a summary of script generation results."""
+    print(f"{title}")
+    for dataset_name, result in results_dict.items():
+        print(f"{dataset_name}:")
+        print(f"  max_distance: {result.get('max_distance', 'N/A')}")
+        print(f"  Bash scripts: {len(result.get('tools', []))}")
+        print(f"  SLURM jobs: {len(result.get('jobs', []))}")
+        if result.get('tools'):
+            print(f"  Tools: {', '.join(result['tools'][:5])}{'...' if len(result['tools']) > 5 else ''}")
+
 def submit_slurm_jobs(results_dir, job_subdir="job_scripts", dry_run=False):
     """Submit all job scripts in results_dir/job_subdir via sbatch.
 
@@ -315,6 +327,93 @@ def submit_slurm_jobs(results_dir, job_subdir="job_scripts", dry_run=False):
             submitted.append((job_path, e.stderr.strip() if e.stderr else str(e)))
 
     return submitted
+
+
+
+def generate_scripts_for_dataset(
+    dataset_dir,
+    contigs_file,
+    spacers_file,
+    max_distance=5,
+    threads=16,
+    skip_tools=None,
+    slurm_threads=16,
+    slurm_opts=None,
+    hyperfine=False
+):
+    """
+    Generate bash and SLURM scripts for a dataset with specified max_distance.
+    
+    Args:
+        dataset_dir: Path to the dataset directory
+        contigs_file: Path to contigs FASTA file
+        spacers_file: Path to spacers FASTA file
+        max_distance: Maximum edit distance/mismatches for tools (default: 5)
+        threads: Number of threads for bash scripts (default: 16)
+        skip_tools: List of tool names to skip (default: None)
+        slurm_threads: Number of threads for SLURM jobs (default: 16)
+        slurm_opts: Dict of SLURM options to override (default: None)
+        hyperfine: Whether to wrap commands in hyperfine (default: False)
+    
+    Returns:
+        dict with keys 'tools' (list of tool names) and 'jobs' (list of job script paths)
+    """
+    import logging
+    from pathlib import Path
+    logger = logging.getLogger(__name__)
+    from .tool_commands import load_tool_configs
+    from .functions import create_bash_script
+    dataset_dir = Path(dataset_dir)
+    
+    # Create necessary directories
+    (dataset_dir / 'bash_scripts').mkdir(exist_ok=True, parents=True)
+    (dataset_dir / 'raw_outputs').mkdir(exist_ok=True, parents=True)
+    (dataset_dir / 'slurm_logs').mkdir(exist_ok=True, parents=True)
+    (dataset_dir / 'job_scripts').mkdir(exist_ok=True, parents=True)
+    
+    logger.info(f"Generating scripts for {dataset_dir.name} (max_distance={max_distance})")
+    
+    # Load tool configs with max_distance (now called max_mismatches in the function)
+    tools = load_tool_configs(
+        results_dir=str(dataset_dir),
+        threads=threads,
+        contigs_file=contigs_file,
+        spacers_file=spacers_file,
+        max_mismatches=max_distance  # Parameter is called max_mismatches in the function
+    )
+    
+    # Filter out skipped tools
+    if skip_tools:
+        tools = {k: v for k, v in tools.items() if k not in skip_tools}
+        logger.info(f"Skipping tools: {skip_tools}")
+    
+    # Generate bash scripts
+    created_tools = []
+    for tool_name, tool in tools.items():
+        try:
+            create_bash_script(tool, str(dataset_dir), max_runs=1, warmups=0, hyperfine=hyperfine)
+            created_tools.append(tool_name)
+            logger.debug(f"  ✓ Created bash script for {tool_name}")
+        except Exception as e:
+            logger.error(f"  ✗ Failed to create script for {tool_name}: {e}")
+    
+    logger.info(f"Created {len(created_tools)} bash scripts")
+    
+    # Generate SLURM job scripts
+    created_jobs = create_slurm_job_scripts(
+        str(dataset_dir),
+        slurm_opts=slurm_opts,
+        threads=slurm_threads
+    )
+    logger.info(f"Created {len(created_jobs)} SLURM job scripts")
+    
+    return {
+        'tools': created_tools,
+        'jobs': created_jobs,
+        'max_distance': max_distance
+    }
+
+
 
 if __name__ == "__main__":
     result_df = pyseff()
