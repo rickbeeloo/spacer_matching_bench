@@ -10,7 +10,7 @@ authors = [
 ]
 description = "Benchmarking protospacer identification tools"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 dependencies = [
     "needletail>=0.7.0,<0.8",
@@ -38,13 +38,12 @@ dependencies = [
     "polars[rt64]>=1.36.1,<2",
     "pydustmasker>=1.0.3,<2",
     "kcounter>=0.1.1,<0.2",
-    "polars-bio>=0.18.0,<0.19",
     "ipdb>=0.13.13,<0.14",
     "uv>=0.9.5,<0.10",
     "rich",
     "rich-click>=1.9.4,<2",
     "intervaltree>=3.1.0,<4",
-    "altair>=5.5.0,<6", "duckdb>=1.4.3,<2",
+    "altair>=5.5.0,<6", "duckdb>=1.4.3,<2", "polars-bio>=0.20.1",
 ]
 
 [project.urls]
@@ -93,7 +92,7 @@ hyperfine = ">=1.19.0,<2"
 jupyter = ">=1.1.1,<2"
 
 [tool.pixi.feature.py39.dependencies]
-python = "~=3.9.0"
+python = "~=3.10.0"
 
 [tool.pixi.environments]
 default = { features = ["build", "format", "publish", "py39", "render"] }
