@@ -1,7 +1,7 @@
 {
   "name": "blastn",
   "output_file": "{output_dir}/blastn_output.tsv",
-  "parse_function_name": "parse_blastn_custom",
+  "parse_function_name": "parse_blastn",
   "script_name": "blastn.sh",
   "mamba_env": "blast_env",
   "command": [

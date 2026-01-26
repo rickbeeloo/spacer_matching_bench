@@ -1,7 +1,7 @@
 {
   "name": "mmseqs2",
   "output_file": "{output_dir}/mmseqs_output.tsv",
-  "parse_function_name": "parse_blastn_custom",
+  "parse_function_name": "parse_blastn",
   "script_name": "mmseqs.sh",
   "mamba_env": "mmseqs2_env",
   "command": [

@@ -1,7 +1,7 @@
 {
   "name": "mmseqs2map",
   "output_file": "{output_dir}/mmseqsmap_output.tsv",
-  "parse_function_name": "parse_blastn_custom",
+  "parse_function_name": "parse_blastn",
   "script_name": "mmseqs2_map.sh",
   "mamba_env": "mmseqs_env",
   "command": [
