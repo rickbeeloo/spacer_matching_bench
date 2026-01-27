@@ -12,8 +12,8 @@ from rich.console import Console
 from bench.utils.functions import (
     read_fasta, read_results, read_hyperfine_results,
     validate_intervals_with_polars_bio, test_alignment,
-    populate_pldf_withseqs_needletail, 
-    estimate_expected_spurious_alignments_fast, prettify_alignment,
+    populate_pldf_withseqs_needletail
+    , prettify_alignment,
     get_seq_from_fastx
 )
 from bench.utils.tool_commands import load_tool_configs
@@ -248,10 +248,10 @@ def validate_unique_alignments_across_tools(
     )
     
     # Log classification summary
-    classification_counts = result.group_by("classification").agg(pl.len()).sort("count", descending=True)
+    classification_counts = result.group_by("classification").agg(pl.len()).sort("len", descending=True)
     logger.info("Classification summary:")
     for row in classification_counts.iter_rows(named=True):
-        logger.info(f"  {row['classification']}: {row['count']}")
+        logger.info(f"  {row['classification']}: {row['len']}")
     
     # Add interpretation note
     true_fps = result.filter(pl.col("classification") == "true_false_positive").height
@@ -678,26 +678,9 @@ def compare_all_tools(
         except Exception as e:
             logger.warning(f"Failed to display example alignments: {e}")
     
-    # Step 2: Estimate expected spurious alignments if requested
-    expected_spurious_hamming = None
-    blast_evalue = None  # Renamed from expected_spurious_edit
-    if estimate_spurious and contigs_file and spacers_file:
-        try:
-            logger.info("Estimating expected spurious alignments...")
-            contigs_dict = read_fasta(contigs_file)
-            spacers_dict = read_fasta(spacers_file)
-            
-            spurious_est = estimate_expected_spurious_alignments_fast(
-                contigs_dict, spacers_dict,
-                max_mismatches=max_mismatches
-            )
-            expected_spurious_hamming = spurious_est['expected_spurious_hamming']
-            blast_evalue = spurious_est['blast_evalue']  # Using renamed metric
-            logger.info(f"Expected spurious (Hamming-based): {expected_spurious_hamming:.2e} ± {spurious_est['std_spurious_hamming']:.2e}")
-            logger.info(f"BLAST E-value estimate: {blast_evalue:.2e} ± {spurious_est['blast_evalue_std']:.2e}")
-        except Exception as e:
-            logger.warning(f"Failed to estimate spurious alignments: {e}")
-    
+    # # Step 2: Estimate expected spurious alignments if requested
+    # # SKIPPED FOR NOW, need to update to use the logic from the notebooks.
+
     # Step 3: Calculate performance for all tools at once using group_by
     logger.info("Calculating performance for all tools using aggregations...")
     try:
@@ -709,12 +692,11 @@ def compare_all_tools(
             augment_ground_truth=augment_ground_truth
         )
         
-        # Add expected spurious estimates if available (both methods)
-        if expected_spurious_hamming is not None:
-            results_df = results_df.with_columns([
-                pl.lit(expected_spurious_hamming).alias("expected_spurious_hamming"),
-                pl.lit(blast_evalue).alias("blast_evalue")  # Renamed column
-            ])
+        # # Add expected spurious estimates if available (both methods)
+        # if expected_spurious_hamming is not None:
+        #     results_df = results_df.with_columns([
+        #         pl.lit(expected_spurious_hamming).alias("expected_spurious_hamming"),
+        #     ])
 
         logger.debug(f"Successfully calculated performance for {results_df.height} tools")
         
@@ -866,7 +848,7 @@ def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4
             contigs_file=contigs_path,
             spacers_file=spacers_path,
             verify_false_positives=verify_false_positives,
-            estimate_spurious=estimate_spurious,
+            estimate_spurious=False, # estimate_spurious,
             hyperfine_results=hyperfine_results,
             max_mismatches=max_mismatches,
             augment_ground_truth=augment_ground_truth,
@@ -898,7 +880,7 @@ def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4
         summary_cols = ["tool", "recall", "true_false_positives", "positives_not_in_plan", 
                        "false_positives", "true_positives"]
         if "expected_spurious_hamming" in performance_results.columns:
-            summary_cols.extend(["expected_spurious_hamming", "blast_evalue"])  # Updated column names
+            summary_cols.extend(["expected_spurious_hamming"])  # Updated column names
         if "augmented_ground_truth" in performance_results.columns:
             summary_cols.append("augmented_ground_truth")
         if "avg_runtime_seconds" in performance_results.columns:
