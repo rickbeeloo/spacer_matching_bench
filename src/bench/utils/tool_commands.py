@@ -4,6 +4,7 @@ import sys
 import logging
 from pathlib import Path
 from typing import Dict, Optional, Any
+import copy
 
 from .functions import get_parse_function
 
@@ -109,7 +110,8 @@ def load_tool_configs(
             continue
     
     logger.info(f"Successfully loaded {len(tools)} tool configurations")
-    return tools
+    # Ensure we return deep copies of all tool configs
+    return {name: copy.deepcopy(config) for name, config in tools.items()}
 
 
 def populate_tools(args):
@@ -157,7 +159,7 @@ def prompt_for_tool_info():
     if file_ext == "sam":
         suggested_parse = "parse_samVn_with_lens_pysam"
     elif file_ext == "tsv" or file_ext == "blast6":
-        suggested_parse = "parse_blastn_custom"
+        suggested_parse = "parse_blastn"
 
     print(f"Suggested parse function: {suggested_parse}")
     parse_func = input("Parse function name (press Enter for suggested): ").strip()

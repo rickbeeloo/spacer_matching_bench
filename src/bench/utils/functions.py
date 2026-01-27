@@ -3,7 +3,6 @@ import glob
 import hashlib
 import json
 import os
-import random
 import re
 from typing import Any, Optional, Union#, Dict, List, Tuple
 
@@ -22,6 +21,7 @@ import math
 import time
 import polars_bio as pb
 import _duckdb as duckdb
+from rust_simulator import Simulator, BaseComposition, DistributionType
 
 
 # so printing to stdout doesn't break, line wrap, or truncate.
@@ -30,6 +30,15 @@ pl.Config.set_tbl_cols(123123)  # should be large enough
 pl.Config.set_fmt_str_lengths(2100)
 pl.Config.set_tbl_width_chars(2100)
 
+
+global tab
+global tab_b
+global tab_extended
+global tab_extended_b
+tab = bytes.maketrans(b"ACTG", b"TGAC")
+tab_b = bytearray(tab)
+tab_extended = bytes.maketrans(b"ACGTURYSWKMBDHVN", b"TGCAAYRSWMKVHDBN")
+tab_extended_b = bytearray(tab_extended)
 
 def read_fasta_needletail(fasta_file: str) -> tuple[list[str], list[str]]:
     """Read sequences from a FASTA file using needletail.
@@ -46,26 +55,6 @@ def read_fasta_needletail(fasta_file: str) -> tuple[list[str], list[str]]:
         seqs.append(record.seq)
         seq_ids.append(record.id)
     return seq_ids, seqs
-
-
-def apply_mismatches(sequence: str, n_mismatches: int) -> str:
-    """Introduce random mismatches into a DNA sequence.
-
-    Args:
-        sequence(str): The original DNA sequence
-        n_mismatches(int): Number of mismatches to introduce
-
-    Returns:
-        str: The sequence with mismatches applied
-    """
-    mismatch_positions = random.sample(range(len(sequence)), n_mismatches)
-    sequence_list = list(sequence)
-    for pos in mismatch_positions:
-        original_base = sequence_list[pos]
-        new_base = random.choice([b for b in "ATCG" if b != original_base])
-        sequence_list[pos] = new_base
-    return "".join(sequence_list)
-
 
 def calculate_shannon_entropy(s: str) -> float:
     """Calculate the Shannon entropy of a string.
@@ -164,10 +153,12 @@ def filter_repetitive_kmers(
     df: pl.DataFrame,
     seq_col: str = "seq",
     id_col: str = "seqid",
-    k: int = 5,
+    k: int = 6,
     max_count: int = 4,
 ) -> pl.DataFrame:
-    """Filter sequences that have any k-mer appearing more than max_count times"""
+    """Filter sequences that have any k-mer appearing more than max_count times.
+        Note, this is not used currently in the package but an almost identical process is done in the spacer_inspection.ipynb notebook.
+    """
     # First get k-mer counts
     df_with_kmers = count_kmers_df(df, seq_col, id_col, k, relative=False)
 
@@ -330,37 +321,24 @@ def lcc_simp(seq: str) -> float:
     return -(float(term_a + term_c + term_t + term_g))
 
 
-def reverse_complement(sequence: str) -> str:
-    """Compute the reverse complement of a DNA sequence, handling ambiguous bases.
-
+def reverse_complement(seq: Union[bytes, str], return_str: bool = True) -> Union[bytes, str]:
+    """Compute the reverse complement of a DNA sequence in bytes, handling ambiguous bases.
     Args:
-        sequence(str): The input DNA sequence
-
+        seq(bytes|str): The input DNA sequence in bytes or string format (will be converted to bytes if string)
+        return_str(bool): Whether to return the result as a string (True) or bytes (False)
     Returns:
-        str: The reverse complement sequence
+        bytes|str: The reverse complement sequence in bytes or string format (based on return_str)
+    Note:
+        This function is adapted from Jack Aidley's Stack overflow answer implemented in https://github.com/conchoecia/fastest_rc_python/blob/master/reverse_complement_tests.py#L91
     """
-    complement = {
-        "A": "T",
-        "T": "A",
-        "C": "G",
-        "G": "C",
-        "N": "N",
-        "U": "A",
-        "R": "Y",
-        "Y": "R",
-        "W": "W",
-        "S": "S",
-        "M": "K",
-        "K": "M",
-        "B": "V",
-        "V": "B",
-        "D": "H",
-        "H": "D",
-    }
-    return "".join(complement[base] for base in reversed(sequence))
+    if isinstance(seq, str):
+        seq = seq.encode()
+    rev_comp = seq.translate(tab_extended)[::-1]
+    if return_str:
+        return rev_comp.decode()
+    else:
+        return rev_comp
 
-
-from rust_simulator import Simulator, BaseComposition, DistributionType
 
 
 def generate_simulation_id(params: dict) -> str:
@@ -1020,7 +998,7 @@ def fix_cigar_for_pysamtools(cigar: str) -> str:
     Returns:
         str: Fixed CIGAR string with all operations having lengths
     """
-    # if any character is not preceded by a digit, append to it 1
+    # if any character is not preceded by a digit, prepend 1 to it
     # handle both standard CIGAR operators (A-Z) and extended operators (=,X)
     t = re.sub(r"([A-Z|=|X])(?!\d)([A-Z|=|X])", r"\g<1>1\g<2>", cigar, count=0)
     if re.search(r"[A-Z|=|X][A-Z|=|X]", t):  # Check for consecutive operators
@@ -1039,7 +1017,7 @@ def get_mismatches_from_cigar(cigar: str) -> int:
         int: Number of mismatches
 
     Note:
-        Cigar string should be in extended format with X for mismatches
+        Cigar string should be in extended format (version 1.4 cigar) with X for mismatches
     """
     return sum(int(num[:-1]) for num in re.findall(r"\d+X", cigar) or [0])
 
@@ -1173,7 +1151,7 @@ def vstack_easy(df1_to_stack: pl.DataFrame, df2_to_stack: pl.DataFrame) -> pl.Da
     return df1_to_stack.vstack(df2_to_stack)
 
 
-def parse_sassy(
+def parse_sassy_duckdb(
     sassy_file: str,
     max_mismatches: int = 5,
     spacer_lendf: Optional[pl.DataFrame] = None,
@@ -1378,7 +1356,7 @@ def parse_sassy(
     return results
 
 
-def parse_sassy_polars(
+def parse_sassy(
     sassy_file: str, max_mismatches: int = 5, spacer_lendf: Optional[pl.DataFrame] = None, max_gaps: int = 2, **kwargs
 ) -> pl.DataFrame:
     """Parse Sassy TSV output format and return standardized coordinates.
@@ -1392,7 +1370,7 @@ def parse_sassy_polars(
         max_gaps (int): Maximum gaps allowed in CIGAR.
 
     Returns:
-        pl.DataFrame: Cleaned results.
+        pl.DataFrame: (optionally filtered) results.
     """
 
     try:
@@ -1471,7 +1449,7 @@ def parse_sassy_polars(
     return results
 
 
-def parse_blastn_custom(blastn_file: str, max_mismatches: int = 5, spacer_lendf: Optional[pl.DataFrame] = None, **kwargs) -> pl.DataFrame:
+def parse_blastn(blastn_file: str, max_mismatches: int = 5, spacer_lendf: Optional[pl.DataFrame] = None, **kwargs) -> pl.DataFrame:
     """Parse a custom BLAST or mmseqs output format
     (query,target,nident,alnlen,mismatch,qlen,gapopen,qstart,qend,tstart,tend,evalue,bits)
     and return standardized coordinates (1-based).
@@ -1487,28 +1465,31 @@ def parse_blastn_custom(blastn_file: str, max_mismatches: int = 5, spacer_lendf:
         pl.DataFrame: Standardized results.
     """
     try:
-        results = pl.read_csv(
+        results = pl.scan_csv(
             blastn_file,
             separator="\t",
             has_header=False,
-            infer_schema_length=100000,
-            # n_threads=kwargs.get("threads", 1),
-            new_columns=[
-                "spacer_id",
-                "contig_id",
-                "nident",
-                "alnlen",
-                "mismatch",
-                "qlen",
-                "gapopen",
-                "qstart",
-                "qend",
-                "tstart",
-                "tend",
-                "evalue",
-                "bits",
-            ],
+            schema={
+                "spacer_id": pl.Utf8,
+                "contig_id": pl.Utf8,
+                "nident": pl.UInt32,
+                "alnlen": pl.UInt32,
+                "mismatch": pl.UInt32,
+                "qlen": pl.UInt32,
+                "gapopen": pl.UInt32,
+                "qstart": pl.UInt32,
+                "qend": pl.UInt32,
+                "tstart": pl.UInt32,
+                "tend": pl.UInt32,
+                "evalue": pl.Float64,
+                "bits": pl.Float64,
+            },
         )
+        results = results.filter((pl.col("mismatch")  <= max_mismatches) ) # do here to push down the filter
+        # results = results.filter((pl.col("qlen") - (pl.col("nident")+3) <= max_mismatches) ) # commented out, will be done later after adding gaps too.
+        results = results.collect()
+        # results = results.limit(1212121).collect()
+
         if any(
             results["qend"] < results["qstart"]
         ):  # mmseqs reports reverse on the subject, not the query.
@@ -2485,7 +2466,7 @@ def populate_pldf_withseqs(
         # pl.col(seqcol).str.slice(length= pl.col("end")-pl.col("start"),offset=pl.col("start")-1).alias(seqcol)
         # )
         # time_end = time.time()
-        # print(f"Time taken: {time_end - time_start:.2f} seconds") # Time taken: 0.15 seconds
+        # print(f"Time taken: {time_end - time_start:.2f} seconds") # Time taken: 0.15 seconds ### UPDATE: THIS IS BUGGED, REVERTING TO map_elements.
         # Benchmarking with map_elements
         # time_start = time.time()
         pldf = pldf.with_columns(
@@ -2750,47 +2731,6 @@ def prettify_alignment(
         return ali.comp
     return f"{ali.query}\n{ali.comp}\n{ali.ref}"
 
-
-def test_alignment_affine(
-    spacer_seq: str,
-    contig_seq: str,
-    strand: bool = False,
-    start: Optional[int] = None,
-    end: Optional[int] = None,
-    gap_cost: int = 10,
-    extend_cost: int = 5,
-    matrix: Any = ps.nuc44,
-    **kwargs,
-) -> int:
-    """ 
-    BROKEN!!! DOESN'T WORK DON'T USE 
-    Test if an alignment matches between a spacer and contig using smith_waterman_gotoh algorithm.
-
-    Returns:
-        int: Number of mismatches.
-    """
-    from affine_gaps import smith_waterman_gotoh_alignment
-
-    if start is not None and end is not None:
-        aligned_region = contig_seq[start:end]
-    else:
-        aligned_region = contig_seq
-    if strand:  # True means reverse strand
-        aligned_region = reverse_complement(aligned_region)
-
-    alignment = smith_waterman_gotoh_alignment(
-        # substitution_matrix=matrix.matrix,
-        str1=spacer_seq,
-        str2=aligned_region,
-        gap_opening=-gap_cost,
-        gap_extension=-extend_cost,
-        match=1,
-        mismatch=-1
-    )
-    mismatches = len(spacer_seq) - alignment[2]
-    return mismatches
-
-
 def test_alignment(
     spacer_seq: str,
     contig_seq: str,
@@ -2857,7 +2797,7 @@ def test_alignment(
 
 
 def calculate_hamming_distance(
-    spacer_seq: str, contig_seq: str, strand=False, start=None, end=None
+    spacer_seq: str, contig_seq: str, strand: bool = False, start=None, end=None
 ):
     """
     Calculate hamming distance (substitutions only, no indels) using ungapped alignment.
@@ -2890,11 +2830,26 @@ def calculate_hamming_distance(
     if strand:
         aligned_region = reverse_complement(aligned_region)
 
-    # If lengths don't match, can't do proper hamming distance
+    # If lengths don't match, can't do proper hamming distance, trying with padding (the shorter) from each side as "good enough effort"
     if len(spacer_seq) != len(aligned_region):
-        # Return length difference as invalid alignment
-        return max(len(spacer_seq), len(aligned_region))
-
+        print("Sequences of different lengths, cannot compute hamming distance accurately.")
+        if len(spacer_seq) < len(aligned_region):
+            # Pad spacer_seq (RIGHT)
+            spacer_seq_r = spacer_seq.ljust(len(aligned_region), "@")
+            ham_rght = sum(1 for a, b in zip(spacer_seq_r, aligned_region) if a != b)
+            # Pad spacer_seq (LEFT)
+            spacer_seq_l = spacer_seq.rjust(len(aligned_region), "@")
+            ham_lft = sum(1 for a, b in zip(spacer_seq_l, aligned_region) if a != b)
+        else:
+            # Pad aligned_region (RIGHT)
+            aligned_region_r = aligned_region.ljust(len(spacer_seq), "@")
+            ham_rght = sum(1 for a, b in zip(spacer_seq, aligned_region_r) if a != b)
+            # Pad aligned_region (LEFT)
+            aligned_region_l = aligned_region.rjust(len(spacer_seq), "@")
+            ham_lft = sum(1 for a, b in zip(spacer_seq, aligned_region_l) if a != b)
+            # Return the minimum of the two padding attempts
+            return min(ham_rght, ham_lft)
+    # if they're the same length, proceed normally
     # Simple character-by-character comparison (true hamming distance)
     hamming = sum(1 for a, b in zip(spacer_seq, aligned_region) if a != b)
     return hamming
@@ -2908,6 +2863,7 @@ def calculate_edit_distance(
     end: Optional[int] = None,
     gap_open: int = 10,
     gap_extend: int = 5,
+    matrix: ps.Matrix = ps.nuc44
 ):
     """
     Calculate edit distance (allowing indels) using Needleman-Wunsch gapped alignment.
@@ -2946,7 +2902,7 @@ def calculate_edit_distance(
         aligned_region,
         open=gap_open,
         extend=gap_extend,
-        matrix=ps.nuc44,
+        matrix=matrix,
     )
 
     comp_string = alignment.traceback.comp
@@ -3732,43 +3688,6 @@ def verify_sam_file(sam_file: str, ref_file: Optional[str] = None):
         print("SAM file looks good, no changes needed")
 
     return sam_file
-
-
-def prefilter_sam_with_sambamba(input_sam: str, output_sam: str, max_mismatches: int = 5, threads: int = 1):
-    """Prefilter SAM file using sambamba to remove unmapped reads with mismatches (NM) <= max_mismatches"""
-    # Filter expression:
-    # - not unmapped: keep only mapped reads
-    # - [NM] <= max_mismatches: keep reads with max_mismatches or fewer mismatches
-    # - cigar !~ /[ID]/: exclude reads with insertions or deletions in CIGAR string # UPDATE: never used.
-
-    filter_expression = f'"not (unmapped) and [NM] <= {max_mismatches}"'
-    if not os.path.exists(input_sam):
-        print(f"File {input_sam} does not exist, skipping")
-        return None
-    if os.path.getsize(input_sam) == 0:
-        print(f"File {input_sam} is empty, skipping")
-        return None
-
-    input_sam = verify_sam_file(input_sam)
-
-    command = [
-        "sambamba",
-        "view",
-        "-F",
-        filter_expression,
-        "--show-progress",
-        "-t",
-        str(threads),
-        "-S",  # SAM input
-        "-f",
-        "sam",  # SAM output
-        "-h",
-        "-o",
-        output_sam,
-        input_sam,
-    ]
-    subprocess.run(" ".join(command), check=True, shell=True)
-    return output_sam
 
 
 def create_comparison_matrix(tools_results: pl.DataFrame, n_mismatches: int = 3):
