@@ -302,6 +302,7 @@ def print_dataset_slurm_summary(results_dict, title):
         if result.get('tools'):
             print(f"  Tools: {', '.join(result['tools'][:5])}{'...' if len(result['tools']) > 5 else ''}")
 
+
 def submit_slurm_jobs(results_dir, job_subdir="job_scripts", dry_run=False):
     """Submit all job scripts in results_dir/job_subdir via sbatch.
 
@@ -413,6 +414,58 @@ def generate_scripts_for_dataset(
         'max_distance': max_distance
     }
 
+def check_job_status(user=None):
+    """
+    Check current SLURM job status.
+    
+    Args:
+        user: Username to check (default: current user via $USER)
+    
+    Returns:
+        DataFrame with job status information
+    """
+    if user is None:
+            user = os.environ.get('USER', 'uneri')
+        
+    cmd = ['squeue', '-u', user, '-o', "%.10i,%.20j,%.10T,%.10D,%.10C,%.10c,%.10M,%.20V,%.10L", '--noheader']
+
+    # print(" ".join(cmd))
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        lines = result.stdout.strip().split('\n')
+        
+        if len(lines) <= 1:
+            print("No jobs currently running or pending")
+            return pl.DataFrame()
+        
+        # Parse the output
+        # print (header)
+        data = []
+        for line in lines[1:]:
+            parts = line.split(",")
+            parts = [xy.strip() for xy in parts]
+            # if len(parts) <14:
+                # parts +=[x for x in 13-len(parts)
+            data.append(parts)
+        print(data)
+        if not data:
+            return pl.DataFrame()
+        
+        df = pl.DataFrame(data, schema=["JobId","JobName", "State", "AllocNodes", "MaxCPUs", "MinCPUs", "TimeUsed", "SubmitTime", "TimeLimit"],orient="row")
+        return df
+        
+    except subprocess.CalledProcessError as e:
+        print(f"Error running squeue: {e}")
+        return pl.DataFrame()
+
+
+def get_jobs_by_pattern(pattern, user=None):
+    """Get jobs matching a name pattern."""
+    df = check_job_status(user)
+    if df.height == 0:
+        return df
+    return df.filter(pl.col('NAME').str.contains_any(pattern))
 
 
 if __name__ == "__main__":

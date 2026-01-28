@@ -471,8 +471,9 @@ def full_run(output_dir, num_contigs, num_spacers, contig_length, spacer_length,
               help='Gap open penalty for alignment validation')
 @click.option('--gap-extend-penalty', type=int, default=5,
               help='Gap extension penalty for alignment validation')
+@click.option('--verbose', '-v', is_flag=True, help='Enable verbose (DEBUG) logging')
 def compare_results(input_dir, max_mismatches, output_file, threads, augment_ground_truth,
-                   skip_tools, only_tools, distance, gap_open_penalty, gap_extend_penalty):
+                   skip_tools, only_tools, distance, gap_open_penalty, gap_extend_penalty,verbose):
     """
     Compare and validate alignment tool results.
     
@@ -482,7 +483,8 @@ def compare_results(input_dir, max_mismatches, output_file, threads, augment_gro
     
     \b
     Metrics Calculated:
-      - True Positives: Correctly identified spacer locations
+      - True Positives: Correctly identified spacer locations (that were in the simulation plan)
+      - False Positives: Incorrectly reported locations
       - False Positives: Incorrectly reported locations
       - False Negatives: Missed spacer locations
       - Precision: TP / (TP + FP)
@@ -498,8 +500,6 @@ def compare_results(input_dir, max_mismatches, output_file, threads, augment_gro
     
     \b
     Gap Penalty Options:
-      Control how gaps are scored during alignment validation:
-      --no-gaps-as-mismatches: Count gaps as mismatches 
       --gap-open-penalty: Penalty for opening a gap
       --gap-extend-penalty: Penalty for extending a gap
     
@@ -507,9 +507,9 @@ def compare_results(input_dir, max_mismatches, output_file, threads, augment_gro
     Example:
       spacer_bencher compare-results -i tests/validation -mm 3 -o results.tsv
       spacer_bencher compare-results -i tests/validation --augment-ground-truth
-      spacer_bencher compare-results -i tests/validation --no-gaps-as-mismatches
     """
     from bench.commands.compare_results import run_compare_results
+
     
     logger.info(f"Comparing tool results in {input_dir}")
     
@@ -519,7 +519,7 @@ def compare_results(input_dir, max_mismatches, output_file, threads, augment_gro
             max_mismatches=max_mismatches,
             output_file=output_file,
             threads=threads,
-            augment_ground_truth=augment_ground_truth,
+            # augment_ground_truth=augment_ground_truth,
             skip_tools=skip_tools,
             only_tools=only_tools,
             distance_metric=distance,

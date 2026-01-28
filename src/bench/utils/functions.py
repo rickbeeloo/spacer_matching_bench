@@ -56,14 +56,15 @@ def read_fasta_needletail(fasta_file: str) -> tuple[list[str], list[str]]:
         seq_ids.append(record.id)
     return seq_ids, seqs
 
-def calculate_shannon_entropy(s: str) -> float:
+def calculate_shannon_entropy(s: str, k:int = 1) -> float:
     """Calculate the Shannon entropy of a string.
 
     Args:
         s(str): The input string
+        k(int): number of letters per 1 symbol in the alphabeit to use for counting (not yet implemented).
 
     Returns:
-        float: The Shannon entropy value
+        float: The Shannon entropy value over the entire string.
     """
     if not s:
         return 0.0  # here in case of NULLs so that applting over ovject of size n still returns a number.  TODO: think if 0.0 is the best place holder value...
@@ -2635,40 +2636,6 @@ def populate_pldf_withseqs_needletail(
 
     return pldf
 
-
-def test_alignment_from_faidx(spacers_file: str, contigs_file: str, alignment: pl.DataFrame, **kwargs) -> bool:
-    """Test if an alignment matches between spacer and contig files using pyfastx.
-    alignment is a single row extracted from a pl.df results  (spacer_id, contig_id, spacer_length, start, end, strand, mismatches, tool)
-
-    Args:
-        spacers_file: Path to spacer FASTA.
-        contigs_file: Path to contig FASTA.
-        alignment: Single-row dataframe.
-
-    Returns:
-        bool: True if alignment verification passes.
-    """
-
-    contig_seq = get_seq_from_fastx(contigs_file, alignment["contig_id"][0])
-    # Get the sequences
-    spacer_seq = get_seq_from_fastx(spacers_file, alignment["spacer_id"][0])
-    # Extract the aligned region from contig
-    aligned_region = contig_seq[alignment["start"].item() : alignment["end"].item()]
-
-    # Compare sequences accounting for strand
-    if alignment["strand"]:  # True means reverse strand
-        aligned_region = reverse_complement(aligned_region)
-
-    alignment = ps.nw_stats_scan(
-        spacer_seq, aligned_region, open=10, extend=10, matrix=ps.nuc44
-    )
-    mismatches = len(spacer_seq) - (alignment.matches)
-    if mismatches != alignment["mismatches"]:
-        # print(f"Mismatch between pyfastx and alignment: {mismatches} != {alignment['mismatches']}")
-        return False
-    return True
-
-
 def prettify_alignment(
     spacer_seq: str,
     contig_seq: str,
@@ -2737,9 +2704,9 @@ def test_alignment(
     strand: bool = False,
     start: Optional[int] = None,
     end: Optional[int] = None,
-    gap_cost: int = 10,
+    gap_cost: int = 5,
     extend_cost: int = 5,
-    gaps_as_mismatch: bool = True,
+    distance_metric: str = "hamming",
     **kwargs,
 )-> int:
     """Test if an alignment matches between a spacer and contig using Needleman-Wunsch algorithm.
@@ -2754,50 +2721,59 @@ def test_alignment(
         end (int): End index.
         gap_cost (int): Opening penalty.
         extend_cost (int): Extension penalty.
-        gaps_as_mismatch(bool): If True, count gaps as mismatches (similar to edit distance, but not quite).
-                         If False, count only substitutions (hamming-like distance).
+        distance_metric (str): Distance metric for validation: 'hamming' (substitutions only) or 'edit' (substitutions + indels). If 'hamming', the gap values are ignored.
 
     Returns:
-        int: Mismatch count.
+        int: Distance count.
     """
     if start is not None and end is not None:
-        aligned_region = contig_seq[start:end]
+        expected_length = end - start
+        # If contig_seq is already trimmed, do not slice again
+        if len(contig_seq) == expected_length:
+            aligned_region = contig_seq
+        else:
+            aligned_region = contig_seq[start:end]
     else:
         aligned_region = contig_seq
     if strand:  # True means reverse strand
         aligned_region = reverse_complement(aligned_region)
 
-    # Always use nw_trace to get the alignment string for accurate counting
-    alignment = ps.nw_trace(
-        spacer_seq,
-        aligned_region,
-        open=gap_cost,
-        extend=extend_cost,
-        matrix=ps.nuc44,
-    )
-
-    # In parasail's comp string:
-    # '|' = match
-    # '.' = mismatch (substitution)
-    # ' ' (space) = gap/indel
-
-    comp_string = alignment.traceback.comp
-    matches = comp_string.count("|")
-
-    if gaps_as_mismatch:
+    if distance_metric == "edit":
         # Edit distance: spacer length minus matched positions
         # This counts all differences including substitutions and indels
-        mismatches = len(spacer_seq) - matches
-    else:
-        # Hamming distance: count only substitutions, exclude gaps
-        # This counts mismatched positions but ignores indels
-        mismatches = comp_string.count(".")
+        # Always use nw_trace to get the alignment string for accurate counting
+        alignment = ps.nw_trace(
+            spacer_seq,
+            aligned_region,
+            open=gap_cost,
+            extend=extend_cost,
+            matrix=ps.nuc44,
+        )
 
-    return mismatches
+        # In parasail's comp string:
+        # '|' = match
+        # '.' = mismatch (substitution)
+        # ' ' (space) = gap/indel
+
+        comp_string = alignment.traceback.comp
+        matches = comp_string.count("|")
+        distance = len(comp_string) - matches
+    else:
+        # Hamming distance: allows only substitutions. No indels.
+        distance = calculate_hamming_distance(
+            spacer_seq,
+            aligned_region,
+            strand=False,
+            start=None,
+            end=None,
+            silent=True,
+        )
+    
+    return distance
 
 
 def calculate_hamming_distance(
-    spacer_seq: str, contig_seq: str, strand: bool = False, start=None, end=None
+    spacer_seq: str, contig_seq: str, strand: bool = False, start=None, end=None, silent:bool =True
 ):
     """
     Calculate hamming distance (substitutions only, no indels) using ungapped alignment.
@@ -2813,7 +2789,7 @@ def calculate_hamming_distance(
         Hamming distance (number of substitutions only)
     
     Note:
-        If sequences are of different lengths, returns the length difference as an invalid alignment.
+        If sequences are of different lengths, it will attempt to pad the shorter sequence with "@" characters on either side and compute two hamming distances, returning the minimum.
     """
     if start is not None and end is not None:
         # Check if sequence is already trimmed to region
@@ -2832,7 +2808,8 @@ def calculate_hamming_distance(
 
     # If lengths don't match, can't do proper hamming distance, trying with padding (the shorter) from each side as "good enough effort"
     if len(spacer_seq) != len(aligned_region):
-        print("Sequences of different lengths, cannot compute hamming distance accurately.")
+        if not silent:
+            print("Sequences of different lengths, cannot compute hamming distance accurately.")
         if len(spacer_seq) < len(aligned_region):
             # Pad spacer_seq (RIGHT)
             spacer_seq_r = spacer_seq.ljust(len(aligned_region), "@")
@@ -2847,8 +2824,8 @@ def calculate_hamming_distance(
             # Pad aligned_region (LEFT)
             aligned_region_l = aligned_region.rjust(len(spacer_seq), "@")
             ham_lft = sum(1 for a, b in zip(spacer_seq, aligned_region_l) if a != b)
-            # Return the minimum of the two padding attempts
-            return min(ham_rght, ham_lft)
+        # Return the minimum of the two padding attempts
+        return min(ham_rght, ham_lft)
     # if they're the same length, proceed normally
     # Simple character-by-character comparison (true hamming distance)
     hamming = sum(1 for a, b in zip(spacer_seq, aligned_region) if a != b)
@@ -2876,6 +2853,7 @@ def calculate_edit_distance(
         end(int): Region end coordinate (only used for slicing if sequence is full-length)
         gap_open(int): Gap opening penalty
         gap_extend(int): Gap extension penalty
+        matrix(ps.Matrix): Scoring matrix
 
     Returns:
         True edit distance: count of substitutions + insertions + deletions
@@ -2937,6 +2915,94 @@ def test_row(row, ignore_region_strands=False):
             row["end"],
             gaps_as_mismatch=True,
         )
+
+
+def prettify_alignment_hamming(
+    spacer_seq: str,
+    contig_seq: str,
+    strand: bool = False,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    return_ref_region: bool = False,
+    return_query_region: bool = False,
+    return_comp_str: bool = False,
+) -> str:
+    """
+    Calculate hamming distance (substitutions only, no indels) using ungapped alignment.
+
+    Args:
+        spacer_seq(str): Query sequence
+        contig_seq(str): Target sequence (may be pre-trimmed to region)
+        strand(bool): If True, reverse complement contig_seq
+        start(int): Region start coordinate (only used for slicing if sequence is full-length)
+        end(int): Region end coordinate (only used for slicing if sequence is full-length)
+        return_ref_region: Return traceback ref.
+        return_query_region: Return traceback query.
+        return_comp_str: Return comparison string (| .).
+        gap_cost: Penalty.
+        extend_cost: Penalty.
+        cost_matrix: Scoring matrix.
+
+    Returns:
+        str: Alignment string representation.
+    Note:
+        If sequences are of different lengths, it will attempt to pad the shorter sequence with "@" characters on either side and compute two hamming distances, returning the minimum.
+
+    """
+    if start is not None and end is not None:
+        aligned_region = contig_seq[start:end]
+    else:
+        aligned_region = contig_seq
+
+    if strand:  # True means reverse strand
+        aligned_region = reverse_complement(aligned_region)
+
+    # If lengths don't match, can't do proper hamming distance, trying with padding (the shorter) from each side as "good enough effort"
+    if len(spacer_seq) != len(aligned_region):
+        if len(spacer_seq) < len(aligned_region):
+            # Pad spacer_seq (RIGHT)
+            spacer_seq_r = spacer_seq.ljust(len(aligned_region), "@")
+            ham_rght = sum(1 for a, b in zip(spacer_seq_r, aligned_region) if a != b)
+            # Pad spacer_seq (LEFT)
+            spacer_seq_l = spacer_seq.rjust(len(aligned_region), "@")
+            ham_lft = sum(1 for a, b in zip(spacer_seq_l, aligned_region) if a != b)
+            
+            # Get the minimum of the two padding attempts, and build alignment string accordingly ("|" for match, "." for mismatch)
+            if ham_rght < ham_lft:
+                ali_str = "".join("|" if a == b else "." for a, b in zip(spacer_seq_r, aligned_region))
+                spacer_seq = spacer_seq_r
+            else:
+                ali_str = "".join("|" if a == b else "." for a, b in zip(spacer_seq_l, aligned_region))
+                spacer_seq = spacer_seq_l
+        else:
+            # Pad aligned_region (RIGHT)
+            aligned_region_r = aligned_region.ljust(len(spacer_seq), "@")
+            ham_rght = sum(1 for a, b in zip(spacer_seq, aligned_region_r) if a != b)
+            # Pad aligned_region (LEFT)
+            aligned_region_l = aligned_region.rjust(len(spacer_seq), "@")
+            ham_lft = sum(1 for a, b in zip(spacer_seq, aligned_region_l) if a != b)
+            
+            # Get the minimum of the two padding attempts, and build alignment string accordingly ("|" for match, "." for mismatch)
+            if ham_rght < ham_lft:
+                ali_str = "".join("|" if a == b else "." for a, b in zip(spacer_seq, aligned_region_r))
+                aligned_region = aligned_region_r
+            else:
+                ali_str = "".join("|" if a == b else "." for a, b in zip(spacer_seq, aligned_region_l))
+                aligned_region = aligned_region_l
+    # if they're the same length, proceed normally
+    # Simple character-by-character comparison (true hamming distance)
+    else:
+        ali_str = "".join("|" if a == b else "." for a, b in zip(spacer_seq, aligned_region))
+
+    if return_ref_region:
+        return aligned_region
+    if return_query_region:
+        return spacer_seq
+    if return_comp_str:
+        return ali_str
+
+    return f"{spacer_seq}\n{ali_str}\n{aligned_region}"
+
 
 
 def test_alignment_polars(results: pl.DataFrame, ignore_region_strands=False, **kwargs):
@@ -3759,19 +3825,19 @@ class DebugArgs:
         self.max_runs = 1
 
 
-def validate_intervals_with_polars_bio(
+def get_overlap_type_polarsbio(
     planned_intervals: pl.DataFrame, tool_results: pl.DataFrame, max_mismatches: int = 5
-):
+) -> pl.DataFrame:
     """
-    Validate tool results against planned intervals using polars-bio interval operations.
+    quickly identify partially overlapping, fully overlapped, or non-overlapping, regions between planned intervals and tool results.
 
     Args:
         planned_intervals(polars.DataFrame): DataFrame with planned spacer insertions (spacer_id, contig_id, start, end, strand, mismatches)
-        tool_results(polars.DataFrame): DataFrame with tool results (spacer_id, contig_id, start, end, strand, mismatches)
+        tool_results(polars.DataFrame): DataFrame with tool(s) results (spacer_id, contig_id, start, end, strand, mismatches)
         max_mismatches(int): Maximum allowed mismatches for validation
 
     Returns:
-        DataFrame with validation results
+        DataFrame with validation results: 
     """
     # Filter tool results by max mismatches
     tool_results_filtered = tool_results.filter(pl.col("mismatches") <= max_mismatches)
@@ -3870,49 +3936,6 @@ def validate_intervals_with_polars_bio(
             .alias("overlap_type")
         ]
     ).collect()
-
-    return validation_results
-
-
-def validate_intervals_fallback(planned_intervals: pl.DataFrame, tool_results: pl.DataFrame, max_mismatches: int = 5):
-    """
-    Fallback interval validation without polars-bio.
-    """
-    # Filter tool results by max mismatches
-    tool_results_filtered = tool_results.filter(pl.col("mismatches") <= max_mismatches)
-
-    # Simple overlap detection using polars operations
-    joined = planned_intervals.join(
-        tool_results_filtered,
-        on=["spacer_id", "contig_id", "strand"],
-        how="inner",
-        suffix="_tool",
-    )
-
-    # Check for overlaps
-    overlap_conditions = (
-        (
-            (pl.col("start") <= pl.col("start_tool"))
-            & (pl.col("end") >= pl.col("end_tool"))
-        )
-        | (
-            (pl.col("start_tool") <= pl.col("start"))
-            & (pl.col("end_tool") >= pl.col("end"))
-        )
-        | (
-            (pl.col("start") < pl.col("end_tool"))
-            & (pl.col("end") > pl.col("start_tool"))
-        )
-    )
-
-    validation_results = joined.with_columns(
-        [
-            pl.when(overlap_conditions)
-            .then(pl.lit("overlap"))
-            .otherwise(pl.lit("no_overlap"))
-            .alias("overlap_type")
-        ]
-    )
 
     return validation_results
 

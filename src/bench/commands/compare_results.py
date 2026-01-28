@@ -11,10 +11,8 @@ from rich.console import Console
 
 from bench.utils.functions import (
     read_fasta, read_results, read_hyperfine_results,
-    validate_intervals_with_polars_bio, test_alignment,
-    populate_pldf_withseqs_needletail
-    , prettify_alignment,
-    get_seq_from_fastx
+     test_alignment,    populate_pldf_withseqs_needletail    , prettify_alignment, prettify_alignment_hamming,
+    get_seq_from_fastx, vstack_easy
 )
 from bench.utils.tool_commands import load_tool_configs
 
@@ -23,16 +21,17 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 
-def validate_unique_alignments_across_tools(
+def classify_unique_alignments_across_tools(
     ground_truth: pl.DataFrame,
     all_tool_results: pl.DataFrame,
     contigs_file: str,
     spacers_file: str,
-    max_mismatches: int = 5,
-    verify_false_positives: bool = True,
+    max_distance: int = 5,
     distance_metric: str = 'hamming',
     gap_open_penalty: int = 5,
-    gap_extend_penalty: int = 5
+    gap_extend_penalty: int = 5,
+    include_comp_string: bool = False
+
 ) -> pl.DataFrame:
     """
     Validate all unique alignments across all tools once.
@@ -46,15 +45,16 @@ def validate_unique_alignments_across_tools(
         contigs_file: Path to contigs FASTA file
         spacers_file: Path to spacers FASTA file
         max_mismatches: Maximum mismatches to consider valid
-        verify_false_positives: Whether to verify FPs by checking actual alignments
         distance_metric: Distance metric for validation: 'hamming' (substitutions only) or 'edit' (substitutions + indels)
-        gap_open_penalty: Gap open penalty for alignment validation (default: 5)
-        gap_extend_penalty: Gap extension penalty for alignment validation (default: 5)
+        gap_open_penalty: Gap open penalty for alignment validation, will be used if distance_metric is 'edit' (default: 5)
+        gap_extend_penalty: Gap extension penalty for alignment validation, will be used if distance_metric is 'edit' (default: 5)
+        include_comp_string: Whether to include the alignment comparison string in the output (default: False)
     
     Returns:
-        Tuple of (classified_alignments, exact_matches_with_gt):
-        - classified_alignments: DataFrame with alignment_idx and classification
-        - exact_matches_with_gt: DataFrame with GT info for recall calculation (from polars-bio join)
+        dataframe with alignment classifications.
+    
+    Note:
+        this doens't add the ground truth results that have no matches in any tool results (these should be considered false negatives, and counted somewhere).
     """
     logger.debug("Validating unique alignments across all tools...")
     
@@ -68,210 +68,100 @@ def validate_unique_alignments_across_tools(
     # Add index for tracking
     unique_alignments = unique_alignments.with_row_index("alignment_idx")
     
-    # Use interval-based validation with polars-bio
-    try:
-        validation_results = validate_intervals_with_polars_bio(
-            ground_truth, unique_alignments, max_mismatches
-        )
-    except Exception as e:
-        logger.error(f"Error in interval validation: {e}")
-        logger.warning("Falling back to simple classification")
-        # Fallback: mark everything as unclassified
-        unique_alignments = unique_alignments.with_columns(
-            pl.lit("unclassified").alias("classification")
-        )
-        return unique_alignments
+    # first roughly categorize matches (exact/else) if they part of the planned_intervals
+    exact_matches = ground_truth.join(unique_alignments,how="inner",on=["spacer_id", "contig_id", "start", "end", "strand"])
     
-    # Process validation results to categorize matches
-    exact_matches = validation_results.filter(pl.col("overlap_type") == "exact_match")
-    partial_overlaps = validation_results.filter(pl.col("overlap_type") == "partial_overlap")
+    need_verify_df = all_tool_results.join(ground_truth,
+                                           how="anti",on=["spacer_id", "contig_id", "start", "end", "strand"])
+    # Categorize results not in ground truth
+    logger.debug("Loading sequences for FP verification...")
+    # Load spacer sequences 
+    need_verify_df = populate_pldf_withseqs_needletail(
+        need_verify_df,
+        seqfile=spacers_file,
+        idcol="spacer_id",
+        seqcol="spacer_seq",
+        trim_to_region=False,
+        reverse_by_strand_col=False,
+    )
+
+    # Load contig sequences
+    need_verify_df = populate_pldf_withseqs_needletail(
+        need_verify_df,
+        seqfile=contigs_file,
+        idcol="contig_id",
+        seqcol="contig_seq",
+        trim_to_region=True,
+        reverse_by_strand_col=True,
+    )
     
-    logger.debug(f"Exact matches from validation: {exact_matches.height}")
-    logger.debug(f"Partial overlaps: {partial_overlaps.height} (will be verified)")
+    logger.debug("Verifying false positive alignments...")
+    logger.debug("Algorithm: Needleman-Wunsch (parasail)")
+    logger.debug(f"Gap open penalty: {gap_open_penalty}")
+    logger.debug(f"Gap extend penalty: {gap_extend_penalty}")
+    logger.debug(f"Distance metric: {distance_metric})")
+    logger.debug(f"Max allowed distance: {max_distance}")
+    logger.debug(f"Alignments to verify: {need_verify_df.height}")
     
-    # Debug: Check if validation created duplicate matches
-    # Each unique_alignment should match at most one ground truth entry
-    index_col_temp = "alignment_idx_2" if "alignment_idx_2" in exact_matches.columns else "alignment_idx"
-    if exact_matches.height > 0:
-        unique_exact_alignments = exact_matches[index_col_temp].n_unique()
-        if unique_exact_alignments != exact_matches.height:
-            logger.warning("Validation created duplicate exact matches:")
-            logger.warning(f"  {exact_matches.height} exact match rows, but only {unique_exact_alignments} unique alignments")
-            logger.warning("  This means some alignments matched multiple GT entries (shouldn't happen!)")
-    
-    # The polars-bio overlap adds "_2" suffix to the second dataframe (unique_alignments) columns
-    index_col = "alignment_idx_2" if "alignment_idx_2" in validation_results.columns else "alignment_idx"
-    
-    # Only exact matches are true positives - partial overlaps need verification
-    # Keep it simple: just track alignment_idx and classification
-    tp_classified = pl.DataFrame({"alignment_idx": [], "classification": []})
-    
-    if exact_matches.height > 0:
-        tp_classified = (
-            exact_matches.select(index_col)
-            .rename({index_col: "alignment_idx"})
-            .unique()  # One classification per alignment
-            .with_columns(pl.lit("exact_match").alias("classification"))
-        )
-    # Partial overlaps and non-overlaps both need verification as potential FPs
-    # Combine them into the fps set to be verified
-    fps_indices = []
-    
-    if partial_overlaps.height > 0:
-        partial_indices = partial_overlaps.select(index_col).rename({index_col: "alignment_idx"})
-        fps_indices.append(partial_indices)
-    
-    # Also get alignments with no overlap at all
-    if tp_classified.height > 0:
-        no_overlap = unique_alignments.filter(
-            ~pl.col("alignment_idx").is_in(tp_classified["alignment_idx"])
-        )
-    else:
-        no_overlap = unique_alignments
-    
-    if no_overlap.height > 0:
-        fps_indices.append(no_overlap.select("alignment_idx"))
-    
-    # Combine all FPs to verify
-    if fps_indices:
-        fps = unique_alignments.filter(
-            pl.col("alignment_idx").is_in(
-                pl.concat(fps_indices, how="vertical_relaxed")["alignment_idx"]
-            )
-        )
-    else:
-        fps = pl.DataFrame(schema=unique_alignments.schema)
-    
-    logger.debug(f"False positives to categorize: {fps.height}")
-    
-    # Categorize false positives
-    fp_classifications = []
-    
-    if fps.height > 0 and verify_false_positives:
-        logger.debug("Loading sequences for FP verification...")
-        try:
-            # Load sequences for false positives
-            fps_with_seqs = populate_pldf_withseqs_needletail(
-                fps,
-                seqfile=contigs_file,
-                idcol="contig_id",
-                seqcol="contig_seq",
-                trim_to_region=True,
-                reverse_by_strand_col=True,
-            )
-            fps_with_seqs = populate_pldf_withseqs_needletail(
-                fps_with_seqs,
-                seqfile=spacers_file,
-                idcol="spacer_id",
-                seqcol="spacer_seq",
-                trim_to_region=False,
-                reverse_by_strand_col=False,
-            )
-            
-            logger.debug("Verifying false positive alignments...")
-            logger.debug("  Algorithm: Needleman-Wunsch (parasail)")
-            logger.debug(f"  Gap open penalty: {gap_open_penalty}")
-            logger.debug(f"  Gap extend penalty: {gap_extend_penalty}")
-            logger.debug(f"  Distance metric: {distance_metric} ({'substitutions + indels' if distance_metric == 'edit' else 'substitutions only'})")
-            logger.debug(f"  Max allowed mismatches: {max_mismatches}")
-            logger.debug(f"  Alignments to verify: {fps_with_seqs.height}")
-            
-            # Test each FP alignment
-            gaps_as_mismatches = (distance_metric == 'edit')
-            for row in fps_with_seqs.iter_rows(named=True):
-                spacer_seq = row.get("spacer_seq")
-                contig_seq = row.get("contig_seq")
-                alignment_idx = row["alignment_idx"]
-                
-                if spacer_seq and contig_seq:
-                    # Test alignment quality using provided gap parameters
-                    actual_mismatches = test_alignment(
-                        spacer_seq, contig_seq,
-                        strand=False,  # Already reverse complemented if needed
-                        start=None, end=None,
-                        gaps_as_mismatch=gaps_as_mismatches,
-                        gap_cost=gap_open_penalty,
-                        extend_cost=gap_extend_penalty,
-                    )
-                    
-                    if actual_mismatches <= max_mismatches:
-                        # Valid alignment, just not in the plan
-                        classification = "positive_not_in_plan"
-                    else:
-                        # Poor alignment quality
-                        classification = "true_false_positive"
-                else:
-                    # Missing sequences
-                    classification = "true_false_positive"
-                
-                fp_classifications.append({
-                    "alignment_idx": alignment_idx,
-                    "classification": classification
-                })
-        
-        except Exception as e:
-            logger.warning(f"Could not verify false positives: {e}")
-            # Without verification, mark all as positives_not_in_plan
-            fp_classifications = [
-                {"alignment_idx": row["alignment_idx"], "classification": "positive_not_in_plan"}
-                for row in fps.iter_rows(named=True)
-            ]
-    elif fps.height > 0:
-        # Without verification, mark all as positives_not_in_plan
-        fp_classifications = [
-            {"alignment_idx": row["alignment_idx"], "classification": "positive_not_in_plan"}
-            for row in fps.iter_rows(named=True)
-        ]
-    
-    # Create FP classification dataframe
-    if fp_classifications:
-        fp_classified = pl.DataFrame(fp_classifications)
-    else:
-        fp_classified = pl.DataFrame({"alignment_idx": [], "classification": []})
-    
-    # Combine all classifications (simple schema: alignment_idx + classification)
-    all_classified = pl.concat([tp_classified, fp_classified], how="vertical_relaxed") if tp_classified.height > 0 or fp_classified.height > 0 else pl.DataFrame({
-        "alignment_idx": [], 
-        "classification": []
-    })
-    
-    # Join back to unique alignments
-    result = unique_alignments.join(
-        all_classified,
-        on="alignment_idx",
+    # Test each non-planned alignment
+    # contig_seq is already trimmed, so do not pass start/end
+    need_verify_df = need_verify_df.with_columns(
+        pl.struct(pl.col("spacer_seq"), pl.col("contig_seq"), pl.col("strand"))
+        .map_elements(
+            lambda x: test_alignment(contig_seq=x["contig_seq"], spacer_seq=x["spacer_seq"], strand=x["strand"], distance_metric=distance_metric, gap_cost=gap_open_penalty, extend_cost=gap_extend_penalty),
+            return_dtype=pl.Int64
+        ).alias("recalculated_distnace")
+    )
+    # add classifications based on verification
+    need_verify_df = need_verify_df.with_columns(
+        pl.when(pl.col("recalculated_distnace") <= max_distance).then(pl.lit("positive_not_in_plan")).otherwise(pl.lit("invalid_alignment")).alias("classification")
+    )
+    logger.debug("verification completed:")
+    logger.debug(f'{need_verify_df["classification"].value_counts(sort=True)}')
+    logger.debug("stacking back to to non-verification-required exact matches dataframe")
+    # Combine exact matches and verified non-planned positives 
+    # alignment_classifications = pl.concat([
+    #     exact_matches.with_columns(pl.lit("positive_in_plan").alias("classification"),
+    #                                 pl.col("mismatches").alias("recalculated_distnace")),
+    #     need_verify_df])
+    # Select only the relevant columns to match need_verify_df
+
+    exact_matches_out = exact_matches.with_columns(
+        pl.lit("positive_in_plan").alias("classification"),
+        pl.col("mismatches").alias("recalculated_distnace")
+    ).select([
+        "spacer_id", "contig_id", "start", "end", "strand", "classification", "recalculated_distnace"
+    ])
+
+    need_verify_out = need_verify_df.select([
+        "spacer_id", "contig_id", "start", "end", "strand", "classification", "recalculated_distnace"
+    ])
+
+    alignment_classifications = vstack_easy(exact_matches_out, need_verify_out)
+
+    alignment_classifications = all_tool_results.join(
+        alignment_classifications.select([
+            "spacer_id", "contig_id", "start", "end", "strand", "classification","recalculated_distnace"
+        ]),
+        on=["spacer_id", "contig_id", "start", "end", "strand"],
         how="left"
-    )
-    
-    # Fill any missing classifications (shouldn't happen, but just in case)
-    result = result.with_columns(
-        pl.col("classification").fill_null("unclassified")
-    )
-    
-    # Log classification summary
-    classification_counts = result.group_by("classification").agg(pl.len()).sort("len", descending=True)
-    logger.info("Classification summary:")
-    for row in classification_counts.iter_rows(named=True):
-        logger.info(f"  {row['classification']}: {row['len']}")
-    
-    # Add interpretation note
-    true_fps = result.filter(pl.col("classification") == "true_false_positive").height
-    pos_not_in_plan = result.filter(pl.col("classification") == "positive_not_in_plan").height
-    
-    if true_fps == 0 and pos_not_in_plan > 0:
-        logger.info(f"  [green]✓ All {pos_not_in_plan} non-planned alignments passed validation[/green]")
-    elif true_fps > 0:
-        logger.info(f"  [yellow]⚠ {true_fps} alignments failed validation (spurious matches)[/yellow]")
-    
-    # Return both classifications and exact matches (with GT info for recall calculation)
-    return result, exact_matches
+    ).select([
+        "spacer_id", "contig_id", "start", "end", "strand", "classification","recalculated_distnace"
+    ]).unique()
+
+    logger.debug("Validation of unique alignments completed.")
+    return alignment_classifications
 
 
+        
+
+    
 def display_example_alignments(
     alignment_classifications: pl.DataFrame,
     tools_results: pl.DataFrame,
     contigs_file: str,
     spacers_file: str,
-    max_mismatches: int = 5,
+    max_distance: int = 5,
     num_examples: int = 3,
     distance_metric: str = 'hamming',
     gap_open_penalty: int = 5,
@@ -293,11 +183,10 @@ def display_example_alignments(
     Note:
         if the query region (spacer) is of a different length than the target region (area on the contig where it matched), the hamming distance is not meaningful.
     """
-    logger.debug("[bold]" + "="*80 + "[/bold]")
     logger.debug("[bold cyan]EXAMPLE ALIGNMENTS BY CLASSIFICATION[/bold cyan]")
     
-    # Get examples for each classification type (except exact_match)
-    classifications_to_show = ["positive_not_in_plan", "true_false_positive"]
+    # Get examples for each classification type 
+    classifications_to_show = ["positive_not_in_plan", "invalid_alignment", "positive_in_plan"]
     
     for classification in classifications_to_show:
         examples = alignment_classifications.filter(
@@ -351,20 +240,19 @@ def display_example_alignments(
             )
             tool_names = tools_with_this["tool"].unique().sort().to_list() if "tool" in tools_with_this.columns else []
             
-            # Calculate edit distance (with indels/gaps counted)
+            # When fetching from FASTA, contig_seq is full-length, so pass start/end
             edit_distance = test_alignment(
                 spacer_seq, contig_seq,
                 strand=strand, start=start, end=end,
-                gaps_as_mismatch=True,
+                distance_metric="edit",
                 gap_cost=gap_open_penalty,
                 extend_cost=gap_extend_penalty
             )
-            
             # Calculate hamming distance (substitutions only, no indels)
             hamming_distance = test_alignment(
                 spacer_seq, contig_seq,
                 strand=strand, start=start, end=end,
-                gaps_as_mismatch=False,
+                distance_metric='hamming',
                 gap_cost=gap_open_penalty,
                 extend_cost=gap_extend_penalty
             )
@@ -373,15 +261,25 @@ def display_example_alignments(
             has_indels = (edit_distance != hamming_distance)
             
             # Generate alignment visualization
-            alignment_str = prettify_alignment(
-                spacer_seq,
-                contig_seq,
-                strand=strand,
-                start=start,
-                end=end,
-                gap_cost=gap_open_penalty,
-                extend_cost=gap_extend_penalty
-            )
+            # Use hamming (ungapped) for hamming distance metric, NW (gapped) for edit distance
+            if distance_metric == 'hamming':
+                alignment_str = prettify_alignment_hamming(
+                    spacer_seq,
+                    contig_seq,
+                    strand=strand,
+                    start=start,
+                    end=end,
+                )
+            else:
+                alignment_str = prettify_alignment(
+                    spacer_seq,
+                    contig_seq,
+                    strand=strand,
+                    start=start,
+                    end=end,
+                    gap_cost=gap_open_penalty,
+                    extend_cost=gap_extend_penalty,
+                )
             
             # Add labels to the alignment
             strand_str = "(-)" if strand else "(+)"
@@ -402,9 +300,9 @@ def display_example_alignments(
                 used_metric_name = "Edit" if distance_metric == 'edit' else "Hamming"
                 
                 # Color code the distances based on validity
-                edit_color = "bold green" if edit_distance <= max_mismatches else "bold red"
-                hamming_color = "bold green" if hamming_distance <= max_mismatches else "bold red"
-                used_color = "bold green" if used_distance <= max_mismatches else "bold red"
+                edit_color = "bold green" if edit_distance <= max_distance else "bold red"
+                hamming_color = "bold green" if hamming_distance <= max_distance else "bold red"
+                used_color = "bold green" if used_distance <= max_distance else "bold red"
                 
                 # Always show edit distance
                 logger.debug(f"  Edit distance (substitutions + indels): [{edit_color}]{edit_distance}[/{edit_color}]")
@@ -415,7 +313,7 @@ def display_example_alignments(
                 else:
                     logger.debug(f"  Hamming distance (substitutions only): [{hamming_color}]{hamming_distance}[/{hamming_color}]")
                 
-                logger.debug(f"  Max allowed mismatches: [bold]{max_mismatches}[/bold]")
+                logger.debug(f"  Max allowed mismatches: [bold]{max_distance}[/bold]")
                 logger.debug(f"  Metric used for validation: [bold]{used_metric_name} distance[/bold] ([{used_color}]{used_distance}[/{used_color}])")
                 
                 if has_indels:
@@ -428,177 +326,326 @@ def display_example_alignments(
                     logger.debug(f"  Found by tools: [magenta]{', '.join(tool_names)}[/magenta]")
             
 
+def display_false_negatives(
+    ground_truth: pl.DataFrame,
+    alignment_classifications: pl.DataFrame,
+    tools_results: pl.DataFrame,
+    contigs_file: str,
+    spacers_file: str,
+    num_examples: int = 5,
+    distance_metric: str = 'hamming',
+    gap_open_penalty: int = 5,
+    gap_extend_penalty: int = 5,
+    show_all_tools_missed: bool = False,
+    specific_tool: Optional[str] = None,
+    all_tools: Optional[Dict] = None
+):
+    """
+    Display example false negative alignments (in ground truth but not found by tools).
+    
+    Args:
+        ground_truth: Ground truth DataFrame
+        alignment_classifications: DataFrame with classified alignments
+        tools_results: DataFrame with tool results
+        contigs_file: Path to contigs FASTA file
+        spacers_file: Path to spacers FASTA file
+        num_examples: Number of examples to show per tool
+        distance_metric: Distance metric for validation
+        gap_open_penalty: Gap open penalty for alignment
+        gap_extend_penalty: Gap extend penalty for alignment
+        show_all_tools_missed: If True, show FNs missed by ALL tools
+        specific_tool: If provided, show FNs for this tool only
+        all_tools: Dictionary of all tools (used when showing per-tool FNs)
+    """
+    
+    if show_all_tools_missed:
+        # Show only FNs missed by ALL tools
+        found_gt = alignment_classifications.filter(
+            pl.col("classification") == "positive_in_plan"
+        ).select(["spacer_id", "contig_id", "start", "end", "strand"])
+        
+        false_negatives = ground_truth.join(
+            found_gt,
+            on=["spacer_id", "contig_id", "start", "end", "strand"],
+            how="anti"
+        )
+        
+        if false_negatives.height == 0:
+            logger.debug("\n[green]No false negatives missed by ALL tools![/green]")
+            return
+        
+        logger.debug(f"\n[bold red]FALSE NEGATIVES MISSED BY ALL TOOLS ({false_negatives.height} total, showing {min(num_examples, false_negatives.height)})[/bold red]")
+        logger.debug("[dim]" + "=" * 80 + "[/dim]")
+        _display_fn_examples(false_negatives.head(num_examples), tools_results, contigs_file, spacers_file, 
+                            distance_metric, gap_open_penalty, gap_extend_penalty)
+        return
+    
+    # Show per-tool FNs
+    if specific_tool:
+        tools_to_check = [specific_tool]
+    elif all_tools:
+        tools_to_check = sorted(all_tools.keys())
+    else:
+        tools_to_check = tools_results["tool"].unique().sort().to_list()
+    
+    for tool_name in tools_to_check:
+        # Get what this tool found
+        tool_found = tools_results.filter(pl.col("tool") == tool_name).join(
+            alignment_classifications.filter(pl.col("classification") == "positive_in_plan"),
+            on=["spacer_id", "contig_id", "start", "end", "strand"],
+            how="inner"
+        ).select(["spacer_id", "contig_id", "start", "end", "strand"])
+        
+        # Find what this tool missed
+        false_negatives = ground_truth.join(
+            tool_found,
+            on=["spacer_id", "contig_id", "start", "end", "strand"],
+            how="anti"
+        )
+        
+        if false_negatives.height == 0:
+            logger.debug(f"\n[green]{tool_name.upper()}: No false negatives![/green]")
+            continue
+        
+        pct_missed = 100 * false_negatives.height / ground_truth.height
+        logger.debug(f"\n[bold yellow]{tool_name.upper()} FALSE NEGATIVES ({false_negatives.height:,} total = {pct_missed:.2f}%, showing {min(num_examples, false_negatives.height)})[/bold yellow]")
+        logger.debug("[dim]" + "=" * 80 + "[/dim]")
+        
+        _display_fn_examples(false_negatives.head(num_examples), tools_results, contigs_file, spacers_file,
+                            distance_metric, gap_open_penalty, gap_extend_penalty, highlight_tool=tool_name)
+
+
+def _display_fn_examples(
+    examples: pl.DataFrame,
+    tools_results: pl.DataFrame,
+    contigs_file: str,
+    spacers_file: str,
+    distance_metric: str,
+    gap_open_penalty: int,
+    gap_extend_penalty: int,
+    highlight_tool: Optional[str] = None
+):
+    """Helper to display FN examples."""
+    for idx, row in enumerate(examples.iter_rows(named=True), 1):
+        spacer_id = row["spacer_id"]
+        contig_id = row["contig_id"]
+        start = row["start"]
+        end = row["end"]
+        strand = row["strand"]
+        expected_mismatches = row.get("mismatches", "unknown")
+        
+        # Get sequences
+        try:
+            spacer_df = get_seq_from_fastx(spacers_file, [spacer_id], return_df=True, 
+                                          idcol="spacer_id", seqcol="spacer_seq")
+            contig_df = get_seq_from_fastx(contigs_file, [contig_id], return_df=True,
+                                          idcol="contig_id", seqcol="contig_seq")
+            
+            if spacer_df.height == 0 or contig_df.height == 0:
+                logger.warning(f"Could not find sequences for {spacer_id} or {contig_id}")
+                continue
+                
+            spacer_seq = spacer_df["spacer_seq"][0]
+            contig_seq = contig_df["contig_seq"][0]
+        except Exception as e:
+            logger.error(f"Error fetching sequences: {e}")
+            continue
+        
+        # Calculate actual distances
+        edit_distance = test_alignment(
+            spacer_seq, contig_seq,
+            strand=strand, start=start, end=end,
+            distance_metric="edit",
+            gap_cost=gap_open_penalty,
+            extend_cost=gap_extend_penalty
+        )
+        hamming_distance = test_alignment(
+            spacer_seq, contig_seq,
+            strand=strand, start=start, end=end,
+            distance_metric='hamming',
+            gap_cost=gap_open_penalty,
+            extend_cost=gap_extend_penalty
+        )
+        
+        # Generate alignment visualization
+        alignment_str = prettify_alignment(
+            spacer_seq,
+            contig_seq,
+            strand=strand,
+            start=start,
+            end=end,
+            gap_cost=gap_open_penalty,
+            extend_cost=gap_extend_penalty,
+        )
+        
+        # Check which tools reported this location (even if wrongly classified)
+        tools_that_reported = tools_results.filter(
+            (pl.col("spacer_id") == spacer_id) &
+            (pl.col("contig_id") == contig_id) &
+            (pl.col("start") == start) &
+            (pl.col("end") == end) &
+            (pl.col("strand") == strand)
+        )
+        tools_reported_names = tools_that_reported["tool"].unique().to_list() if tools_that_reported.height > 0 else []
+        
+        logger.debug(f"\n[bold]False Negative #{idx}:[/bold]")
+        logger.debug(f"  Spacer:            {spacer_id}")
+        logger.debug(f"  Contig:            {contig_id}")
+        logger.debug(f"  Position:          {start}-{end} ({'reverse' if strand else 'forward'})")
+        logger.debug(f"  Expected distance: {expected_mismatches}")
+        logger.debug(f"  Actual hamming:    {hamming_distance}")
+        logger.debug(f"  Actual edit:       {edit_distance}")
+        
+        if highlight_tool:
+            # Highlight which tools DID find this that the highlight_tool missed
+            if tools_reported_names:
+                logger.debug(f"  [green]Found by: {', '.join(tools_reported_names)}[/green]")
+            else:
+                logger.debug("  [red]Not reported by any tool[/red]")
+        else:
+            if tools_reported_names:
+                logger.debug(f"  [yellow]Reported by (but not classified as TP): {', '.join(tools_reported_names)}[/yellow]")
+            else:
+                logger.debug("  [red]Not reported by any tool[/red]")
+        
+        # Display alignment
+        lines = alignment_str.split("\n")
+        if len(lines) >= 3:
+            logger.debug("\n  Alignment:")
+            for line in lines:
+                logger.debug(f"    {line}")
+        
+        logger.debug("")
+
 
 def calculate_all_tool_performance(
     tools_results: pl.DataFrame,
     alignment_classifications: pl.DataFrame,
-    exact_matches_with_gt: pl.DataFrame,
     ground_truth: pl.DataFrame,
-    augment_ground_truth: bool = False
 ) -> pl.DataFrame:
     """
     Calculate performance metrics for all tools at once using group_by aggregations.
     
-    This is more efficient and elegant than looping through tools individually.
+    Always calculates both planned-only and augmented (including non-planned) metrics.
     
     Args:
-        tools_results: Combined results from all tools (must have 'tool' column)
-        alignment_classifications: Pre-computed classifications for all unique alignments
-        exact_matches_with_gt: Validation results with GT info (from polars-bio join)
-        ground_truth: Original ground truth DataFrame
-        augment_ground_truth: If True, count verified "positives_not_in_plan" as TPs.
-                             Ground truth becomes: planned + unique verified non-planned alignments
+        tools_results: DataFrame with all tool results (must have 'tool' column)
+        alignment_classifications: DataFrame with classifications for unique alignments
+                                  (columns: spacer_id, contig_id, start, end, strand, classification, recalculated_distance)
+        ground_truth: Original ground truth DataFrame (needed to identify false negatives)
     
     Returns:
-        DataFrame with performance metrics for all tools
+        DataFrame with performance metrics for all tools (both planned-only and augmented)
     """
-    # Deduplicate tools_results before joining to avoid double-counting
-    # Some tools may report the same alignment with different mismatch counts
-    original_count = tools_results.height
-    unique_tool_results = tools_results.unique(
-        subset=["tool", "spacer_id", "contig_id", "start", "end", "strand"]
-    )
-    deduplicated_count = unique_tool_results.height
-    
-    if original_count != deduplicated_count:
-        logger.debug(f"Deduplicated tool results: {original_count} → {deduplicated_count} (removed {original_count - deduplicated_count} duplicates)")
-    
-    # Join deduplicated tool results with classifications
-    classified_results = unique_tool_results.join(
+    # Join tool results with classifications
+    classified_results = tools_results.join(
         alignment_classifications,
         on=["spacer_id", "contig_id", "start", "end", "strand"],
         how="left"
     )
     
-    # Determine ground truth count
-    if augment_ground_truth:
-        # Augmented GT = planned + unique verified non-planned alignments (shared across all tools)
-        unique_positives_not_in_plan = alignment_classifications.filter(
-            pl.col("classification") == "positive_not_in_plan"
-        ).height
-        gt_count = ground_truth.height + unique_positives_not_in_plan
-        logger.debug(f"Augmented ground truth: {ground_truth.height} (planned) + {unique_positives_not_in_plan} (verified non-planned) = {gt_count}")
-    else:
-        gt_count = ground_truth.height
-        logger.debug(f"Using standard ground truth count: {gt_count}")
+    # Calculate ground truth counts
+    planned_gt_count = ground_truth.height
+    unique_positives_not_in_plan = alignment_classifications.filter(
+        pl.col("classification") == "positive_not_in_plan"
+    ).height
+    augmented_gt_count = planned_gt_count + unique_positives_not_in_plan
+    
+    logger.debug(f"Ground truth (planned only): {planned_gt_count}")
+    logger.debug(f"Verified non-planned alignments: {unique_positives_not_in_plan}")
+    logger.debug(f"Ground truth (augmented): {augmented_gt_count}")
     
     # Aggregate by tool to count each classification type
     performance = classified_results.group_by("tool").agg([
         # Count each classification type
-        pl.col("classification").filter(pl.col("classification") == "exact_match").count().alias("planned_true_positives"),
+        pl.col("classification").filter(pl.col("classification") == "positive_in_plan").count().alias("planned_true_positives"),
         pl.col("classification").filter(pl.col("classification") == "positive_not_in_plan").count().alias("positives_not_in_plan"),
-        pl.col("classification").filter(pl.col("classification") == "true_false_positive").count().alias("true_false_positives"),
+        pl.col("classification").filter(pl.col("classification") == "invalid_alignment").count().alias("invalid_alignments"),
     ])
     
-    # For recall: count unique GT entries found per tool (not just total alignments)
-    # Join tool results with exact match classifications, then with GT info
-    if exact_matches_with_gt.height > 0:
-        # Get alignment_idx for exact matches
-        exact_match_alignments = classified_results.filter(
-            pl.col("classification") == "exact_match"
-        )
+    # Calculate false negatives per tool
+    # FN = ground truth entries not found by the tool (within the distance threshold)
+    fn_counts = []
+    for tool_name in performance["tool"].to_list():
+        tool_alignments = classified_results.filter(pl.col("tool") == tool_name)
         
-        # Join with exact_matches_with_gt using alignment_idx
-        index_col = "alignment_idx_2" if "alignment_idx_2" in exact_matches_with_gt.columns else "alignment_idx"
+        # GT entries found by this tool (positive_in_plan)
+        gt_found = tool_alignments.filter(
+            pl.col("classification") == "positive_in_plan"
+        ).select(["spacer_id", "contig_id", "start", "end", "strand"]).unique()
         
-        # First join tool results with classifications to get alignment_idx
-        tool_exact_matches = unique_tool_results.join(
-            alignment_classifications.filter(pl.col("classification") == "exact_match"),
+        # False negatives = GT entries not in the found set
+        fn = ground_truth.join(
+            gt_found,
             on=["spacer_id", "contig_id", "start", "end", "strand"],
-            how="inner"
-        )
+            how="anti"
+        ).height
         
-        # Then join with GT info using alignment_idx
-        exact_tool_alignments_with_gt = tool_exact_matches.join(
-            exact_matches_with_gt.select([index_col, "spacer_id_1", "contig_id_1", "start_1", "end_1", "strand_1"]),
-            left_on="alignment_idx",
-            right_on=index_col,
-            how="inner"
-        )
-        
-        # Count unique GT entries per tool
-        gt_counts = exact_tool_alignments_with_gt.group_by("tool").agg([
-            pl.struct(["spacer_id_1", "contig_id_1", "start_1", "end_1", "strand_1"]).n_unique().alias("unique_gt_entries_found")
-        ])
-        
-        performance = performance.join(gt_counts, on="tool", how="left")
-        # Fill nulls (tools with no exact matches)
-        performance = performance.with_columns(
-            pl.col("unique_gt_entries_found").fill_null(0)
-        )
-    else:
-        # No exact matches found
-        performance = performance.with_columns(
-            pl.lit(0).alias("unique_gt_entries_found")
-        )
+        fn_counts.append({"tool": tool_name, "false_negatives_planned": fn})
     
-    # Calculate derived metrics using polars expressions
-    if augment_ground_truth:
-        # Augmented mode: positives_not_in_plan also count as TPs
-        performance = performance.with_columns([
-            # True positives = planned TPs + verified non-planned positives
-            (pl.col("planned_true_positives") + pl.col("positives_not_in_plan")).alias("true_positives"),
-            # False positives = only true_false_positives (spurious alignments)
-            pl.col("true_false_positives").alias("false_positives"),
-            # Ground truth is the augmented count
-            pl.lit(gt_count).alias("ground_truth_total"),
-            pl.lit(True).alias("augmented_ground_truth"),
-        ])
-    else:
-        # Standard mode: only planned TPs count as true positives
-        performance = performance.with_columns([
-            # True positives = only alignments matching the plan
-            pl.col("planned_true_positives").alias("true_positives"),
-            # False positives = verified non-planned + spurious alignments
-            (pl.col("positives_not_in_plan") + pl.col("true_false_positives")).alias("false_positives"),
-            # Ground truth is the original count
-            pl.lit(gt_count).alias("ground_truth_total"),
-            pl.lit(False).alias("augmented_ground_truth"),
-        ])
+    fn_df = pl.DataFrame(fn_counts)
+    performance = performance.join(fn_df, on="tool", how="left")
     
-    # Calculate precision, recall, and F1 score
-    if augment_ground_truth:
-        # Augmented mode: recall based on total unique valid alignments (planned + verified non-planned)
-        # We already deduplicated tool results, so true_positives represents unique valid alignments found
-        performance = performance.with_columns([
-            # Precision = TP / (TP + FP)
-            (pl.col("true_positives") / (pl.col("true_positives") + pl.col("false_positives")))
-                .fill_null(0.0)
-                .alias("precision"),
-            # Recall = unique valid alignments found / augmented GT, capped at 1.0
-            # Cap at 1.0 because a tool can report overlapping positions that map to the same biological targets
-            pl.min_horizontal(
-                pl.col("true_positives") / pl.col("ground_truth_total"),
-                pl.lit(1.0)
-            )
-                .fill_null(0.0)
-                .alias("recall"),
-        ])
-        
-        # Log if any tool exceeded augmented GT (recall capped at 1.0)
-        tools_over_gt = performance.filter(pl.col("true_positives") > pl.col("ground_truth_total"))
-        if tools_over_gt.height > 0:
-            for row in tools_over_gt.iter_rows(named=True):
-                logger.debug(f"  [yellow]{row['tool']}:[/yellow] {row['true_positives']} TPs > {row['ground_truth_total']} augmented GT (recall capped at 1.0)")
-                logger.debug("    This indicates the tool reported overlapping/redundant positions for some targets")
-    else:
-        # Standard mode: recall based only on planned GT entries found
-        performance = performance.with_columns([
-            # Precision = TP / (TP + FP)
-            (pl.col("true_positives") / (pl.col("true_positives") + pl.col("false_positives")))
-                .fill_null(0.0)
-                .alias("precision"),
-            # Recall = unique planned GT entries found / planned GT total
-            (pl.col("unique_gt_entries_found") / pl.col("ground_truth_total"))
-                .fill_null(0.0)
-                .alias("recall"),
-        ])
-    
-    # F1 score = 2 * (precision * recall) / (precision + recall)
+    # Add ground truth counts
     performance = performance.with_columns([
-        (2 * pl.col("precision") * pl.col("recall") / (pl.col("precision") + pl.col("recall")))
+        pl.lit(planned_gt_count).alias("ground_truth_planned"),
+        pl.lit(augmented_gt_count).alias("ground_truth_augmented"),
+    ])
+    
+    # Calculate all true positives (planned + non-planned)
+    performance = performance.with_columns([
+        (pl.col("planned_true_positives") + pl.col("positives_not_in_plan")).alias("all_true_positives"),
+    ])
+    
+    # Calculate metrics for PLANNED ONLY mode (strict)
+    performance = performance.with_columns([
+        # FP (planned only) = verified non-planned + invalid alignments
+        (pl.col("positives_not_in_plan") + pl.col("invalid_alignments")).alias("false_positives_planned"),
+        # Precision (planned only) = planned TP / (planned TP + all FP)
+        (pl.col("planned_true_positives") / (pl.col("planned_true_positives") + pl.col("positives_not_in_plan") + pl.col("invalid_alignments")))
             .fill_null(0.0)
-            .alias("f1_score"),
+            .alias("precision_planned"),
+        # Recall (planned only) = planned TP / (planned TP + FN)
+        (pl.col("planned_true_positives") / (pl.col("planned_true_positives") + pl.col("false_negatives_planned")))
+            .fill_null(0.0)
+            .alias("recall_planned"),
+    ])
+    
+    # Calculate metrics for AUGMENTED mode (including non-planned)
+    performance = performance.with_columns([
+        # FP (augmented) = only invalid alignments (non-planned positives are now TPs)
+        pl.col("invalid_alignments").alias("false_positives_augmented"),
+        # FN (augmented) = augmented GT - all TPs found by this tool
+        (pl.col("ground_truth_augmented") - pl.col("all_true_positives")).alias("false_negatives_augmented"),
+        # Precision (augmented) = all TP / (all TP + invalid only)
+        (pl.col("all_true_positives") / (pl.col("all_true_positives") + pl.col("invalid_alignments")))
+            .fill_null(0.0)
+            .alias("precision_augmented"),
+        # Recall (augmented) = all TP / augmented GT (shared across all tools)
+        (pl.col("all_true_positives") / pl.col("ground_truth_augmented"))
+            .fill_null(0.0)
+            .alias("recall_augmented"),
+    ])
+    
+    # Calculate F1 scores for both modes
+    performance = performance.with_columns([
+        # F1 (planned only)
+        (2 * pl.col("precision_planned") * pl.col("recall_planned") / (pl.col("precision_planned") + pl.col("recall_planned")))
+            .fill_null(0.0)
+            .alias("f1_score_planned"),
+        # F1 (augmented)
+        (2 * pl.col("precision_augmented") * pl.col("recall_augmented") / (pl.col("precision_augmented") + pl.col("recall_augmented")))
+            .fill_null(0.0)
+            .alias("f1_score_augmented"),
+    ])
+    
+    # Add percentage columns for easier interpretation (planned mode)
+    performance = performance.with_columns([
+        (pl.col("recall_planned") * 100).alias("identified_pct_planned"),
+        ((1 - pl.col("recall_planned")) * 100).alias("missed_pct_planned"),
+        ((pl.col("false_positives_planned") / (pl.col("planned_true_positives") + pl.col("false_positives_planned"))) * 100)
+            .fill_null(0.0)
+            .alias("false_positive_pct_planned"),
     ])
     
     return performance
@@ -614,7 +661,6 @@ def compare_all_tools(
     estimate_spurious: bool = False,
     hyperfine_results: Optional[pl.DataFrame] = None,
     max_mismatches: int = 5,
-    augment_ground_truth: bool = False,
     distance_metric: str = 'hamming',
     gap_open_penalty: int = 5,
     gap_extend_penalty: int = 5,
@@ -625,6 +671,7 @@ def compare_all_tools(
     This function:
     1. Validates unique alignments once across all tools
     2. Calculates per-tool performance metrics using efficient group_by aggregations
+    3. Always computes both planned-only and augmented metrics
     
     This approach is much more efficient than validating each tool separately.
     
@@ -638,24 +685,22 @@ def compare_all_tools(
         estimate_spurious: Whether to estimate expected spurious alignments
         hyperfine_results: Optional DataFrame with hyperfine benchmark results
         max_mismatches: Maximum number of mismatches to consider valid
-        augment_ground_truth: If True, count verified "positives_not_in_plan" as TPs
         distance_metric: Distance metric for validation: 'hamming' (substitutions only) or 'edit' (substitutions + indels)
         gap_open_penalty: Gap open penalty for alignment validation (default: 5)
         gap_extend_penalty: Gap extension penalty for alignment validation (default: 5)
     
     Returns:
-        DataFrame with comparison results for all tools
+        DataFrame with comparison results for all tools (includes both planned and augmented metrics)
     """
     logger.debug("Starting consolidated tool comparison...")
     
-    # Step 1: Validate unique alignments across all tools
-    alignment_classifications, exact_matches_with_gt = validate_unique_alignments_across_tools(
+    # Step 1: Classify unique alignments across all tools
+    alignment_classifications = classify_unique_alignments_across_tools(
         ground_truth=ground_truth,
         all_tool_results=tools_results,
         contigs_file=contigs_file,
         spacers_file=spacers_file,
-        max_mismatches=max_mismatches,
-        verify_false_positives=verify_false_positives,
+        max_distance=max_mismatches,
         distance_metric=distance_metric,
         gap_open_penalty=gap_open_penalty,
         gap_extend_penalty=gap_extend_penalty
@@ -669,27 +714,94 @@ def compare_all_tools(
                 tools_results=tools_results,
                 contigs_file=contigs_file,
                 spacers_file=spacers_file,
-                max_mismatches=max_mismatches,
-                num_examples=3,
+                max_distance=max_mismatches,
+                num_examples=4,
                 distance_metric=distance_metric,
                 gap_open_penalty=gap_open_penalty,
                 gap_extend_penalty=gap_extend_penalty
             )
         except Exception as e:
             logger.warning(f"Failed to display example alignments: {e}")
+        
+        # Display false negatives missed by all tools
+        try:
+            # First, show how many FNs each tool has
+            logger.debug("\n[bold cyan]FALSE NEGATIVE COUNTS BY TOOL:[/bold cyan]")
+            for tool_name in sorted(tools.keys()):
+                tool_alignments = tools_results.filter(pl.col("tool") == tool_name)
+                tool_found_gt = tool_alignments.join(
+                    alignment_classifications.filter(pl.col("classification") == "positive_in_plan"),
+                    on=["spacer_id", "contig_id", "start", "end", "strand"],
+                    how="inner"
+                ).select(["spacer_id", "contig_id", "start", "end", "strand"]).unique()
+                
+                tool_fn_count = ground_truth.join(
+                    tool_found_gt,
+                    on=["spacer_id", "contig_id", "start", "end", "strand"],
+                    how="anti"
+                ).height
+                
+                if tool_fn_count == 0:
+                    logger.debug(f"  [green]{tool_name}: {tool_fn_count} FNs[/green]")
+                else:
+                    logger.debug(f"  [yellow]{tool_name}: {tool_fn_count:,} FNs ({100*tool_fn_count/ground_truth.height:.2f}%)[/yellow]")
+            
+            # Show FNs missed by ALL tools
+            display_false_negatives(
+                ground_truth=ground_truth,
+                alignment_classifications=alignment_classifications,
+                tools_results=tools_results,
+                contigs_file=contigs_file,
+                spacers_file=spacers_file,
+                num_examples=3,
+                distance_metric=distance_metric,
+                gap_open_penalty=gap_open_penalty,
+                gap_extend_penalty=gap_extend_penalty,
+                show_all_tools_missed=True
+            )
+            
+            # Show per-tool FN examples (2 examples per tool)
+            display_false_negatives(
+                ground_truth=ground_truth,
+                alignment_classifications=alignment_classifications,
+                tools_results=tools_results,
+                contigs_file=contigs_file,
+                spacers_file=spacers_file,
+                num_examples=2,
+                distance_metric=distance_metric,
+                gap_open_penalty=gap_open_penalty,
+                gap_extend_penalty=gap_extend_penalty,
+                show_all_tools_missed=False,
+                all_tools=tools
+            )
+            
+            # Show per-tool FN examples (3 examples per tool)
+            display_false_negatives(
+                ground_truth=ground_truth,
+                alignment_classifications=alignment_classifications,
+                tools_results=tools_results,
+                contigs_file=contigs_file,
+                spacers_file=spacers_file,
+                num_examples=1,
+                distance_metric=distance_metric,
+                gap_open_penalty=gap_open_penalty,
+                gap_extend_penalty=gap_extend_penalty,
+                show_all_tools_missed=False,
+                all_tools=tools
+            )
+        except Exception as e:
+            logger.warning(f"Failed to display false negatives: {e}")
     
     # # Step 2: Estimate expected spurious alignments if requested
     # # SKIPPED FOR NOW, need to update to use the logic from the notebooks.
 
     # Step 3: Calculate performance for all tools at once using group_by
-    logger.info("Calculating performance for all tools using aggregations...")
+    logger.info("Calculating performance for all tools (both planned-only and augmented metrics)...")
     try:
         results_df = calculate_all_tool_performance(
             tools_results=tools_results,
             alignment_classifications=alignment_classifications,
-            exact_matches_with_gt=exact_matches_with_gt,
             ground_truth=ground_truth,
-            augment_ground_truth=augment_ground_truth
         )
         
         # # Add expected spurious estimates if available (both methods)
@@ -720,12 +832,14 @@ def compare_all_tools(
 
 def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4,
                        skip_tools='', only_tools=None, contigs=None, spacers=None,
-                       augment_ground_truth=False, verify_false_positives=True,
+                       verify_false_positives=True,
                        estimate_spurious=True, distance_metric='hamming',
                        gap_open_penalty=5, gap_extend_penalty=5):
     """
     This function reads alignment tool outputs, compares them against ground truth,
     and calculates performance metrics including precision, recall, and F1 scores.
+    
+    Always calculates both planned-only and augmented (including non-planned) metrics.
     
     Args:
         input_dir: Directory containing tool outputs and ground truth
@@ -736,9 +850,6 @@ def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4
         only_tools: Comma-separated list of tools to process (overrides skip_tools)
         contigs: Path to custom contigs file (optional)
         spacers: Path to custom spacers file (optional)
-        augment_ground_truth: If True, verified "positives_not_in_plan" count as TPs (default: False)
-                             The augmented ground truth = original plan + unique verified non-planned alignments
-                             This shared ground truth is used for all tools to ensure recall ≤ 1.0
         verify_false_positives: Whether to verify false positives by alignment checking (default: True)
         estimate_spurious: Whether to estimate expected spurious alignments (default: True)
         distance_metric: Distance metric for validation: 'hamming' (substitutions only) or 'edit' (substitutions + indels). Default: 'hamming'
@@ -795,7 +906,7 @@ def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4
         "length": [len(seq) for seq in spacers_dict.values()]
     })
     logger.debug(f"Loaded {len(spacers_dict)} spacers")
-    
+
     # Read tool results
     logger.debug("Reading tool alignment results...")
     tools_results = read_results(
@@ -824,11 +935,13 @@ def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4
         # Try alternate name
         ground_truth_file = f"{input_dir}/simulated_data/ground_truth.tsv"
     
-    performance_results = None
+    # Load ground truth or create empty DataFrame if not found
     if os.path.exists(ground_truth_file):
         logger.debug(f"Reading ground truth from {ground_truth_file}...")
         ground_truth = pl.read_csv(ground_truth_file, separator="\t")
         logger.info(f"Loaded {ground_truth.height} ground truth annotations")
+        ground_truth = ground_truth.filter(pl.col("mismatches") <= max_mismatches)
+        logger.info(f"{ground_truth.height} ground truth annotations within max mismatches of {max_mismatches}")
         
         # Check for duplicates in ground truth
         unique_gt = ground_truth.unique(subset=["spacer_id", "contig_id", "start", "end", "strand"])
@@ -836,67 +949,84 @@ def run_compare_results(input_dir, max_mismatches=5, output_file=None, threads=4
             logger.warning(f"Ground truth contains {ground_truth.height - unique_gt.height} duplicate entries!")
             logger.debug(f"Using deduplicated ground truth: {unique_gt.height} unique entries")
             ground_truth = unique_gt
-        
-        logger.debug("Comparing results against ground truth using consolidated validation...")
-        if augment_ground_truth:
-            logger.debug("  augment_ground_truth=True: Verified non-planned alignments will count as TPs")
-        
-        performance_results = compare_all_tools(
-            tools=tools,
-            ground_truth=ground_truth,
-            tools_results=tools_results,
-            contigs_file=contigs_path,
-            spacers_file=spacers_path,
-            verify_false_positives=verify_false_positives,
-            estimate_spurious=False, # estimate_spurious,
-            hyperfine_results=hyperfine_results,
-            max_mismatches=max_mismatches,
-            augment_ground_truth=augment_ground_truth,
-            distance_metric=distance_metric,
-            gap_open_penalty=gap_open_penalty,
-            gap_extend_penalty=gap_extend_penalty
-        )
-        
-        # Output performance results
-        if output_file:
-            performance_results.write_csv(output_file, separator="\t")
-            logger.debug(f"Wrote performance results to {output_file}")
-        else:
-            logger.debug("\n=== Performance Results ===")
-            print(performance_results)
-        
-        # Also save to standard location
-        perf_output = f"{input_dir}/performance_results.tsv"
-        performance_results.write_csv(perf_output, separator="\t")
-        logger.debug(f"Saved performance results to {perf_output}")
-        
-        # Print a sorted, slimmer summary table to screen
-        
-        logger.info("PERFORMANCE SUMMARY (sorted by recall score)")
-        if augment_ground_truth:
-            logger.debug("  Note: augment_ground_truth=True, verified non-planned alignments count as TPs")
-        
-        # Select key columns and sort by recall score
-        summary_cols = ["tool", "recall", "true_false_positives", "positives_not_in_plan", 
-                       "false_positives", "true_positives"]
-        if "expected_spurious_hamming" in performance_results.columns:
-            summary_cols.extend(["expected_spurious_hamming"])  # Updated column names
-        if "augmented_ground_truth" in performance_results.columns:
-            summary_cols.append("augmented_ground_truth")
-        if "avg_runtime_seconds" in performance_results.columns:
-            summary_cols.append("avg_runtime_seconds")
-        
-        summary_table = performance_results.select(summary_cols).sort("recall", descending=True)
-        
-        # Format and print
-        pl.Config.set_tbl_cols(-1)
-        pl.Config.set_tbl_rows(15)
-        logger.info("")  # Add newline
-        console.print(summary_table)  # Use console for polars table formatting
-        logger.debug("="*80)
     else:
-        logger.warning("No ground truth file found, skipping performance comparison")
-        logger.warning(f"Expected file at: {ground_truth_file}")
+        logger.warning("No ground truth file found, using empty ground truth")
+        logger.debug(f"Expected file at: {ground_truth_file}")
+        # Create empty ground truth DataFrame with expected schema
+        ground_truth = pl.DataFrame({
+            "spacer_id": [],
+            "contig_id": [],
+            "start": [],
+            "end": [],
+            "strand": [],
+            "mismatches": []
+        }, schema={
+            "spacer_id": pl.Utf8,
+            "contig_id": pl.Utf8,
+            "start": pl.Int64,
+            "end": pl.Int64,
+            "strand": pl.Boolean,
+            "mismatches": pl.Int64
+        })
+        logger.info("Created empty ground truth (0 annotations)")
+    
+    logger.debug("Comparing results against ground truth using consolidated validation...")
+    logger.debug("Computing both planned-only and augmented metrics")
+    
+    performance_results = compare_all_tools(
+        tools=tools,
+        ground_truth=ground_truth,
+        tools_results=tools_results,
+        contigs_file=contigs_path,
+        spacers_file=spacers_path,
+        verify_false_positives=verify_false_positives,
+        estimate_spurious=False, # estimate_spurious,
+        hyperfine_results=hyperfine_results,
+        max_mismatches=max_mismatches,
+        distance_metric=distance_metric,
+        gap_open_penalty=gap_open_penalty,
+        gap_extend_penalty=gap_extend_penalty
+    )
+    
+    # Output performance results
+    if output_file:
+        performance_results.write_csv(output_file, separator="\t")
+        logger.debug(f"Wrote performance results to {output_file}")
+    else:
+        logger.debug("\n=== Performance Results ===")
+        print(performance_results)
+    
+    # Also save to standard location
+    perf_output = f"{input_dir}/performance_results.tsv"
+    performance_results.write_csv(perf_output, separator="\t")
+    logger.debug(f"Saved performance results to {perf_output}")
+    
+    # Print a sorted, slimmer summary table to screen
+    
+    logger.info("PERFORMANCE SUMMARY (sorted by recall_planned)")
+    
+    # Select key columns and sort by recall_planned
+    summary_cols = [
+        "tool", 
+        "recall_planned", "precision_planned", "f1_score_planned",
+        "recall_augmented", "precision_augmented", "f1_score_augmented",
+        "all_true_positives", "planned_true_positives", 
+        "positives_not_in_plan", "invalid_alignments",
+        "false_negatives_planned"
+    ]
+    if "expected_spurious_hamming" in performance_results.columns:
+        summary_cols.extend(["expected_spurious_hamming"])
+    if "avg_runtime_seconds" in performance_results.columns:
+        summary_cols.append("avg_runtime_seconds")
+    
+    summary_table = performance_results.select(summary_cols).sort("recall_planned", descending=True)
+    
+    # Format and print
+    pl.Config.set_tbl_cols(-1)
+    pl.Config.set_tbl_rows(15)
+    logger.info("")  # Add newline
+    console.print(summary_table)  # Use console for polars table formatting
+    logger.debug("="*80)
     
     logger.info("Results processing completed successfully")
     

@@ -88,7 +88,7 @@ def load_tool_configs(
                         spacers_file=spacers_file,
                         output_dir=output_dir,
                         results_dir=results_dir,
-                        max_mismatches=max_mismatches,
+                        max_mismatches=max_mismatches if tool_config["name"]!="bowtie1" else min(3,max_mismatches), # hardcoding a limit of 3 for bowtie1
                     )
                     for cmd in tool_config["command"]
                 ]
