@@ -1,6 +1,7 @@
 """
 Sequence simulation command. mostly a wrapper for the rust simulator.
 """
+
 import os
 import logging
 
@@ -9,17 +10,43 @@ from bench.utils.functions import *
 logger = logging.getLogger(__name__)
 
 
-def run_simulate(num_contigs, num_spacers, contig_length_range, spacer_length_range,
-                 mismatch_range, spacer_insertions, indel_insertions, indel_deletions,
-                 reverse_complement, threads, output_dir, id_prefix=None, gc_content=None,
-                 contig_distribution='uniform', spacer_distribution='uniform', verify=False,
-                 contigs=None, spacers=None, a_frac=None, t_frac=None, c_frac=None, g_frac=None,
-                 contig_gc_content=None, spacer_gc_content=None,
-                 contig_a_frac=None, contig_t_frac=None, contig_c_frac=None, contig_g_frac=None,
-                 spacer_a_frac=None, spacer_t_frac=None, spacer_c_frac=None, spacer_g_frac=None):
+def run_simulate(
+    num_contigs,
+    num_spacers,
+    contig_length_range,
+    spacer_length_range,
+    mismatch_range,
+    spacer_insertions,
+    indel_insertions,
+    indel_deletions,
+    reverse_complement,
+    threads,
+    output_dir,
+    id_prefix=None,
+    gc_content=None,
+    contig_distribution="uniform",
+    spacer_distribution="uniform",
+    verify=False,
+    contigs=None,
+    spacers=None,
+    a_frac=None,
+    t_frac=None,
+    c_frac=None,
+    g_frac=None,
+    contig_gc_content=None,
+    spacer_gc_content=None,
+    contig_a_frac=None,
+    contig_t_frac=None,
+    contig_c_frac=None,
+    contig_g_frac=None,
+    spacer_a_frac=None,
+    spacer_t_frac=None,
+    spacer_c_frac=None,
+    spacer_g_frac=None,
+):
     """
     Core simulation function that can be called from both CLI interfaces.
-    
+
     Args:
         num_contigs: Number of contigs to generate
         num_spacers: Number of spacers to generate
@@ -53,18 +80,18 @@ def run_simulate(num_contigs, num_spacers, contig_length_range, spacer_length_ra
         spacer_t_frac: T base fraction for spacers (optional)
         spacer_c_frac: C base fraction for spacers (optional)
         spacer_g_frac: G base fraction for spacers (optional)
-    
+
     Returns:
         Tuple of (contigs, spacers, ground_truth) dictionaries/lists
     """
     logger.info(f"Starting simulation: {num_contigs} contigs, {num_spacers} spacers")
     logger.debug(f"Output directory: {output_dir}")
-    
+
     # Create directory structure
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(f"{output_dir}/simulated_data", exist_ok=True)
     logger.debug("Created directory structure")
-    
+
     logger.debug("Running Rust simulator...")
     contigs_out, spacers_out, ground_truth = simulate_data_rust(
         contigs=contigs,
@@ -99,12 +126,11 @@ def run_simulate(num_contigs, num_spacers, contig_length_range, spacer_length_ra
         spacer_t_frac=spacer_t_frac,
         spacer_c_frac=spacer_c_frac,
         spacer_g_frac=spacer_g_frac,
-        verify=verify
+        verify=verify,
     )
-    
+
     logger.info(f"Generated {len(contigs_out)} contigs and {len(spacers_out)} spacers")
     logger.info(f"Ground truth contains {len(ground_truth)} spacer insertions")
     logger.debug(f"Simulation completed. Data saved to {output_dir}/simulated_data/")
-    
-    return contigs_out, spacers_out, ground_truth
 
+    return contigs_out, spacers_out, ground_truth

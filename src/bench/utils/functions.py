@@ -2,9 +2,10 @@
 import glob
 import hashlib
 import json
+import logging
 import os
 import re
-from typing import Any, Optional, Union#, Dict, List, Tuple
+from typing import Any, Optional, Union  # , Dict, List, Tuple
 
 import subprocess
 import tempfile
@@ -23,6 +24,9 @@ import polars_bio as pb
 import _duckdb as duckdb
 from rust_simulator import Simulator, BaseComposition, DistributionType
 
+# Configure logger for this module
+logger = logging.getLogger(__name__)
+
 
 # so printing to stdout doesn't break, line wrap, or truncate.
 pl.Config.set_tbl_rows(123123)
@@ -40,6 +44,7 @@ tab_b = bytearray(tab)
 tab_extended = bytes.maketrans(b"ACGTURYSWKMBDHVN", b"TGCAAYRSWMKVHDBN")
 tab_extended_b = bytearray(tab_extended)
 
+
 def read_fasta_needletail(fasta_file: str) -> tuple[list[str], list[str]]:
     """Read sequences from a FASTA file using needletail.
 
@@ -56,7 +61,8 @@ def read_fasta_needletail(fasta_file: str) -> tuple[list[str], list[str]]:
         seq_ids.append(record.id)
     return seq_ids, seqs
 
-def calculate_shannon_entropy(s: str, k:int = 1) -> float:
+
+def calculate_shannon_entropy(s: str, k: int = 1) -> float:
     """Calculate the Shannon entropy of a string.
 
     Args:
@@ -158,7 +164,7 @@ def filter_repetitive_kmers(
     max_count: int = 4,
 ) -> pl.DataFrame:
     """Filter sequences that have any k-mer appearing more than max_count times.
-        Note, this is not used currently in the package but an almost identical process is done in the spacer_inspection.ipynb notebook.
+    Note, this is not used currently in the package but an almost identical process is done in the spacer_inspection.ipynb notebook.
     """
     # First get k-mer counts
     df_with_kmers = count_kmers_df(df, seq_col, id_col, k, relative=False)
@@ -322,7 +328,9 @@ def lcc_simp(seq: str) -> float:
     return -(float(term_a + term_c + term_t + term_g))
 
 
-def reverse_complement(seq: Union[bytes, str], return_str: bool = True) -> Union[bytes, str]:
+def reverse_complement(
+    seq: Union[bytes, str], return_str: bool = True
+) -> Union[bytes, str]:
     """Compute the reverse complement of a DNA sequence in bytes, handling ambiguous bases.
     Args:
         seq(bytes|str): The input DNA sequence in bytes or string format (will be converted to bytes if string)
@@ -339,7 +347,6 @@ def reverse_complement(seq: Union[bytes, str], return_str: bool = True) -> Union
         return rev_comp.decode()
     else:
         return rev_comp
-
 
 
 def generate_simulation_id(params: dict) -> str:
@@ -379,7 +386,9 @@ def simulate_data_rust(
     # New parameters for base composition and distribution
     contig_distribution: Optional[Any] = None,
     spacer_distribution: Optional[Any] = None,
-    base_composition: Optional[Any] = None,  # Deprecated: use contig/spacer specific params
+    base_composition: Optional[
+        Any
+    ] = None,  # Deprecated: use contig/spacer specific params
     gc_content: Optional[float] = None,  # Deprecated: use contig/spacer specific params
     a_frac: Optional[float] = None,  # Deprecated: use contig/spacer specific params
     t_frac: Optional[float] = None,  # Deprecated: use contig/spacer specific params
@@ -443,7 +452,7 @@ def simulate_data_rust(
     # Use the Rust implementation for input file simulation
     if contigs is not None or spacers is not None:
         if debug:
-            print("Using Rust simulate_from_input_files...")
+            logger.info("Using Rust simulate_from_input_files...")
             start_time = time.time()
 
         # Generate simulation ID if not provided
@@ -458,9 +467,9 @@ def simulate_data_rust(
                 "prop_rc": prop_rc,
             }
             id_prefix = generate_simulation_id(sim_params)
-            print(f"Using generated simulation ID: {id_prefix}")
+            logger.info(f"Using generated simulation ID: {id_prefix}")
         else:
-            print(f"Using provided ID prefix: {id_prefix}")
+            logger.info(f"Using provided ID prefix: {id_prefix}")
 
         simulator = Simulator()
 
@@ -542,7 +551,9 @@ def simulate_data_rust(
 
         if debug:
             end_time = time.time()
-            print(f"Simulation time when using Rust: {end_time - start_time} seconds")
+            logger.info(
+                f"Simulation time when using Rust: {end_time - start_time} seconds"
+            )
 
         # Convert the ground truth data types before creating DataFrame
         processed_ground_truth = [
@@ -580,12 +591,12 @@ def simulate_data_rust(
                 ).height
                 > 0
             ):
-                print(
+                logger.info(
                     verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches"))
                 )
                 raise ValueError("Simulated data is not correct")
             else:
-                print("Simulated data is correct")
+                logger.info("Simulated data is correct")
 
         return contigs_dict, spacers_dict, ground_truth_df
 
@@ -595,7 +606,7 @@ def simulate_data_rust(
         threads = multiprocessing.cpu_count()
 
     if debug:
-        print(f"Using {threads} threads for Rust simulation...")
+        logger.info(f"Using {threads} threads for Rust simulation...")
         start_time = time.time()
 
     # Generate simulation ID if not provided
@@ -612,9 +623,9 @@ def simulate_data_rust(
             "prop_rc": prop_rc,
         }
         id_prefix = generate_simulation_id(sim_params)
-        print(f"Using generated simulation ID: {id_prefix}")
+        logger.info(f"Using generated simulation ID: {id_prefix}")
     else:
-        print(f"Using provided ID prefix: {id_prefix}")
+        logger.info(f"Using provided ID prefix: {id_prefix}")
 
     simulator = Simulator()
 
@@ -692,7 +703,7 @@ def simulate_data_rust(
 
     if debug:
         end_time = time.time()
-        print(f"Simulation time when using Rust: {end_time - start_time} seconds")
+        logger.info(f"Simulation time when using Rust: {end_time - start_time} seconds")
 
     # Convert the ground truth data types before creating DataFrame
     processed_ground_truth = [
@@ -726,10 +737,12 @@ def simulate_data_rust(
             verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches")).height
             > 0
         ):
-            print(verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches")))
+            logger.info(
+                verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches"))
+            )
             raise ValueError("Simulated data is not correct")
         else:
-            print("Simulated data is correct")
+            logger.info("Simulated data is correct")
     return contigs, spacers, ground_truth_df
 
 
@@ -856,9 +869,7 @@ def run_tool(tool: dict, results_dir: str, debug: bool = False) -> dict:
     """
     if debug:
         # Debug mode: run the actual command directly, not the hyperfine wrapper
-        print(f"\n{'=' * 60}")
-        print(f"DEBUG: Running {tool['name']} directly")
-        print(f"{'=' * 60}")
+        logger.info(f"DEBUG: Running {tool['name']} directly")
 
         # Get the mamba environment if specified
         mamba_env = tool.get("mamba_env", None)
@@ -870,7 +881,7 @@ def run_tool(tool: dict, results_dir: str, debug: bool = False) -> dict:
         else:
             cmd = " ".join(tool["command"])
 
-        print(f"Command: {cmd}\n")
+        logger.info(f"Command: {cmd}\n")
 
         # Run the command and capture output
         result = subprocess.run(
@@ -879,26 +890,26 @@ def run_tool(tool: dict, results_dir: str, debug: bool = False) -> dict:
 
         # Print stdout and stderr
         if result.stdout:
-            print("STDOUT:")
-            print(result.stdout)
+            logger.info("STDOUT:")
+            logger.info(result.stdout)
         if result.stderr:
-            print("STDERR:")
-            print(result.stderr)
+            logger.info("STDERR:")
+            logger.info(result.stderr)
 
         # Check return code
         if result.returncode != 0:
-            print(f"\n❌ Command failed with exit code {result.returncode}")
+            logger.info(f"\n❌ Command failed with exit code {result.returncode}")
             raise RuntimeError(
                 f"Tool {tool['name']} failed with exit code {result.returncode}"
             )
         else:
-            print("\n✓ Command succeeded")
+            logger.info("\n✓ Command succeeded")
 
-        print(f"{'=' * 60}\n")
+        logger.info(f"{'=' * 60}\n")
         return {}  # No timing data in debug mode
     else:
         # Normal mode: run via bash script with hyperfine
-        print(
+        logger.info(
             f"Running {tool['script_name']} in {results_dir}/bash_scripts/{tool['script_name']}"
         )
         subprocess.run(f"{results_dir}/bash_scripts/{tool['script_name']}", shell=True)
@@ -908,7 +919,13 @@ def run_tool(tool: dict, results_dir: str, debug: bool = False) -> dict:
         return data
 
 
-def create_bash_script(tool: dict, results_dir: str, max_runs: int = 1, warmups: int = 0, hyperfine: bool = True) -> None:
+def create_bash_script(
+    tool: dict,
+    results_dir: str,
+    max_runs: int = 1,
+    warmups: int = 0,
+    hyperfine: bool = True,
+) -> None:
     """Create a bash script for running a tool with optional hyperfine benchmarking.
 
     Args:
@@ -960,6 +977,7 @@ def clean_everything(results_dir: str) -> None:
     os.system(f"rm -rf {results_dir}/bash_scripts/")
     os.system(f"rm -rf {results_dir}/results/")
     os.system(f"rm -rf {results_dir}/simulated_data/")
+
 
 def clean_before_rerun(tool_name: str, results_dir: str) -> None:
     """Clean output files for a specific tool before rerunning.
@@ -1023,91 +1041,9 @@ def get_mismatches_from_cigar(cigar: str) -> int:
     return sum(int(num[:-1]) for num in re.findall(r"\d+X", cigar) or [0])
 
 
-def parse_samVext(sam_file: str, max_mismatches: int = 5) -> pl.DataFrame:
-
-    """Parse SAM file using the version 1.4 cigar strings, where = for matches, X for mismatches, I for insertions, D for deletions.
-
-    Args:
-        sam_file (str): Path to the SAM file.
-        max_mismatches (int): Maximum mismatches allowed.
-
-    Returns:
-        pl.DataFrame: Parsed results.
-    """
-    results = []
-    with open(sam_file, "r") as f:
-        for line in f:
-            # print(line)
-            if line.startswith("@"):
-                continue
-            fields = line.strip().split("\t")
-            if fields[2] == "*":  # unmapped
-                continue
-            if len(fields) >= 3:
-                spacer_id = str(fields[0])
-                flag = int(fields[1])
-                is_reverse = bool(flag & 16)
-                strand = is_reverse  # Changed from '-' if is_reverse else '+'
-                contig_id = str(fields[2])
-                start = int(fields[3]) - 1  # SAM is 1-based
-                cigar = fields[5]
-                seq_length = get_aln_len_from_cigar(cigar)
-                mismatches = -1  # default value
-                if len(fields) >= 12:  # has tags
-                    # get which tag is NM:i:``
-                    nm_tag = [x for x in fields[11:] if x.startswith("NM:i:")]
-                    if len(nm_tag) > 0:
-                        mismatches = int(nm_tag[0].split(":")[2])
-
-                if (
-                    mismatches == -1
-                ):  # if we don't find NM:i: we try to get it from the cigar string.
-                    mismatches = get_mismatches_from_cigar(cigar)
-
-                if mismatches > max_mismatches:
-                    continue
-                end = start + seq_length
-                results.append(
-                    [
-                        str(spacer_id),
-                        str(contig_id),
-                        str(strand),
-                        int(start),
-                        int(end),
-                        int(mismatches),
-                    ]
-                )
-
-    if len(results) == 0:
-        return pl.DataFrame(
-            schema={
-                "spacer_id": pl.Utf8,
-                "contig_id": pl.Utf8,
-                "strand": pl.Boolean,
-                "start": pl.UInt32,
-                "end": pl.UInt32,
-                "mismatches": pl.UInt32,
-            },
-            orient="row",
-        )  # empty dataframe, so we can still join with other results
-
-    # Create lists for each column
-    spacer_ids, contig_ids, strands, starts, ends, mismatches = zip(*results)
-
-    df = pl.DataFrame(
-        {
-            "spacer_id": spacer_ids,
-            "contig_id": contig_ids,
-            "strand": strands,
-            "start": starts,
-            "end": ends,
-            "mismatches": mismatches,
-        }
-    )
-    return df.unique()
-
-
-def order_columns_to_match(df1_to_order: pl.DataFrame, df2_to_match: pl.DataFrame) -> pl.DataFrame:
+def order_columns_to_match(
+    df1_to_order: pl.DataFrame, df2_to_match: pl.DataFrame
+) -> pl.DataFrame:
     """Select columns in df1 to match the order in df2.
 
     Args:
@@ -1120,7 +1056,9 @@ def order_columns_to_match(df1_to_order: pl.DataFrame, df2_to_match: pl.DataFram
     return df1_to_order.select(df2_to_match.columns)
 
 
-def cast_cols_to_match(df1_to_cast: pl.DataFrame, df2_to_match: pl.DataFrame) -> pl.DataFrame:
+def cast_cols_to_match(
+    df1_to_cast: pl.DataFrame, df2_to_match: pl.DataFrame
+) -> pl.DataFrame:
     """Cast columns in df1 to match types in df2.
 
     Args:
@@ -1152,213 +1090,12 @@ def vstack_easy(df1_to_stack: pl.DataFrame, df2_to_stack: pl.DataFrame) -> pl.Da
     return df1_to_stack.vstack(df2_to_stack)
 
 
-def parse_sassy_duckdb(
+def parse_sassy(
     sassy_file: str,
     max_mismatches: int = 5,
     spacer_lendf: Optional[pl.DataFrame] = None,
-    max_gaps: int = 1,
-    threads: int = 10,
-    output_prefix: str = "sassy_parsed",
-    output_dir: str = ".",
-    memory_limit: str = "50GB",
+    max_gaps: int = 5,
     **kwargs,
-) -> pl.LazyFrame:
-    """
-    Parses Sassy TSV using DuckDB with caching capabilities.
-    If a valid Parquet file already exists for the given prefix/date, it is loaded directly.
-
-    Args:
-        sassy_file (str): Input path.
-        max_mismatches (int): Mismatch threshold.
-        spacer_lendf (pl.DataFrame): Spacer lengths.
-        max_gaps (int): Gap threshold.
-        threads (int): CPU cores.
-        output_prefix (str): Cache filename prefix.
-        output_dir (str): Cache directory.
-        memory_limit (str): DuckDB RAM limit.
-
-    Returns:
-        pl.LazyFrame: Parsed results.
-    """
-    from pathlib import Path
-    import datetime
-
-    output_dir = Path(sassy_file).parent
-
-    # 1. CONSTRUCT DETERMINISTIC PATH
-    # Naming convention: {output_dir}/{prefix}_{YYYYMMDD}.parquet
-    date_str = datetime.datetime.now().strftime("%Y%m%d")
-    parquet_filename = f"{output_prefix}_{date_str}.parquet"
-    parquet_path = os.path.join(output_dir, parquet_filename)
-
-    # 2. CACHE CHECK (RESUME LOGIC)
-    if os.path.exists(parquet_path):
-        print(f"Checking existing cache at: {parquet_path}")
-        try:
-            # We try to scan the file. If the footer is missing (incomplete write),
-            # this will throw an error immediately.
-            # Using scan_parquet().schema is a very fast metadata-only check.
-            existing_schema = pl.scan_parquet(parquet_path).collect_schema()
-
-            # (Optional) Verify essential columns exist to ensure it's not an old version
-            if "spacer_id" in existing_schema and "mismatches" in existing_schema:
-                print(
-                    ">> Valid cache found! Returning lazy frame (no materialization)."
-                )
-                # Return lazy frame - let read_results/DuckDB handle streaming
-                return pl.scan_parquet(parquet_path)
-            else:
-                print(">> Cache exists but schema is incorrect. Reprocessing...")
-        except Exception as e:
-            print(
-                f">> Cache file exists but appears corrupt/incomplete ({e}). Reprocessing..."
-            )
-
-    # =========================================================================
-    # START PROCESSING (Only if Cache Miss)
-    # =========================================================================
-
-    # STRICT thread enforcement via environment variables
-    # These are set BEFORE DuckDB connection to take effect
-    # os.environ["OMP_NUM_THREADS"] = str(threads)  # OpenMP
-    # os.environ["OPENBLAS_NUM_THREADS"] = str(threads)  # OpenBLAS
-    # os.environ["MKL_NUM_THREADS"] = str(threads)  # Intel MKL
-    # os.environ["VECLIB_MAXIMUM_THREADS"] = str(threads)  # macOS veclib
-    # os.environ["NUMEXPR_NUM_THREADS"] = str(threads)  # NumExpr
-
-    print(
-        f"\n[ThreadControl] Setting environment variables for {threads} threads (Sassy)"
-    )
-
-    con = duckdb.connect(database=":memory:")
-
-    # Hardware Tuning - Control query parallelism
-    con.execute(f"SET threads TO {threads};")
-    con.execute("SET preserve_insertion_order = false;")
-    con.execute(f"SET memory_limit = '{memory_limit}';")
-
-    # Logic Definitions
-    cigar_check = "length(cigar) - length(replace(replace(replace(cigar, 'I', ''), 'D', ''), 'N', ''))"
-
-    if max_gaps == 1:
-        gap_logic = f"{cigar_check} = 0"
-    else:
-        gap_logic = f"""
-            (CASE 
-                WHEN (cigar LIKE '%I%' OR cigar LIKE '%D%' OR cigar LIKE '%N%') 
-                THEN {cigar_check} <= {max_gaps}
-                ELSE TRUE 
-            END)
-        """
-
-    if spacer_lendf is not None:
-        con.register("spacer_lookup", spacer_lendf)
-        join_step = "INNER JOIN spacer_lookup s ON g.spacer_id = s.spacer_id"
-        len_selection = "s.length AS spacer_length"
-    else:
-        join_step = ""
-        len_selection = "0 AS spacer_length"
-
-    try:
-        print(f"Starting DuckDB Pipeline (Writing to: {parquet_path})...")
-
-        query = f"""
-            COPY (
-                WITH 
-                -- STEP 1: SCAN & CHEAP FILTER
-                fast_filter AS (
-                    SELECT 
-                        spacer_id, contig_id, mismatches, strand, "start", "end", cigar
-                    FROM read_csv(
-                        '{sassy_file}', 
-                        sep='\t', 
-                        header=True, 
-                        skip=1,
-                        parallel=true,
-                        auto_detect=false,
-                        hive_partitioning=false,
-                        columns={{
-                            'spacer_id': 'VARCHAR', 'contig_id': 'VARCHAR', 
-                            'mismatches': 'UINTEGER', 'strand': 'VARCHAR', 
-                            'start': 'UINTEGER', 'end': 'UINTEGER',
-                            'slice_str': 'VARCHAR', 'cigar': 'VARCHAR'
-                        }}
-                    )
-                    WHERE mismatches <= {max_mismatches}
-                ),
-
-                -- STEP 2: EXPENSIVE FILTER
-                gap_filter AS (
-                    SELECT * FROM fast_filter
-                    WHERE {gap_logic}
-                )
-
-                -- STEP 3: JOIN & SELECT
-                SELECT 
-                    g.spacer_id,
-                    g.contig_id,
-                    {len_selection},
-                    (g.strand = '-') AS strand,
-                    g."start",
-                    g."end",
-                    g.mismatches
-                FROM gap_filter g
-                {join_step}
-
-            -- Write Config
-            ) TO '{parquet_path}' (FORMAT 'PARQUET', COMPRESSION 'SNAPPY', ROW_GROUP_SIZE 100000);
-        """
-
-        # Execute the write
-        con.execute(query)
-
-        # Return lazy frame without materialization
-        print("Returning lazy frame (no materialization).")
-        if os.path.exists(parquet_path):
-            # Return lazy frame - let read_results/DuckDB handle streaming
-            results = pl.scan_parquet(parquet_path)
-        else:
-            print(
-                "Warning: DuckDB finished but no file was created (empty result set?)."
-            )
-            results = pl.DataFrame(
-                schema={
-                    "spacer_id": pl.String,
-                    "contig_id": pl.String,
-                    "spacer_length": pl.UInt32,
-                    "strand": pl.Boolean,
-                    "start": pl.UInt32,
-                    "end": pl.UInt32,
-                    "mismatches": pl.UInt32,
-                },
-                orient="row",
-            ).lazy()
-
-    except Exception as e:
-        print(f"Failed to process Sassy file: {e}")
-        # If the write crashed halfway, the file might be corrupt. Clean it up?
-        # Typically better to leave it for inspection or manual deletion,
-        # but you can uncomment this if you prefer auto-cleanup:
-        # if os.path.exists(parquet_path): os.remove(parquet_path)
-
-        return pl.DataFrame(
-            schema={
-                "spacer_id": pl.String,
-                "contig_id": pl.String,
-                "spacer_length": pl.UInt32,
-                "strand": pl.Boolean,
-                "start": pl.UInt32,
-                "end": pl.UInt32,
-                "mismatches": pl.UInt32,
-            },
-            orient="row",
-        ).lazy()
-
-    return results
-
-
-def parse_sassy(
-    sassy_file: str, max_mismatches: int = 5, spacer_lendf: Optional[pl.DataFrame] = None, max_gaps: int = 2, **kwargs
 ) -> pl.DataFrame:
     """Parse Sassy TSV output format and return standardized coordinates.
     Sassy output format:
@@ -1404,7 +1141,9 @@ def parse_sassy(
         results = results.filter(pl.col("mismatches") <= max_mismatches)
 
     except Exception as e:
-        print(f"Failed to read Sassy file {sassy_file}: {e}, returning empty dataframe")
+        logger.warning(
+            f"Failed to read Sassy file {sassy_file}: {e}, returning empty dataframe"
+        )
         return pl.DataFrame(
             schema={
                 "spacer_id": pl.Utf8,
@@ -1450,7 +1189,12 @@ def parse_sassy(
     return results
 
 
-def parse_blastn(blastn_file: str, max_mismatches: int = 5, spacer_lendf: Optional[pl.DataFrame] = None, **kwargs) -> pl.DataFrame:
+def parse_blastn(
+    blastn_file: str,
+    max_mismatches: int = 5,
+    spacer_lendf: Optional[pl.DataFrame] = None,
+    **kwargs,
+) -> pl.DataFrame:
     """Parse a custom BLAST or mmseqs output format
     (query,target,nident,alnlen,mismatch,qlen,gapopen,qstart,qend,tstart,tend,evalue,bits)
     and return standardized coordinates (1-based).
@@ -1486,7 +1230,9 @@ def parse_blastn(blastn_file: str, max_mismatches: int = 5, spacer_lendf: Option
                 "bits": pl.Float64,
             },
         )
-        results = results.filter((pl.col("mismatch")  <= max_mismatches) ) # do here to push down the filter
+        results = results.filter(
+            (pl.col("mismatch") <= max_mismatches)
+        )  # do here to push down the filter
         # results = results.filter((pl.col("qlen") - (pl.col("nident")+3) <= max_mismatches) ) # commented out, will be done later after adding gaps too.
         results = results.collect()
         # results = results.limit(1212121).collect()
@@ -1494,7 +1240,7 @@ def parse_blastn(blastn_file: str, max_mismatches: int = 5, spacer_lendf: Option
         if any(
             results["qend"] < results["qstart"]
         ):  # mmseqs reports reverse on the subject, not the query.
-            print("qend < qstart detected, assuming tend and tstart are reversed")
+            logger.debug("qend < qstart detected, assuming tend and tstart are reversed")
             results = results.with_columns(
                 pl.when(pl.col("qend") < pl.col("qstart"))
                 .then(pl.struct(tstart=pl.col("tend"), tend=pl.col("tstart")))
@@ -1505,7 +1251,7 @@ def parse_blastn(blastn_file: str, max_mismatches: int = 5, spacer_lendf: Option
         #      pl.col("spacer_id").cast(pl.Utf8)
         # )
     except Exception as e:
-        print(
+        logger.warning(
             f"Failed to read BLAST file {blastn_file}: {e}, returning empty dataframe"
         )
         return pl.DataFrame(
@@ -1535,7 +1281,7 @@ def parse_blastn(blastn_file: str, max_mismatches: int = 5, spacer_lendf: Option
             "mismatches"
         ),  # Need to consider setting this as max(qlen,alnlen), as mmseqs can report seems to allow gaps in the query to be counted in the aligned length.
     )
-    # print(results.filter(pl.col("mismatches") != pl.col("mismatch")).height)
+    # logger.info(results.filter(pl.col("mismatches") != pl.col("mismatch")).height)
 
     # Filter out rows with more than max_mismatches mismatches
     results = results.with_columns(
@@ -1558,7 +1304,12 @@ def parse_blastn(blastn_file: str, max_mismatches: int = 5, spacer_lendf: Option
     return results
 
 
-def parse_lexicmap(tsv_file: str, max_mismatches: int = 5, spacer_lendf: Optional[pl.DataFrame] = None, **kwargs) -> pl.DataFrame:
+def parse_lexicmap(
+    tsv_file: str,
+    max_mismatches: int = 5,
+    spacer_lendf: Optional[pl.DataFrame] = None,
+    **kwargs,
+) -> pl.DataFrame:
     """Parse LexicMap TSV output format and return standardized coordinates.
 
     LexicMap output columns (1-based positions):
@@ -1613,7 +1364,7 @@ def parse_lexicmap(tsv_file: str, max_mismatches: int = 5, spacer_lendf: Optiona
         if results.height == 0:
             raise ValueError(f"No results found in {tsv_file}")
     except Exception as e:
-        print(
+        logger.warning(
             f"Failed to create read from file {tsv_file}: {e}, returning empty dataframe"
         )
         return pl.DataFrame(
@@ -1656,7 +1407,9 @@ def parse_lexicmap(tsv_file: str, max_mismatches: int = 5, spacer_lendf: Optiona
     return results
 
 
-def parse_samVn_with_lens_polars(sam_file: str, spacer_lendf: pl.DataFrame, max_mismatches: int = 5) -> pl.DataFrame:
+def parse_samVn_with_lens_polars(
+    sam_file: str, spacer_lendf: pl.DataFrame, max_mismatches: int = 5
+) -> pl.DataFrame:
     """Parse SAM file using spacer lengths for qlen and numerics in CIGAR for alignment length
     uses polars to speed up things
 
@@ -1703,7 +1456,7 @@ def parse_samVn_with_lens_polars(sam_file: str, spacer_lendf: pl.DataFrame, max_
             "index"
         )
         if unmmaped_lines_idx.len() > 0:
-            print(
+            logger.warning(
                 f"Warning: {unmmaped_lines_idx.len()} unmapped lines found in {sam_file}"
             )
             sam_df = sam_df.filter(pl.col("contig_id") != "*")
@@ -1735,7 +1488,9 @@ def parse_samVn_with_lens_polars(sam_file: str, spacer_lendf: pl.DataFrame, max_
         sam_df = sam_df.with_columns(tags_df["nm"].alias("nm"))
         sam_df = sam_df.drop(["index"])
     except Exception as e:
-        print(f"Failed to read SAM file {sam_file}: {e}, returning empty dataframe")
+        logger.warning(
+            f"Failed to read SAM file {sam_file}: {e}, returning empty dataframe"
+        )
         return pl.DataFrame(
             schema={
                 "spacer_id": pl.Utf8,
@@ -1817,7 +1572,6 @@ def parse_sam(
     max_mismatches: int = 5,
     threads: int = 4,
     ref_file: Optional[str] = None,
-    gaps_as_mismatches: bool = False,
     **kwargs,
 ) -> pl.DataFrame:
     """Parse SAM file using pysam and spacer lengths to compute mismatches
@@ -1829,7 +1583,6 @@ def parse_sam(
         max_mismatches (int): Filter limit.
         threads (int): Worker threads.
         ref_file (str): Reference FASTA.
-        gaps_as_mismatches (bool): NM calculation logic.
 
     Returns:
         pl.DataFrame: Parsed results.
@@ -1838,7 +1591,9 @@ def parse_sam(
     try:
         sam_file = verify_sam_file(sam_file, ref_file)
     except Exception as e:
-        print(f"Failed to verify SAM file {sam_file}: {e}, returning empty dataframe")
+        logger.warning(
+            f"Failed to verify SAM file {sam_file}: {e}, returning empty dataframe"
+        )
         return pl.DataFrame(
             schema={
                 "spacer_id": pl.Utf8,
@@ -1856,8 +1611,12 @@ def parse_sam(
     # Create a dictionary for quick spacer length lookups - TODO: maybe there's a faster native polars way to do this.
     spacer_lens = dict(zip(spacer_lendf["spacer_id"], spacer_lendf["length"]))
 
-    with pysam.AlignmentFile(sam_file, "r", check_sq=False) as samfile:
-        for read in tqdm(samfile, desc="Parsing SAM file"):
+    with pysam.AlignmentFile(sam_file, "r", check_sq=False, threads=threads) as samfile:
+        if logger.level == logging.DEBUG:
+            iterator = tqdm(samfile, desc="Parsing SAM file")
+        else:
+            iterator = samfile
+        for read in iterator:
             if read.is_unmapped:
                 continue
 
@@ -1872,7 +1631,7 @@ def parse_sam(
             # hard_clipped = sum(length for op, length in read.cigartuples
             #                   if op == 5)  # H operation
             # # if hard_clipped > 0:
-            # #      print(f"Hard clipped {hard_clipped} for {read.query_name}")
+            # #      logger.debug(f"Hard clipped {hard_clipped} for {read.query_name}")
             # #      # break
             # if spacer_len == 0: # some alignments get 0 length, maybe because some tools do not output the sequence for secondary/ambiguous alignments. I suspect pysam get's the query length from the nchar of the seq.
             #      # print (f"spacer_len == 0 for {read.query_name}, extracting alignment info from cigar")
@@ -1880,10 +1639,12 @@ def parse_sam(
             #      spacer_len = spacer_lens.get(read.query_name)
             # else:
             #      spacer_len = spacer_len + hard_clipped
-            #      # print(f"{spacer_len}")
+            #      # logger.debug(f"{spacer_len}")
             #      # break
             if spacer_len is None:
-                print(f"Warning: spacer {read.query_name} not found in reference table")
+                logger.warning(
+                    f"Warning: spacer {read.query_name} not found in reference table"
+                )
                 break
             # Get alignment infto_string()
             # strand = '-' if read.is_reverse else '+'
@@ -1904,15 +1665,15 @@ def parse_sam(
 
             # debug
             # if soft_clipped > 0:
-                #  print(f"Soft clipped {soft_clipped} for {read.query_name}")
-                 # break
+            #  logger.info(f"Soft clipped {soft_clipped} for {read.query_name}")
+            # break
             # Get edit distance from NM tag  (counts non-identical positions including gaps)
             nm = (read.get_tag("NM") if read.has_tag("NM") else 0) + soft_clipped
 
             # Calculate mismatches based on length and matches
             mismatches = (spacer_len - query_alignment_length) + nm
             if mismatches < 0:
-                print("mismatches < 0")
+                logger.info("mismatches < 0")
                 break
             if mismatches > max_mismatches or nm > max_mismatches:
                 continue
@@ -2051,7 +1812,10 @@ def plot_matrix(
 
 
 def parse_tab(
-    output_file: str, max_mismatches: int = 5, spacer_lendf: Optional[pl.DataFrame] = None, **kwargs
+    output_file: str,
+    max_mismatches: int = 5,
+    spacer_lendf: Optional[pl.DataFrame] = None,
+    **kwargs,
 ) -> pl.DataFrame:
     """expecting tab file with columns: spacer_id, contig_id, start, end, strand - because Antonio insists.
 
@@ -2072,7 +1836,9 @@ def parse_tab(
             infer_schema_length=100000,
         )
     except Exception as e:
-        print(f"Failed to read TAB file {output_file}: {e}, returning empty dataframe")
+        logger.warning(
+            f"Failed to read TAB file {output_file}: {e}, returning empty dataframe"
+        )
         return pl.DataFrame(
             schema={
                 "spacer_id": pl.Utf8,
@@ -2124,7 +1890,7 @@ def parse_hyperfine_output(json_file: str) -> Optional[pl.DataFrame]:
         with open(json_file, "r") as f:
             data = json.load(f)
     except Exception as e:
-        print(f"Failed to read hyperfine results for {json_file}: {e}")
+        logger.warning(f"Failed to read hyperfine results for {json_file}: {e}")
         return None
 
     # Extract the first result (assuming one script-ran per file)
@@ -2181,7 +1947,7 @@ def read_hyperfine_results(tools: dict, results_dir: str) -> pl.DataFrame:
             )
             results = results.vstack(tool_results)
         except Exception as e:
-            print(f"Failed to read hyperfine results for {tool['name']}: {e}")
+            logger.warning(f"Failed to read hyperfine results for {tool['name']}: {e}")
     return results
 
 
@@ -2199,9 +1965,9 @@ def run_tools(tools: dict, results_dir: str, debug: bool = False) -> None:
             clean_before_rerun(tool["name"], results_dir)
             tool["time_info"] = run_tool(tool, results_dir, debug=debug)
             if not debug:
-                print(f"\nSuccessfully ran tool: {tool['name']}")
+                logger.info(f"\nSuccessfully ran tool: {tool['name']}")
         except Exception as e:
-            print(f"{tool['name']} failed: {e}")
+            logger.warning(f"{tool['name']} failed: {e}")
 
 
 def get_seq_from_fastx(
@@ -2270,7 +2036,13 @@ def get_seq_from_fastx(
         return output_file
 
 
-def soft_fetch_fastx(fa: pfx.Fasta, id: str, start: Optional[int] = None, end: Optional[int] = None, strand: Optional[str] = None) -> Optional[str]:
+def soft_fetch_fastx(
+    fa: pfx.Fasta,
+    id: str,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    strand: Optional[str] = None,
+) -> Optional[str]:
     """Safely fetch a sequence or sub-sequence from a pyfastx Fasta object.
 
     Args:
@@ -2316,7 +2088,7 @@ def populate_pldf_from_fastx(
     fa = pfx.Fasta(seqfile)
     cols = start_col is not None and end_col is not None and strand_col is not None
     if (not cols) or (trim_to_region):
-        print(
+        logger.info(
             "No start, end, or strand column provided, or trim_to_region is True, returning the entire sequences"
         )
         tmpdf = pldf.select([idcol]).unique()
@@ -2344,9 +2116,15 @@ def populate_pldf_from_fastx(
     seqs = [
         None
     ] * tmpdf.height  # initialize the list of sequences the same size as the tmpdf
-    for ix in tqdm(
-        range(tmpdf.height), desc="Fetching sequences", total=tmpdf.height
-    ):  # 9998/9998 [00:24<00:00, 410.95it/s, 00:15<00:00, 645.96it/s when list is initialized with None
+    if logger.level == logging.DEBUG:
+        iterator = tqdm(
+            range(tmpdf.height),
+            desc="Fetching sequences",
+            total=tmpdf.height,
+        )
+    else:
+        iterator = range(tmpdf.height)
+    for ix in iterator:  # 9998/9998 [00:24<00:00, 410.95it/s, 00:15<00:00, 645.96it/s when list is initialized with None
         row = tmpdf[ix]
         seq = soft_fetch_fastx(
             fa,
@@ -2363,7 +2141,7 @@ def populate_pldf_from_fastx(
     # pl.struct(pl.col(idcol), pl.col("start_0based"), pl.col(end_col), pl.col("strand4bed")).map_elements(lambda x: soft_fetch_fastx(fa, x[idcol], x["start_0based"], x[end_col], x["strand4bed"]),strategy="threading", return_dtype=pl.Utf8).alias(seqcol)
     #      )
     # time_end = time.time() # 17.89 seconds (no threading) 16.66 seconds (threading)
-    # print(f"Time taken: {time_end - time_start:.2f} seconds")
+    # logger.info(f"Time taken: {time_end - time_start:.2f} seconds")
 
     tmpdf = tmpdf.drop(["strand4bed", "start_0based"])
 
@@ -2408,23 +2186,27 @@ def populate_pldf_withseqs(
     stranded = strand_col in pldf.columns and reverse_by_strand_col
     # if stranded:
     #      nr_contigids = pldf[[idcol,strand_col]].unique()
-    #      # print("rev true")
+    #      # logger.info("rev true")
     # else:
     nr_contigids = pl.DataFrame({idcol: pldf[idcol].unique()})
-    # print("rev false")
+    # logger.info("rev false")
     # drop nulls nas or empty strings
     nr_contigids = nr_contigids.filter(~pl.col(idcol).is_in([None, "", "nan"]))
-    print(f"Total of unique {idcol} ids to fetch: {nr_contigids.height}")
+    logger.info(f"Total of unique {idcol} ids to fetch: {nr_contigids.height}")
     nr_contigs_list = nr_contigids[idcol].unique().to_list()
     minipldf = pl.DataFrame(
         {idcol: nr_contigs_list, seqcol: [None] * len(nr_contigs_list)}
     )
     # Process chunks and update DataFrame
-    for i in tqdm(
-        range(0, len(nr_contigs_list), chunk_size),
-        desc="Populating df with sequences",
-        total=len(nr_contigs_list) // chunk_size,
-    ):
+    if logger.level == logging.DEBUG:
+        iterator = tqdm(
+            range(0, len(nr_contigs_list), chunk_size),
+            desc="Populating df with sequences",
+            total=len(nr_contigs_list) // chunk_size,
+        )
+    else:
+        iterator = range(0, len(nr_contigs_list), chunk_size)
+    for i in iterator:
         chunk = nr_contigs_list[i : i + chunk_size]
         # Get sequences for current chunk
         chunk_seqs = get_seq_from_fastx(
@@ -2443,31 +2225,31 @@ def populate_pldf_withseqs(
             .drop(f"{seqcol}_right")
         )
 
-    print(
+    logger.info(
         f"Estimated size of temporary dataframe: {minipldf.estimated_size('mb'):.2f} MB"
     )
     # count the number of nulls in the seqs_list
     nulls = [x for x in minipldf[seqcol].to_list() if x is None]
-    print(f"Number of unfound ids: {len(nulls)}")
+    logger.info(f"Number of unfound ids: {len(nulls)}")
     if minipldf.height == 0:
-        print("No sequences found, returning input as is")
+        logger.info("No sequences found, returning input as is")
         return pldf
 
     if drop_missing:
-        print("Dropping unfound ids")
+        logger.info("Dropping unfound ids")
         pldf = pldf.filter(pl.col(idcol).is_in(minipldf[idcol].unique().to_list()))
 
     pldf = pldf.join(minipldf, on=idcol, how="left")
 
     if trim_to_region and "start" in pldf.columns and "end" in pldf.columns:
-        print("Trimming to region")
+        logger.info("Trimming to region")
         # Benchmarking with slice
         # time_start = time.time()
         # pldf = pldf.with_columns(
         # pl.col(seqcol).str.slice(length= pl.col("end")-pl.col("start"),offset=pl.col("start")-1).alias(seqcol)
         # )
         # time_end = time.time()
-        # print(f"Time taken: {time_end - time_start:.2f} seconds") # Time taken: 0.15 seconds ### UPDATE: THIS IS BUGGED, REVERTING TO map_elements.
+        # logger.info(f"Time taken: {time_end - time_start:.2f} seconds") # Time taken: 0.15 seconds ### UPDATE: THIS IS BUGGED, REVERTING TO map_elements.
         # Benchmarking with map_elements
         # time_start = time.time()
         pldf = pldf.with_columns(
@@ -2478,10 +2260,10 @@ def populate_pldf_withseqs(
             .alias(seqcol)
         )
         # time_end = time.time()
-        # print(f"Time taken: {time_end - time_start:.2f} seconds") # Time taken: 0.06 seconds
+        # logger.info(f"Time taken: {time_end - time_start:.2f} seconds") # Time taken: 0.06 seconds
 
     if stranded:
-        print("Reversing stranded sequences")
+        logger.info("Reversing stranded sequences")
         # get the strand from the nr_contigids
         pldf = pldf.with_columns(
             pl.when(pl.col("strand"))
@@ -2528,12 +2310,12 @@ def populate_pldf_withseqs_needletail(
     if trim_to_region:
         merge_cols.extend([start_col, end_col])
 
-    print(f"Initial pldf shape: {pldf.shape}")
+    logger.debug(f"Initial pldf shape: {pldf.shape}")
     minipldf = pldf.select(merge_cols).unique()
-    print(f"Unique entries in minipldf: {minipldf.shape}")
+    logger.debug(f"Unique entries in minipldf: {minipldf.shape}")
 
     minipldf = minipldf.filter(~pl.col(idcol).is_in([None, "", "nan"]))
-    print(f"After filtering nulls: {minipldf.shape}")
+    logger.debug(f"After filtering nulls: {minipldf.shape}")
 
     minipldf = minipldf.with_columns(pl.lit(None).alias(seqcol))
 
@@ -2559,7 +2341,7 @@ def populate_pldf_withseqs_needletail(
     # seq_count = 0
     # for _ in parse_fastx_file(seqfile):
     #      seq_count += 1
-    print(f"Actual number of sequences in file: {seq_count}")
+    logger.debug(f"Actual number of sequences in file: {seq_count}")
 
     # Reset file iterator
     index = 0
@@ -2570,8 +2352,8 @@ def populate_pldf_withseqs_needletail(
 
         # Process chunk when we hit chunk_size or end of file
         if len(seqs) >= chunk_size or index == seq_count:
-            print(f"\nProcessing chunk {index}/{seq_count}")
-            print(f"Number of sequences in chunk: {len(seqs)}")
+            logger.debug(f"\nProcessing chunk {index}/{seq_count}")
+            logger.debug(f"Number of sequences in chunk: {len(seqs)}")
 
             chunk_seqs = pl.DataFrame({idcol: seq_ids, seqcol: seqs})
 
@@ -2580,17 +2362,17 @@ def populate_pldf_withseqs_needletail(
             )  # this join get's the info columns (start, end, strand) if needed, only for the entires in this chunk that are in the minipldf.
 
             if trim_to_region:
-                print("Trimming sequences")
-                # print(chunk_seqs.columns)
+                logger.debug("Trimming sequences")
+                # logger.info(chunk_seqs.columns)
                 # chunk_seqs = chunk_seqs.with_columns(len_toextract=pl.col(end_col)-pl.col(start_col) + 1)
                 chunk_seqs = chunk_seqs.with_columns(
-                #     pl.col(seqcol).str.slice(
-                #         offset=pl.col(start_col) -1,
-                #         length="len_toextract"                        
-                #     ).alias(seqcol)
-                # )
-                            # ,  # is polars 0-based coordinated?
-                # print (chunk_seqs[seqcol].head(10))
+                    #     pl.col(seqcol).str.slice(
+                    #         offset=pl.col(start_col) -1,
+                    #         length="len_toextract"
+                    #     ).alias(seqcol)
+                    # )
+                    # ,  # is polars 0-based coordinated?
+                    # print (chunk_seqs[seqcol].head(10))
                     pl.struct(pl.col(seqcol), pl.col(start_col), pl.col(end_col))
                     .map_elements(
                         lambda x: str(x[seqcol][x[start_col] : x[end_col]])
@@ -2602,8 +2384,8 @@ def populate_pldf_withseqs_needletail(
                 )
 
             if reverse_by_strand_col:
-                print("Reversing sequences")
-                # print(chunk_seqs.columns)
+                logger.debug("Reversing sequences")
+                # logger.debug(chunk_seqs.columns)
                 chunk_seqs = chunk_seqs.with_columns(
                     pl.when(pl.col(strand_col) == "-")
                     .then(
@@ -2616,13 +2398,15 @@ def populate_pldf_withseqs_needletail(
                     .alias(seqcol)
                 )
 
-            print("Joining with nascent df")
+            logger.debug("Joining with nascent df")
             minipldf = minipldf.join(chunk_seqs, on=merge_cols, how="left")
             minipldf = minipldf.with_columns(
                 pl.coalesce([pl.col(seqcol), pl.col(f"{seqcol}_right")]).alias(seqcol)
             ).drop(f"{seqcol}_right")
 
-            print(f"Null count in seqcol after chunk: {minipldf[seqcol].null_count()}")
+            logger.debug(
+                f"Null count in seqcol after chunk: {minipldf[seqcol].null_count()}"
+            )
 
             seqs = []
             seq_ids = []
@@ -2630,11 +2414,12 @@ def populate_pldf_withseqs_needletail(
             if minipldf[seqcol].null_count() == 0:
                 break
 
-    print("\nFinal merge with original df")
+    logger.debug("\nFinal merge with original df")
     pldf = pldf.join(minipldf, on=merge_cols, how="left")
-    print(f"Final null count in seqcol: {pldf[seqcol].null_count()}")
+    logger.debug(f"Final null count in seqcol: {pldf[seqcol].null_count()}")
 
     return pldf
+
 
 def prettify_alignment(
     spacer_seq: str,
@@ -2698,6 +2483,85 @@ def prettify_alignment(
         return ali.comp
     return f"{ali.query}\n{ali.comp}\n{ali.ref}"
 
+
+def match_intervals_with_tolerance(
+    ground_truth: pl.DataFrame,
+    tool_results: pl.DataFrame,
+    tolerance: int = 5,
+) -> pl.DataFrame:
+    """
+    Match tool-reported intervals to ground truth intervals allowing some coordinate tolerance.
+
+    This function identifies which tool-reported alignments correspond to ground truth alignments,
+    even if the coordinates are slightly off (e.g., due to coordinate system differences or
+    boundary reporting variations).
+
+    Args:
+        ground_truth: DataFrame with ground truth alignments (must have: spacer_id, contig_id, start, end, strand)
+        tool_results: DataFrame with tool-reported alignments (must have: spacer_id, contig_id, start, end, strand)
+        tolerance: Maximum number of bases difference allowed in start/end coordinates (default: 5)
+
+    Returns:
+        DataFrame with tool results that match ground truth, with classification column added,
+        plus ground truth coordinates (start_gt, end_gt) for reference.
+        Non-matching results are excluded (caller should handle them separately).
+    """
+    # Handle empty ground truth - return empty result with correct schema
+    if ground_truth.height == 0:
+        return tool_results.head(0).with_columns(
+            [
+                pl.lit(None, dtype=pl.Int64).alias("start_gt"),
+                pl.lit(None, dtype=pl.Int64).alias("end_gt"),
+                pl.lit("positive_in_plan").alias("classification"),
+            ]
+        )
+
+    # For each tool result, check if it overlaps with a ground truth interval
+    # We consider it a match if:
+    # 1. Same spacer_id and contig_id and strand
+    # 2. Start and end coordinates are within tolerance bases
+
+    # Create a join on spacer_id, contig_id, strand
+    joined = tool_results.join(
+        ground_truth.select(
+            ["spacer_id", "contig_id", "start", "end", "strand", "mismatches"]
+        ),
+        on=["spacer_id", "contig_id", "strand"],
+        how="inner",
+        suffix="_gt",
+    )
+
+    # Filter to matches within tolerance
+    # Allow start/end to be within tolerance bases of ground truth
+    matches = joined.filter(
+        (pl.col("start") - pl.col("start_gt")).abs() <= tolerance,
+        (pl.col("end") - pl.col("end_gt")).abs() <= tolerance,
+    )
+
+    # If a tool result matches multiple ground truth entries, keep the closest one
+    # (This handles edge cases where intervals might overlap)
+    matches = matches.with_columns(
+        (
+            (pl.col("start") - pl.col("start_gt")).abs()
+            + (pl.col("end") - pl.col("end_gt")).abs()
+        ).alias("coord_distance")
+    )
+
+    # Keep only the best match for each tool result
+    matches = (
+        matches.sort("coord_distance")
+        .group_by(["spacer_id", "contig_id", "start", "end", "strand"])
+        .first()
+    )
+
+    # Select original columns from tool_results plus classification and ground truth coordinates
+    result = matches.select(
+        [c for c in tool_results.columns] + ["start_gt", "end_gt"]
+    ).with_columns(pl.lit("positive_in_plan").alias("classification"))
+
+    return result
+
+
 def test_alignment(
     spacer_seq: str,
     contig_seq: str,
@@ -2708,7 +2572,7 @@ def test_alignment(
     extend_cost: int = 5,
     distance_metric: str = "hamming",
     **kwargs,
-)-> int:
+) -> int:
     """Test if an alignment matches between a spacer and contig using Needleman-Wunsch algorithm.
     Input is a spacer and contig sequence and coordinates, and optionally strand, start, end, gap_cost, extend_cost, and gaps_as_mismatch.
     Returns the number of mismatches.
@@ -2768,12 +2632,17 @@ def test_alignment(
             end=None,
             silent=True,
         )
-    
+
     return distance
 
 
 def calculate_hamming_distance(
-    spacer_seq: str, contig_seq: str, strand: bool = False, start=None, end=None, silent:bool =True
+    spacer_seq: str,
+    contig_seq: str,
+    strand: bool = False,
+    start=None,
+    end=None,
+    silent: bool = True,
 ):
     """
     Calculate hamming distance (substitutions only, no indels) using ungapped alignment.
@@ -2787,7 +2656,7 @@ def calculate_hamming_distance(
 
     Returns:
         Hamming distance (number of substitutions only)
-    
+
     Note:
         If sequences are of different lengths, it will attempt to pad the shorter sequence with "@" characters on either side and compute two hamming distances, returning the minimum.
     """
@@ -2809,7 +2678,9 @@ def calculate_hamming_distance(
     # If lengths don't match, can't do proper hamming distance, trying with padding (the shorter) from each side as "good enough effort"
     if len(spacer_seq) != len(aligned_region):
         if not silent:
-            print("Sequences of different lengths, cannot compute hamming distance accurately.")
+            logger.info(
+                "Sequences of different lengths, cannot compute hamming distance accurately."
+            )
         if len(spacer_seq) < len(aligned_region):
             # Pad spacer_seq (RIGHT)
             spacer_seq_r = spacer_seq.ljust(len(aligned_region), "@")
@@ -2840,7 +2711,7 @@ def calculate_edit_distance(
     end: Optional[int] = None,
     gap_open: int = 10,
     gap_extend: int = 5,
-    matrix: ps.Matrix = ps.nuc44
+    matrix: ps.Matrix = ps.nuc44,
 ):
     """
     Calculate edit distance (allowing indels) using Needleman-Wunsch gapped alignment.
@@ -2966,13 +2837,17 @@ def prettify_alignment_hamming(
             # Pad spacer_seq (LEFT)
             spacer_seq_l = spacer_seq.rjust(len(aligned_region), "@")
             ham_lft = sum(1 for a, b in zip(spacer_seq_l, aligned_region) if a != b)
-            
+
             # Get the minimum of the two padding attempts, and build alignment string accordingly ("|" for match, "." for mismatch)
             if ham_rght < ham_lft:
-                ali_str = "".join("|" if a == b else "." for a, b in zip(spacer_seq_r, aligned_region))
+                ali_str = "".join(
+                    "|" if a == b else "." for a, b in zip(spacer_seq_r, aligned_region)
+                )
                 spacer_seq = spacer_seq_r
             else:
-                ali_str = "".join("|" if a == b else "." for a, b in zip(spacer_seq_l, aligned_region))
+                ali_str = "".join(
+                    "|" if a == b else "." for a, b in zip(spacer_seq_l, aligned_region)
+                )
                 spacer_seq = spacer_seq_l
         else:
             # Pad aligned_region (RIGHT)
@@ -2981,18 +2856,24 @@ def prettify_alignment_hamming(
             # Pad aligned_region (LEFT)
             aligned_region_l = aligned_region.rjust(len(spacer_seq), "@")
             ham_lft = sum(1 for a, b in zip(spacer_seq, aligned_region_l) if a != b)
-            
+
             # Get the minimum of the two padding attempts, and build alignment string accordingly ("|" for match, "." for mismatch)
             if ham_rght < ham_lft:
-                ali_str = "".join("|" if a == b else "." for a, b in zip(spacer_seq, aligned_region_r))
+                ali_str = "".join(
+                    "|" if a == b else "." for a, b in zip(spacer_seq, aligned_region_r)
+                )
                 aligned_region = aligned_region_r
             else:
-                ali_str = "".join("|" if a == b else "." for a, b in zip(spacer_seq, aligned_region_l))
+                ali_str = "".join(
+                    "|" if a == b else "." for a, b in zip(spacer_seq, aligned_region_l)
+                )
                 aligned_region = aligned_region_l
     # if they're the same length, proceed normally
     # Simple character-by-character comparison (true hamming distance)
     else:
-        ali_str = "".join("|" if a == b else "." for a, b in zip(spacer_seq, aligned_region))
+        ali_str = "".join(
+            "|" if a == b else "." for a, b in zip(spacer_seq, aligned_region)
+        )
 
     if return_ref_region:
         return aligned_region
@@ -3002,7 +2883,6 @@ def prettify_alignment_hamming(
         return ali_str
 
     return f"{spacer_seq}\n{ali_str}\n{aligned_region}"
-
 
 
 def test_alignment_polars(results: pl.DataFrame, ignore_region_strands=False, **kwargs):
@@ -3030,260 +2910,6 @@ def test_alignment_polars(results: pl.DataFrame, ignore_region_strands=False, **
     return results
 
 
-def recalculate_mismatches_streaming(
-    parquet_path: str,
-    spacers_file: str,
-    contigs_file: str,
-    output_parquet: str,
-    max_mismatches: int = 3,
-    batch_size: int = 200000,
-    threads: int = 12,
-    memory_limit: str = "100GB",
-    ignore_region_strands: bool = True,
-):
-    """
-    Recalculate mismatches using streaming approach with DuckDB.
-    
-    This function:
-    1. Uses DuckDB to extract unique regions (streaming, no full load)
-    2. Batches sequence population and alignment validation
-    3. Joins recalculated mismatches back to original data
-    4. Filters based on recalculated mismatches
-    
-    Args:
-        parquet_path: Path to parquet file with tool results
-        spacers_file: Path to spacers FASTA file
-        contigs_file: Path to contigs FASTA file
-        output_parquet: Path to save filtered results
-        max_mismatches: Maximum mismatches to keep after recalculation
-        batch_size: Number of unique regions to process per batch
-        threads: Number of threads for DuckDB
-        memory_limit: Memory limit for DuckDB
-        ignore_region_strands: Whether to ignore strand info during alignment
-        
-    Returns:
-        None (writes to output_parquet)
-    """
-    import os
-    
-    # Check if output already exists and is valid
-    if os.path.exists(output_parquet):
-        try:
-            with open(output_parquet, 'rb') as f:
-                f.seek(-4, 2)  # Seek to last 4 bytes
-                footer = f.read()
-                if footer == b'PAR1':
-                    print(f"\n✓ Valid parquet file already exists: {output_parquet}")
-                    print("  Skipping recalculation. Delete the file to recompute.")
-                    return None
-                else:
-                    print("\n⚠ Output file exists but appears corrupted (missing PAR1 footer)")
-                    print("  Rerunning recalculation...")
-        except Exception as e:
-            print(f"\n⚠ Error checking output file: {e}")
-            print("  Rerunning recalculation...")
-    
-    print("\n[Streaming Mismatch Recalculation]")
-    print(f"  Input: {parquet_path}")
-    print(f"  Output: {output_parquet}")
-    print(f"  Batch size: {batch_size:,}")
-    print(f"  Memory limit: {memory_limit}")
-    
-    # Create working directory for intermediate files next to the output
-    temp_dir = os.path.join(os.path.dirname(output_parquet), "mismatch_recalc_temp")
-    os.makedirs(temp_dir, exist_ok=True)
-    # temp_dir = os.path.abspath(tempfile.mkdtemp(prefix="mismatch_recalc_"))
-    # temp_dir = tempfile.mkdtemp(prefix="mismatch_recalc_")
-    unique_regions_path = os.path.join(temp_dir, "unique_regions.parquet")
-    validated_regions_path = os.path.join(temp_dir, "validated_regions.parquet")
-    
-    try:
-        # Step 1: Extract unique regions using DuckDB (streaming, no memory load)
-        # Check if unique_regions already exists and is valid
-        region_count = None
-        if os.path.exists(unique_regions_path):
-            try:
-                # Check if file is large enough to contain PAR1 footer
-                file_size = os.path.getsize(unique_regions_path)
-                if file_size >= 4:
-                    with open(unique_regions_path, 'rb') as f:
-                        f.seek(-4, 2)  # Seek to last 4 bytes
-                        footer = f.read()
-                        if footer == b'PAR1':
-                            print("\n[Step 1/4] ✓ Valid unique_regions.parquet found, reusing...")
-                            # Get count for progress tracking
-                            con = duckdb.connect(database=":memory:")
-                            con.execute(f"SET threads TO {threads};")
-                            con.execute(f"SET memory_limit = '{memory_limit}';")
-                            region_count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{unique_regions_path}')").fetchone()[0]
-                            print(f"  Found {region_count:,} unique regions")
-                            con.close()
-                        else:
-                            print("\n[Step 1/4] ⚠ unique_regions.parquet exists but appears corrupted (invalid footer)")
-                            print("  Re-extracting unique regions...")
-                else:
-                    print(f"\n[Step 1/4] ⚠ unique_regions.parquet exists but is too small ({file_size} bytes)")
-                    print("  Re-extracting unique regions...")
-            except Exception as e:
-                print(f"\n[Step 1/4] ⚠ Error checking unique_regions.parquet: {e}")
-                print("  Re-extracting unique regions...")
-        
-        # Only extract if we didn't find a valid file
-        if region_count is None:
-            print("\n[Step 1/4] Extracting unique regions via DuckDB...")
-            con = duckdb.connect(database=":memory:")
-            con.execute(f"SET threads TO {threads};")
-            con.execute(f"SET memory_limit = '{memory_limit}';")
-            
-            # Extract unique regions and write to parquet
-            con.execute(f"""
-                COPY (
-                    SELECT DISTINCT 
-                        spacer_id, contig_id, strand, "start", "end"
-                    FROM read_parquet('{parquet_path}')
-                ) TO '{unique_regions_path}' (FORMAT PARQUET, COMPRESSION SNAPPY)
-            """)
-            
-            # Get count for progress tracking
-            region_count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{unique_regions_path}')").fetchone()[0]
-            print(f"  Found {region_count:,} unique regions")
-            con.close()
-        
-        # Step 2: Populate sequences in batches
-        print("\n[Step 2/4] Populating sequences in batches...")
-        
-        # Read unique regions in lazy mode
-        unique_regions = pl.scan_parquet(unique_regions_path)
-        
-        # Process in batches to avoid OOM
-        processed_batches = []
-        total_batches = (region_count + batch_size - 1) // batch_size
-        
-        for batch_num in range(total_batches):
-            offset = batch_num * batch_size
-            print(f"  Processing batch {batch_num + 1}/{total_batches} (offset={offset:,})...")
-            
-            # Read batch
-            batch = unique_regions.slice(offset, batch_size).collect()
-            
-            # Populate spacer sequences
-            batch = populate_pldf_withseqs_needletail(
-                seqfile=spacers_file,
-                pldf=batch,
-                chunk_size=500000,
-                reverse_by_strand_col=False,
-                trim_to_region=False,
-                idcol="spacer_id",
-                seqcol="spacer_seq"
-            )
-            
-            # Populate contig sequences
-            batch = populate_pldf_withseqs_needletail(
-                seqfile=contigs_file,
-                pldf=batch,
-                chunk_size=100000,
-                reverse_by_strand_col=True,
-                trim_to_region=True,
-                idcol="contig_id",
-                start_col="start",
-                end_col="end",
-                strand_col="strand",
-                seqcol="contig_seq"
-            )
-            
-            # Recalculate mismatches using parasail
-            batch = test_alignment_polars(
-                batch,
-                ignore_region_strands=ignore_region_strands
-            )
-            
-            # Keep only needed columns
-            batch = batch.select([
-                "spacer_id", "contig_id", "strand", "start", "end",
-                "alignment_test", "spacer_seq", "contig_seq"
-            ])
-            
-            processed_batches.append(batch)
-            
-            # Optional: write intermediate results to avoid memory buildup
-            if len(processed_batches) >= 10:  # Write every 10 batches
-                print("    Writing intermediate results...")
-                if os.path.exists(validated_regions_path):
-                    # Append to existing file
-                    pl.concat(processed_batches).write_parquet(
-                        validated_regions_path, 
-                        compression="snappy",
-                        row_group_size=100000
-                    )
-                else:
-                    # Create new file
-                    pl.concat(processed_batches).write_parquet(
-                        validated_regions_path,
-                        compression="snappy"
-                    )
-                processed_batches = []
-        
-        # Write any remaining batches
-        if processed_batches:
-            print("\n  Writing final batch...")
-            if os.path.exists(validated_regions_path):
-                # This is tricky - need to append properly
-                existing = pl.scan_parquet(validated_regions_path)
-                new_data = pl.concat(processed_batches)
-                pl.concat([existing.collect(), new_data]).write_parquet(
-                    validated_regions_path,
-                    compression="snappy"
-                )
-            else:
-                pl.concat(processed_batches).write_parquet(
-                    validated_regions_path,
-                    compression="snappy"
-                )
-        
-        print("\n[Step 3/4] Joining recalculated mismatches back to original data...")
-        
-        # Step 3: Join using DuckDB and filter
-        con = duckdb.connect(database=":memory:")
-        con.execute(f"SET threads TO {threads};")
-        con.execute(f"SET memory_limit = '{memory_limit}';")
-        
-        # Join and filter in one DuckDB query (streaming)
-        con.execute(f"""
-            COPY (
-                SELECT 
-                    t.*,
-                    v.alignment_test,
-                    v.spacer_seq,
-                    v.contig_seq
-                FROM read_parquet('{parquet_path}') t
-                LEFT JOIN read_parquet('{validated_regions_path}') v
-                    ON t.spacer_id = v.spacer_id 
-                    AND t.contig_id = v.contig_id
-                    AND t.strand = v.strand
-                    AND t."start" = v."start"
-                    AND t."end" = v."end"
-                WHERE v.alignment_test <= {max_mismatches}
-            ) TO '{output_parquet}' (FORMAT PARQUET, COMPRESSION SNAPPY)
-        """)
-        
-        final_count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{output_parquet}')").fetchone()[0]
-        print(f"  Filtered to {final_count:,} alignments (≤{max_mismatches} mismatches)")
-        
-        con.close()
-        
-        print("\n[Step 4/4] Cleanup...")
-        
-    finally:
-        # Cleanup temp files
-        import shutil
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-            print(f"  Removed temp directory: {temp_dir}")
-    
-    print(f"\n[Complete] Results written to: {output_parquet}")
-    return None
-
-
 def read_results(
     tools: dict,
     max_mismatches: int = 5,
@@ -3292,7 +2918,10 @@ def read_results(
     threads: int = 10,
     use_duckdb: bool = True,
     output_parquet: Optional[str] = None,
-    memory_limit: str = str(min(50000, psutil.virtual_memory().available // (1024 * 1024 * 2))) + "MB", # set a default memory limit to 50gb or half of all available RAM (if less than 50gb)
+    memory_limit: str = str(
+        min(50000, psutil.virtual_memory().available // (1024 * 1024 * 2))
+    )
+    + "MB",  # set a default memory limit to 50gb or half of all available RAM (if less than 50gb)
 ):
     """
     Read and combine results from multiple tools with memory-efficient processing.
@@ -3353,9 +2982,9 @@ def _read_results_duckdb(
     # os.environ["VECLIB_MAXIMUM_THREADS"] = str(threads)  # macOS veclib
     # os.environ["NUMEXPR_NUM_THREADS"] = str(threads)  # NumExpr
 
-    print(f"\n[ThreadControl] Setting environment variables for {threads} threads")
-    print(f"  OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS')}")
-    print(f"  OPENBLAS_NUM_THREADS={os.environ.get('OPENBLAS_NUM_THREADS')}")
+    logger.debug(f"Setting environment variables for {threads} threads")
+    logger.debug(f"  OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS')}")
+    logger.debug(f"  OPENBLAS_NUM_THREADS={os.environ.get('OPENBLAS_NUM_THREADS')}")
 
     # Create a temporary directory for intermediate results if needed
     temp_dir = tempfile.mkdtemp(prefix="spacer_bench_duckdb_")
@@ -3371,24 +3000,24 @@ def _read_results_duckdb(
 
     # Log actual thread setting
     thread_setting = con.execute("SELECT current_setting('threads')").fetchone()[0]
-    print(f"  DuckDB query parallelism: {thread_setting} threads")
-    print(f"  DuckDB memory limit: {memory_limit}")
+    logger.debug(f"  DuckDB query parallelism: {thread_setting} threads")
+    logger.debug(f"  DuckDB memory limit: {memory_limit}")
 
     try:
         for tool in tools.values():
             try:
-                print(f"\nReading results for {tool['name']}...")
+                logger.debug(f"Reading results for {tool['name']}...")
                 parse_function = tool.get("parse_function")
 
                 # Check if file exists and has content
                 if os.path.exists(tool["output_file"]):
                     file_size = os.path.getsize(tool["output_file"])
-                    print(f"File size: {file_size / 1024 / 1024:.2f} MB")
+                    logger.debug(f"File size: {file_size / 1024 / 1024:.2f} MB")
                     if file_size == 0:
-                        print(f"File {tool['output_file']} is empty, skipping")
+                        logger.debug(f"File {tool['output_file']} is empty, skipping")
                         continue
                 else:
-                    print(f"File {tool['output_file']} does not exist, skipping")
+                    logger.debug(f"File {tool['output_file']} does not exist, skipping")
                     continue
 
                 # Parse results using the tool-specific parser
@@ -3420,10 +3049,10 @@ def _read_results_duckdb(
                 tool_parquet = os.path.join(temp_dir, f"{tool['name']}.parquet")
                 parsed_results.sink_parquet(tool_parquet)
                 parquet_files.append(tool_parquet)
-                print(f"Saved {tool['name']} results to {tool_parquet}")
+                logger.debug(f"Saved {tool['name']} results to {tool_parquet}")
 
             except Exception as e:
-                print(f"Failed to read results for {tool['name']}: {e}")
+                logger.warning(f"Failed to read results for {tool['name']}: {e}")
                 import traceback
 
                 traceback.print_exc()
@@ -3431,7 +3060,7 @@ def _read_results_duckdb(
 
         # If no results were collected, return empty dataframe
         if not parquet_files:
-            print("No results collected from any tool")
+            logger.warning("No results collected from any tool")
             return pl.DataFrame(
                 schema={
                     "spacer_id": pl.Utf8,
@@ -3447,7 +3076,9 @@ def _read_results_duckdb(
             )
 
         # Combine all parquet files using DuckDB's union operation
-        print(f"\nCombining results from {len(parquet_files)} tools using DuckDB...")
+        logger.debug(
+            f"Combining results from {len(parquet_files)} tools using DuckDB..."
+        )
 
         # Build union by concatenating all parquet files
         union_query = " UNION ALL ".join(
@@ -3456,7 +3087,7 @@ def _read_results_duckdb(
 
         # If output_parquet is specified, write directly to file using DuckDB's native COPY
         if output_parquet:
-            print(
+            logger.debug(
                 f"Writing combined results to {output_parquet} using DuckDB (no materialization)..."
             )
             # Use DuckDB's COPY command to write directly without materializing in Polars
@@ -3466,13 +3097,13 @@ def _read_results_duckdb(
                 ) TO '{output_parquet}' (FORMAT 'PARQUET', COMPRESSION 'SNAPPY', ROW_GROUP_SIZE 100000)
             """
             con.execute(copy_query)
-            print(f"Results saved to {output_parquet}")
+            logger.debug(f"Results saved to {output_parquet}")
             result_df = None
         else:
             # Only load to Polars if not saving to Parquet
-            print("Loading results to Polars...")
+            logger.debug("Loading results to Polars...")
             union_relation = con.execute(union_query).pl()
-            print("Results ready")
+            logger.debug("Results ready")
             result_df = union_relation
 
         return result_df
@@ -3483,11 +3114,11 @@ def _read_results_duckdb(
 
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
-            print(f"Cleaned up temporary directory: {temp_dir}")
+            logger.debug(f"Cleaned up temporary directory: {temp_dir}")
 
 
 def _read_results_polars_lazy(
-    tools : dict,
+    tools: dict,
     max_mismatches: int = 5,
     spacer_lendf: Optional[pl.DataFrame] = None,
     ref_file: Optional[str] = None,
@@ -3503,18 +3134,18 @@ def _read_results_polars_lazy(
     try:
         for tool in tools.values():
             try:
-                print(f"\nReading results for {tool['name']}...")
+                logger.debug(f"\nReading results for {tool['name']}...")
                 parse_function = tool.get("parse_function")
 
                 # Check if file exists and has content
                 if os.path.exists(tool["output_file"]):
                     file_size = os.path.getsize(tool["output_file"])
-                    print(f"File size: {file_size / 1024 / 1024:.2f} MB")
+                    logger.debug(f"File size: {file_size / 1024 / 1024:.2f} MB")
                     if file_size == 0:
-                        print(f"File {tool['output_file']} is empty, skipping")
+                        logger.debug(f"File {tool['output_file']} is empty, skipping")
                         continue
                 else:
-                    print(f"File {tool['output_file']} does not exist, skipping")
+                    logger.debug(f"File {tool['output_file']} does not exist, skipping")
                     continue
 
                 # Parse results using the tool-specific parser
@@ -3536,10 +3167,10 @@ def _read_results_polars_lazy(
                 ).lazy()
 
                 lazy_frames.append(parsed_results)
-                print(f"Loaded {tool['name']} results (lazy evaluation)")
+                logger.debug(f"Loaded {tool['name']} results (lazy evaluation)")
 
             except Exception as e:
-                print(f"Failed to read results for {tool['name']}: {e}")
+                logger.debug(f"Failed to read results for {tool['name']}: {e}")
                 import traceback
 
                 traceback.print_exc()
@@ -3547,7 +3178,7 @@ def _read_results_polars_lazy(
 
         # If no results were collected, return empty dataframe
         if not lazy_frames:
-            print("No results collected from any tool")
+            logger.debug("No results collected from any tool")
             return pl.DataFrame(
                 schema={
                     "spacer_id": pl.Utf8,
@@ -3563,25 +3194,25 @@ def _read_results_polars_lazy(
             )
 
         # Combine using lazy concatenation
-        print(
+        logger.debug(
             f"\nCombining results from {len(lazy_frames)} tools using Polars lazy evaluation..."
         )
         combined_lazy = pl.concat(lazy_frames, how="vertical_relaxed")
 
         # If output_parquet is specified, write directly to file
         if output_parquet:
-            print(f"Writing combined results to {output_parquet}...")
+            logger.debug(f"Writing combined results to {output_parquet}...")
             combined_lazy.sink_parquet(output_parquet)
-            print(f"Results saved to {output_parquet}")
+            logger.debug(f"Results saved to {output_parquet}")
             return None
         else:
             # Collect and return
-            print("Collecting results...")
+            logger.debug("Collecting results...")
             result_df = combined_lazy.collect()
             return result_df
 
     except Exception as e:
-        print(f"Error in Polars lazy evaluation: {e}")
+        logger.error(f"Error in Polars lazy evaluation: {e}")
         import traceback
 
         traceback.print_exc()
@@ -3597,14 +3228,14 @@ def verify_sam_file(sam_file: str, ref_file: Optional[str] = None):
         lines = f.readlines()
 
     if len(lines) < 2:
-        print("SAM file has less than 2 lines")
+        logger.debug("SAM file has less than 2 lines")
         return None
 
     first_line = lines[0].strip()
     second_line = lines[1].strip() if len(lines) > 1 else ""
 
-    print("first line of sam file", first_line)
-    print("second line of sam file", second_line)
+    logger.debug(f"first line of sam file {first_line}")
+    logger.debug(f"second line of sam file {second_line}")
 
     # Check if this is a mummer file - always rewrite HD line for mummer
     is_mummer_file = "mummer" in sam_file.lower()
@@ -3616,7 +3247,7 @@ def verify_sam_file(sam_file: str, ref_file: Optional[str] = None):
     hd_needs_fixing = False
     if has_hd_header and " " in first_line and "\t" not in first_line:
         hd_needs_fixing = True
-        print("HD line has spaces instead of tabs, will fix")
+        logger.debug("HD line has spaces instead of tabs, will fix")
 
     # Check if we have SQ lines
     sq_lines = []
@@ -3636,7 +3267,7 @@ def verify_sam_file(sam_file: str, ref_file: Optional[str] = None):
     has_sq_lines = len(sq_lines) > 0
     has_pg_lines = len(pg_lines) > 0
 
-    print(f"Found {len(sq_lines)} SQ lines, {len(pg_lines)} PG lines")
+    logger.debug(f"Found {len(sq_lines)} SQ lines, {len(pg_lines)} PG lines")
 
     # Determine if we need to fix the file
     needs_fixing = (
@@ -3644,7 +3275,7 @@ def verify_sam_file(sam_file: str, ref_file: Optional[str] = None):
     )
 
     if needs_fixing:
-        print("SAM file needs fixing")
+        logger.debug("SAM file needs fixing")
 
         # Create new file with proper header
         with open(sam_file + ".new", "w") as new_sam_file:
@@ -3652,7 +3283,7 @@ def verify_sam_file(sam_file: str, ref_file: Optional[str] = None):
             if is_mummer_file:
                 # Always rewrite HD line for mummer files
                 new_sam_file.write("@HD\tVN:1.6\tSO:unsorted\n")
-                print("Rewriting HD line for mummer file")
+                logger.debug("Rewriting HD line for mummer file")
             elif has_hd_header:
                 if hd_needs_fixing:
                     # Replace spaces with tabs in HD line
@@ -3671,16 +3302,16 @@ def verify_sam_file(sam_file: str, ref_file: Optional[str] = None):
                 for sq_line in sq_lines:
                     new_sam_file.write(sq_line + "\n")
             elif ref_file is not None:
-                print("Reference file provided, using it to add SQ lines")
+                logger.debug("Reference file provided, using it to add SQ lines")
                 try:
                     tmp = pysam.FastaFile(ref_file)
                     for ref_name, ref_length in zip(tmp.references, tmp.lengths):
                         new_sam_file.write(f"@SQ\tSN:{ref_name}\tLN:{ref_length}\n")
                 except Exception as e:
-                    print(f"Error reading reference file: {e}")
+                    logger.error(f"Error reading reference file: {e}")
                     return None
             else:
-                print(
+                logger.warning(
                     "No reference file provided, trying to find SQ lines from other SAM files"
                 )
                 present_sam_files = glob.glob(
@@ -3700,7 +3331,7 @@ def verify_sam_file(sam_file: str, ref_file: Optional[str] = None):
                 ]
 
                 if len(present_sam_files) == 0:
-                    print("No non-empty sam files found, returning None")
+                    logger.debug("No non-empty sam files found, returning None")
                     return None
 
                 # Find a SAM file with SQ lines
@@ -3719,7 +3350,7 @@ def verify_sam_file(sam_file: str, ref_file: Optional[str] = None):
                         break
 
                 if not sq_found:
-                    print("No SQ lines found in any SAM files")
+                    logger.warning("No SQ lines found in any SAM files")
                     return None
 
             # Add PG lines
@@ -3748,10 +3379,10 @@ def verify_sam_file(sam_file: str, ref_file: Optional[str] = None):
 
         # Replace original file with fixed version
         os.rename(sam_file + ".new", sam_file)
-        print("SAM file has been fixed")
+        logger.debug("SAM file has been fixed")
 
     else:
-        print("SAM file looks good, no changes needed")
+        logger.debug("SAM file looks good, no changes needed")
 
     return sam_file
 
@@ -3837,7 +3468,7 @@ def get_overlap_type_polarsbio(
         max_mismatches(int): Maximum allowed mismatches for validation
 
     Returns:
-        DataFrame with validation results: 
+        DataFrame with validation results:
     """
     # Filter tool results by max mismatches
     tool_results_filtered = tool_results.filter(pl.col("mismatches") <= max_mismatches)
@@ -3861,7 +3492,7 @@ def get_overlap_type_polarsbio(
 
     # Check if dataframes are empty
     if planned_df.height == 0:
-        print("Warning: planned_df is empty")
+        logger.warning("Warning: planned_df is empty")
         return pl.DataFrame(
             schema={
                 "spacer_id_1": pl.Utf8,
@@ -3878,7 +3509,7 @@ def get_overlap_type_polarsbio(
             }
         )
     if tool_df.height == 0:
-        print("Warning: tool_df is empty")
+        logger.warning("Warning: tool_df is empty")
         return pl.DataFrame(
             schema={
                 "spacer_id_1": pl.Utf8,
@@ -3905,9 +3536,9 @@ def get_overlap_type_polarsbio(
             cols2=["contig_id", "start", "end"],
         )
     except Exception as e:
-        print(f"Error in pb.overlap: {e}")
-        print(f"planned_df shape: {planned_df.shape}")
-        print(f"tool_df shape: {tool_df.shape}")
+        logger.error(f"Error in pb.overlap: {e}")
+        logger.error(f"planned_df shape: {planned_df.shape}")
+        logger.error(f"tool_df shape: {tool_df.shape}")
         raise
 
     # Calculate validation metrics with strand consideration
@@ -3964,7 +3595,7 @@ def load_multiple_fractions_duckdb(
     os.environ["VECLIB_MAXIMUM_THREADS"] = str(threads)
     os.environ["NUMEXPR_NUM_THREADS"] = str(threads)
 
-    print(
+    logger.info(
         f"\n[DuckDB] Loading {len(fraction_parquet_files)} fractions with {threads} threads"
     )
 
@@ -3980,9 +3611,11 @@ def load_multiple_fractions_duckdb(
             union_queries.append(
                 f"SELECT *, {frac} as fraction FROM read_parquet('{pf}')"
             )
-            print(f"  Fraction {frac}: {os.path.getsize(pf) / 1024 / 1024:.1f} MB")
+            logger.info(
+                f"  Fraction {frac}: {os.path.getsize(pf) / 1024 / 1024:.1f} MB"
+            )
         else:
-            print(f"  Fraction {frac}: NOT FOUND or empty, skipping")
+            logger.info(f"  Fraction {frac}: NOT FOUND or empty, skipping")
 
     if not union_queries:
         raise ValueError("No valid parquet files found")
@@ -3990,7 +3623,9 @@ def load_multiple_fractions_duckdb(
     # Create view for all fractions
     union_query = " UNION ALL ".join(union_queries)
     con.execute(f"CREATE VIEW fractions AS {union_query}")
-    print(f"[DuckDB] Created view 'fractions' with {len(union_queries)} fractions")
+    logger.info(
+        f"[DuckDB] Created view 'fractions' with {len(union_queries)} fractions"
+    )
 
     return con
 
@@ -4010,7 +3645,7 @@ def query_fractions_duckdb(con, query_template, output_parquet=None):
         If output_parquet is None, returns results as Polars DataFrame.
         If output_parquet is specified, saves to disk and returns None.
     """
-    print("\n[DuckDB] Executing query...")
+    logger.info("\n[DuckDB] Executing query...")
 
     if output_parquet:
         copy_query = f"""
@@ -4019,7 +3654,7 @@ def query_fractions_duckdb(con, query_template, output_parquet=None):
             ) TO '{output_parquet}' (FORMAT 'PARQUET', COMPRESSION 'SNAPPY', ROW_GROUP_SIZE 100000)
         """
         con.execute(copy_query)
-        print(f"[DuckDB] Results saved to {output_parquet}")
+        logger.info(f"[DuckDB] Results saved to {output_parquet}")
         return None
     else:
         result = con.execute(query_template).pl()
@@ -4038,7 +3673,7 @@ def create_spacer_counts_with_tools_duckdb(
     """
     DuckDB version of create_spacer_counts_with_tools.
     Calculates occurrence counts and tool detection fractions without loading full dataset.
-    
+
     Args:
         parquet_path: Path to parquet file with recalculated mismatches
         tools_list: List of tool names
@@ -4047,23 +3682,23 @@ def create_spacer_counts_with_tools_duckdb(
         output_parquet: Optional path to save results
         threads: Number of threads for DuckDB
         memory_limit: Memory limit for DuckDB
-        
+
     Returns:
         Polars DataFrame or None (if output_parquet specified)
     """
     con = duckdb.connect(database=":memory:")
     con.execute(f"SET threads TO {threads};")
     con.execute(f"SET memory_limit = '{memory_limit}';")
-    
+
     # Build mismatch filter
     if exact_or_max == "max":
         mismatch_filter = f"alignment_test <= {mismatches}"
     else:
         mismatch_filter = f"alignment_test = {mismatches}"
-    
+
     # Create tools list SQL
     tools_sql = ", ".join([f"'{tool}'" for tool in tools_list])
-    
+
     query = f"""
         WITH spacer_counts AS (
             -- Get total occurrences per spacer
@@ -4104,9 +3739,14 @@ def create_spacer_counts_with_tools_duckdb(
             ON ac.spacer_id = tm.spacer_id 
             AND ac.tool = tm.tool
     """
-    
+
     # Pivot to get tools as columns
-    tool_columns = ', '.join([f"MAX(CASE WHEN tool = '{tool}' THEN fraction ELSE 0 END) as \"{tool}\"" for tool in tools_list])
+    tool_columns = ", ".join(
+        [
+            f"MAX(CASE WHEN tool = '{tool}' THEN fraction ELSE 0 END) as \"{tool}\""
+            for tool in tools_list
+        ]
+    )
     pivot_query = f"""
         WITH base_data AS ({query})
         SELECT 
@@ -4116,7 +3756,7 @@ def create_spacer_counts_with_tools_duckdb(
         FROM base_data
         GROUP BY spacer_id, n_occurrences
     """
-    
+
     if output_parquet:
         con.execute(f"""
             COPY ({pivot_query}) 
@@ -4137,13 +3777,13 @@ def get_summary_stats_duckdb(
 ):
     """
     Get summary statistics from parquet file using DuckDB.
-    
+
     Returns summary by tool without loading full dataset into memory.
     """
     con = duckdb.connect(database=":memory:")
     con.execute(f"SET threads TO {threads};")
     con.execute(f"SET memory_limit = '{memory_limit}';")
-    
+
     query = """
         SELECT 
             tool,
@@ -4155,7 +3795,7 @@ def get_summary_stats_duckdb(
         GROUP BY tool
         ORDER BY tool
     """
-    
+
     result = con.execute(query, [parquet_path]).pl()
     con.close()
     return result
@@ -4172,24 +3812,24 @@ def create_tool_comparison_matrix_duckdb(
     """
     Create tool comparison matrix using DuckDB.
     Cell(i,j) = number of unique pairs in tool i but not in tool j.
-    
+
     Returns Polars DataFrame with matrix.
     """
     import numpy as np
-    
+
     con = duckdb.connect(database=":memory:")
     con.execute(f"SET threads TO {threads};")
     con.execute(f"SET memory_limit = '{memory_limit}';")
-    
+
     # Create empty matrix
     matrix_data = np.zeros((len(tools_list), len(tools_list)), dtype=int)
-    
+
     # Get unique pairs for each tool
     for i, tool_x in enumerate(tools_list):
         for j, tool_y in enumerate(tools_list):
             if tool_x == tool_y:
                 continue
-            
+
             # Count pairs in x but not in y using DuckDB
             query = f"""
                 WITH tool_x_pairs AS (
@@ -4213,19 +3853,21 @@ def create_tool_comparison_matrix_duckdb(
                         AND tool_x_pairs."end" = tool_y_pairs."end"
                 )
             """
-            
+
             count = con.execute(query).fetchone()[0]
             matrix_data[i, j] = count
-    
+
     con.close()
-    
+
     # Convert to DataFrame
     matrix = pl.DataFrame(matrix_data, schema=tools_list)
-    matrix = matrix.with_columns(pl.Series(name="tool1", values=tools_list, dtype=pl.Utf8))
-    
+    matrix = matrix.with_columns(
+        pl.Series(name="tool1", values=tools_list, dtype=pl.Utf8)
+    )
+
     if output_csv:
-        matrix.write_csv(output_csv, separator='\t')
-    
+        matrix.write_csv(output_csv, separator="\t")
+
     return matrix
 
 
@@ -4249,15 +3891,15 @@ def load_fraction_results_lazy(fraction_parquet_files, add_fraction_col=True):
             if add_fraction_col:
                 lf = lf.with_columns(pl.lit(frac).alias("fraction"))
             lazy_frames.append(lf)
-            print(f"  Fraction {frac}: loaded (lazy)")
+            logger.info(f"  Fraction {frac}: loaded (lazy)")
         else:
-            print(f"  Fraction {frac}: NOT FOUND or empty, skipping")
+            logger.info(f"  Fraction {frac}: NOT FOUND or empty, skipping")
 
     if not lazy_frames:
         raise ValueError("No valid parquet files found")
 
     combined = pl.concat(lazy_frames)
-    print(f"[Polars] Concatenated {len(lazy_frames)} fractions as lazy frame")
+    logger.info(f"[Polars] Concatenated {len(lazy_frames)} fractions as lazy frame")
 
     return combined
 
@@ -4293,7 +3935,9 @@ def analyze_sassy_edit_distance_false_positives(
     os.environ["VECLIB_MAXIMUM_THREADS"] = str(threads)
     os.environ["NUMEXPR_NUM_THREADS"] = str(threads)
 
-    print("\n[EditDistance] Analyzing false positives in sassy output (edit distance)")
+    logger.info(
+        "\n[EditDistance] Analyzing false positives in sassy output (edit distance)"
+    )
 
     # Parse sassy output with edit distance filter
     sassy_results = parse_sassy(
@@ -4304,12 +3948,12 @@ def analyze_sassy_edit_distance_false_positives(
         ref_file=ref_file,
     )
 
-    print(
+    logger.info(
         f"Loaded {sassy_results.height:,} sassy alignments with edit distance ≤ {max_edit_distance}"
     )
 
     # Load spacer and contig sequences for recalculation with hamming distance
-    print("Recalculating alignments with hamming distance for comparison...")
+    logger.info("Recalculating alignments with hamming distance for comparison...")
 
     # Convert to eager if needed
     if hasattr(sassy_results, "collect"):
@@ -4320,7 +3964,7 @@ def analyze_sassy_edit_distance_false_positives(
         ["spacer_id", "contig_id", "strand", "start", "end"]
     ).unique()
 
-    print(f"Verifying {unique_regions.height:,} unique regions...")
+    logger.info(f"Verifying {unique_regions.height:,} unique regions...")
 
     # Load sequences
     unique_regions = populate_pldf_withseqs_needletail(

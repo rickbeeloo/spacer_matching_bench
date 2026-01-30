@@ -185,7 +185,7 @@ def write_subsampled_sequences(
     seq_file: str,
     selected_seqs: List[str],
     output_file: str,
-    extract_method: str = "iter", # "iter" or "pyfastx" or "paraseq_filt"
+    extract_method: str = "iter",  # "iter" or "pyfastx" or "paraseq_filt"
     print_debug: bool = False,
 ) -> int:
     """Write subsampled contigs to output file.
@@ -231,21 +231,37 @@ def write_subsampled_sequences(
             seq_file, selected_seqs, return_df=False, output_file=output_file
         )
     elif extract_method == "paraseq_filt":
-        print("Using paraseq_filt for sequence extraction... should probably upload the code for paraset_filt to somewhere")
+        print(
+            "Using paraseq_filt for sequence extraction... should probably upload the code for paraset_filt to somewhere"
+        )
         import subprocess as sp
-        with open(os.path.join(output_file + '.lst'), 'w') as f:
+
+        with open(os.path.join(output_file + ".lst"), "w") as f:
             f.write("")  # create/clear the file
             f.writelines("\n".join(selected_seqs))
         sp.run(
-            " ".join(['paraseq_filt', '--input', seq_file, '--headers', os.path.join(output_file + '.lst'), '--output', output_file, '--threads', '10']),
+            " ".join(
+                [
+                    "paraseq_filt",
+                    "--input",
+                    seq_file,
+                    "--headers",
+                    os.path.join(output_file + ".lst"),
+                    "--output",
+                    output_file,
+                    "--threads",
+                    "10",
+                ]
+            ),
             shell=True,
         )
         try:
-            os.remove(os.path.join(output_file + '.lst'))   
+            os.remove(os.path.join(output_file + ".lst"))
         except OSError:
             pass
     else:
         raise ValueError(f"Invalid extract method: {extract_method}")
+
 
 def subsample_dataset(
     contigs_file: str,
@@ -362,7 +378,11 @@ def subsample_dataset(
     #     f.write("")  # create/clear the file
     #     f.writelines("\n".join(selected_contigs)) # this is fastest with paraseq_filt...
     written_contigs = write_subsampled_sequences(
-        contigs_file, selected_contigs, contigs_output, extract_method,print_debug=print_debug
+        contigs_file,
+        selected_contigs,
+        contigs_output,
+        extract_method,
+        print_debug=print_debug,
     )
     logger.info(f"Written {written_contigs} subsampled contigs")
 

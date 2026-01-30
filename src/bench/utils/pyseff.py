@@ -1,10 +1,12 @@
 import os
+
 # import re
 import shlex
 import subprocess
 import tempfile
 
 import polars as pl
+
 
 def parse_time_to_seconds(time_str):
     """Convert Slurm time format to seconds"""
@@ -60,7 +62,14 @@ def format_seconds(seconds):
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
-def pyseff(sacct_df=None,start_date = "2025-10-01", remove_cancelled=True,remove_failed=True, calculate_memory_efficiency=True,calculate_cpu_efficiency=True):
+def pyseff(
+    sacct_df=None,
+    start_date="2025-10-01",
+    remove_cancelled=True,
+    remove_failed=True,
+    calculate_memory_efficiency=True,
+    calculate_cpu_efficiency=True,
+):
     """
     Main function to analyze job efficiency from sacct output, similar to Slurm's seff
 
@@ -118,40 +127,41 @@ def pyseff(sacct_df=None,start_date = "2025-10-01", remove_cancelled=True,remove
 
     if sacct_df.is_empty():
         return sacct_df
-    
+
     # convert CPU time to seconds
     sacct_df = sacct_df.with_columns(
-            [
-                pl.col("TotalCPU")
-                .map_elements(parse_time_to_seconds, return_dtype=pl.UInt32)
-                .alias("TotalCPU_Seconds"),
-                pl.col("Elapsed")
-                .map_elements(parse_time_to_seconds, return_dtype=pl.UInt32)
-                .alias("Elapsed_Seconds"),
-            ]
-        )
-    
+        [
+            pl.col("TotalCPU")
+            .map_elements(parse_time_to_seconds, return_dtype=pl.UInt32)
+            .alias("TotalCPU_Seconds"),
+            pl.col("Elapsed")
+            .map_elements(parse_time_to_seconds, return_dtype=pl.UInt32)
+            .alias("Elapsed_Seconds"),
+        ]
+    )
+
     # Calculate CPU efficiency
     if calculate_cpu_efficiency:
         sacct_df = sacct_df.with_columns(
             [
                 (
                     pl.col("TotalCPU_Seconds")
-                / (pl.col("Elapsed_Seconds") * pl.col("AllocCPUS"))
-                * 100
-            )
-            .round(2)
-            .alias("CPU_Efficiency")
+                    / (pl.col("Elapsed_Seconds") * pl.col("AllocCPUS"))
+                    * 100
+                )
+                .round(2)
+                .alias("CPU_Efficiency")
             ]
         )
 
     # Always create MaxRSS_MB and ReqMem_MB columns
     sacct_df = sacct_df.with_columns(
         [
-            pl.col("MaxRSS").map_elements(parse_mem, return_dtype=pl.Float64,skip_nulls=True)
+            pl.col("MaxRSS")
+            .map_elements(parse_mem, return_dtype=pl.Float64, skip_nulls=True)
             .alias("MaxRSS_MB"),
             pl.col("ReqMem")
-            .map_elements(parse_mem, return_dtype=pl.Float64,skip_nulls=True)
+            .map_elements(parse_mem, return_dtype=pl.Float64, skip_nulls=True)
             .alias("ReqMem_MB"),
         ]
     )
@@ -159,9 +169,7 @@ def pyseff(sacct_df=None,start_date = "2025-10-01", remove_cancelled=True,remove
     # Calculate memory efficiency if requested
     if calculate_memory_efficiency:
         sacct_df = sacct_df.with_columns(
-            (
-                (pl.col("MaxRSS_MB") / pl.col("ReqMem_MB")) * 100
-            )
+            ((pl.col("MaxRSS_MB") / pl.col("ReqMem_MB")) * 100)
             .round(2)
             .alias("Memory_Efficiency")
         )
@@ -180,15 +188,15 @@ def pyseff(sacct_df=None,start_date = "2025-10-01", remove_cancelled=True,remove
         pl.col("MaxRSS_MB").max().alias("MaxRSS_MB"),
         pl.col("ReqMem_MB").first().alias("ReqMem_MB"),
     ]
-    
+
     # Add CPU efficiency to aggregation if it was calculated
     if calculate_cpu_efficiency:
         agg_cols.append(pl.col("CPU_Efficiency").mean().alias("CPU_Efficiency"))
-    
+
     # Add Memory efficiency to aggregation if it was calculated
     if calculate_memory_efficiency:
         agg_cols.append(pl.col("Memory_Efficiency").mean().alias("Memory_Efficiency"))
-    
+
     sacct_df = sacct_df.group_by("BaseJobID").agg(agg_cols)
 
     # Format time columns back to human-readable format
@@ -201,8 +209,8 @@ def pyseff(sacct_df=None,start_date = "2025-10-01", remove_cancelled=True,remove
             .map_elements(format_seconds, return_dtype=pl.Utf8)
             .alias("TotalCPU"),
         ]
-    ) #.select(
-        # [
+    )  # .select(
+    # [
     #         "BaseJobID",
     #         "JobName",
     #         "State",
@@ -220,8 +228,9 @@ def pyseff(sacct_df=None,start_date = "2025-10-01", remove_cancelled=True,remove
     return result_df
 
 
-
-def create_slurm_job_scripts(results_dir, slurm_opts=None, job_subdir="job_scripts",threads=16):
+def create_slurm_job_scripts(
+    results_dir, slurm_opts=None, job_subdir="job_scripts", threads=16
+):
     """Create SLURM job scripts for each bash script under results_dir/bash_scripts.
 
     Args:
@@ -237,17 +246,17 @@ def create_slurm_job_scripts(results_dir, slurm_opts=None, job_subdir="job_scrip
     log_dir = os.path.join(results_dir, "slurm_logs")
     os.makedirs(out_job_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
-    equal_opts = ['mail-user', 'mail-type']
+    equal_opts = ["mail-user", "mail-type"]
     # space_opts = [ 'A', 'q', 't']
 
     default_opts = {
-        'mail-user': 'uneri@lbl.gov',
-        'mail-type': 'FAIL,END,BEGIN',
-        'A': 'grp-org-sc-metagen',
-        'q': 'jgi_normal',
-        'c': threads,
-        'mem': '168G',
-        't': '72:00:00',
+        "mail-user": "uneri@lbl.gov",
+        "mail-type": "FAIL,END,BEGIN",
+        "A": "grp-org-sc-metagen",
+        "q": "jgi_normal",
+        "c": threads,
+        "mem": "168G",
+        "t": "72:00:00",
     }
     if slurm_opts:
         default_opts.update(slurm_opts)
@@ -257,7 +266,7 @@ def create_slurm_job_scripts(results_dir, slurm_opts=None, job_subdir="job_scrip
         return created
 
     for entry in sorted(os.listdir(bash_dir)):
-        if not entry.endswith('.sh'):
+        if not entry.endswith(".sh"):
             continue
         script_path = os.path.join(bash_dir, entry)
         tool_name = os.path.splitext(entry)[0]
@@ -265,30 +274,29 @@ def create_slurm_job_scripts(results_dir, slurm_opts=None, job_subdir="job_scrip
         job_file = os.path.join(out_job_dir, f"{tool_name}.sh")
 
         # Build sbatch header
-        with open(job_file, 'w') as jf:
-            jf.write('#!/bin/bash\n')
+        with open(job_file, "w") as jf:
+            jf.write("#!/bin/bash\n")
             for k, v in default_opts.items():
                 # Use single-dash for single-letter opts, double-dash otherwise
                 if k in equal_opts:
-                    prefix = '-' if len(str(k)) == 1 else '--'
+                    prefix = "-" if len(str(k)) == 1 else "--"
                     jf.write(f"#SBATCH {prefix}{k}={v}\n")
                 else:
-                    prefix = '-' if len(str(k)) == 1 else '--'
+                    prefix = "-" if len(str(k)) == 1 else "--"
                     jf.write(f"#SBATCH {prefix}{k} {v}\n")
 
-            jf.write(f"#SBATCH -J \"{job_name}\"\n")
+            jf.write(f'#SBATCH -J "{job_name}"\n')
             jf.write(f"#SBATCH -o {os.path.join(log_dir, job_name)}-%A.out\n")
             jf.write(f"#SBATCH -e {os.path.join(log_dir, job_name)}-%A.err\n\n")
 
             # Run command: call the generated script with number of cpus
             # Use shlex.quote to safely embed paths
-            jf.write(f"bash {shlex.quote(script_path)} \"$SLURM_CPUS_PER_TASK\"\n")
+            jf.write(f'bash {shlex.quote(script_path)} "$SLURM_CPUS_PER_TASK"\n')
 
         os.chmod(job_file, 0o755)
         created.append(job_file)
 
     return created
-
 
 
 def print_dataset_slurm_summary(results_dict, title):
@@ -299,8 +307,10 @@ def print_dataset_slurm_summary(results_dict, title):
         print(f"  max_distance: {result.get('max_distance', 'N/A')}")
         print(f"  Bash scripts: {len(result.get('tools', []))}")
         print(f"  SLURM jobs: {len(result.get('jobs', []))}")
-        if result.get('tools'):
-            print(f"  Tools: {', '.join(result['tools'][:5])}{'...' if len(result['tools']) > 5 else ''}")
+        if result.get("tools"):
+            print(
+                f"  Tools: {', '.join(result['tools'][:5])}{'...' if len(result['tools']) > 5 else ''}"
+            )
 
 
 def submit_slurm_jobs(results_dir, job_subdir="job_scripts", dry_run=False):
@@ -315,20 +325,21 @@ def submit_slurm_jobs(results_dir, job_subdir="job_scripts", dry_run=False):
 
     for job in sorted(os.listdir(job_dir)):
         job_path = os.path.join(job_dir, job)
-        if not job.endswith('.sh'):
+        if not job.endswith(".sh"):
             continue
         if dry_run:
             submitted.append((job_path, None))
             continue
         # Use subprocess to call sbatch and capture output
         try:
-            proc = subprocess.run(['sbatch', job_path], capture_output=True, text=True, check=True)
+            proc = subprocess.run(
+                ["sbatch", job_path], capture_output=True, text=True, check=True
+            )
             submitted.append((job_path, proc.stdout.strip()))
         except subprocess.CalledProcessError as e:
             submitted.append((job_path, e.stderr.strip() if e.stderr else str(e)))
 
     return submitted
-
 
 
 def generate_scripts_for_dataset(
@@ -340,11 +351,11 @@ def generate_scripts_for_dataset(
     skip_tools=None,
     slurm_threads=16,
     slurm_opts=None,
-    hyperfine=False
+    hyperfine=False,
 ):
     """
     Generate bash and SLURM scripts for a dataset with specified max_distance.
-    
+
     Args:
         dataset_dir: Path to the dataset directory
         contigs_file: Path to contigs FASTA file
@@ -355,90 +366,98 @@ def generate_scripts_for_dataset(
         slurm_threads: Number of threads for SLURM jobs (default: 16)
         slurm_opts: Dict of SLURM options to override (default: None)
         hyperfine: Whether to wrap commands in hyperfine (default: False)
-    
+
     Returns:
         dict with keys 'tools' (list of tool names) and 'jobs' (list of job script paths)
     """
     import logging
     from pathlib import Path
+
     logger = logging.getLogger(__name__)
     from .tool_commands import load_tool_configs
     from .functions import create_bash_script
+
     dataset_dir = Path(dataset_dir)
-    
+
     # Create necessary directories
-    (dataset_dir / 'bash_scripts').mkdir(exist_ok=True, parents=True)
-    (dataset_dir / 'raw_outputs').mkdir(exist_ok=True, parents=True)
-    (dataset_dir / 'slurm_logs').mkdir(exist_ok=True, parents=True)
-    (dataset_dir / 'job_scripts').mkdir(exist_ok=True, parents=True)
-    
-    logger.info(f"Generating scripts for {dataset_dir.name} (max_distance={max_distance})")
-    
+    (dataset_dir / "bash_scripts").mkdir(exist_ok=True, parents=True)
+    (dataset_dir / "raw_outputs").mkdir(exist_ok=True, parents=True)
+    (dataset_dir / "slurm_logs").mkdir(exist_ok=True, parents=True)
+    (dataset_dir / "job_scripts").mkdir(exist_ok=True, parents=True)
+
+    logger.info(
+        f"Generating scripts for {dataset_dir.name} (max_distance={max_distance})"
+    )
+
     # Load tool configs with max_distance (now called max_mismatches in the function)
     tools = load_tool_configs(
         results_dir=str(dataset_dir),
         threads=threads,
         contigs_file=contigs_file,
         spacers_file=spacers_file,
-        max_mismatches=max_distance  # Parameter is called max_mismatches in the function
+        max_mismatches=max_distance,  # Parameter is called max_mismatches in the function
     )
-    
+
     # Filter out skipped tools
     if skip_tools:
         tools = {k: v for k, v in tools.items() if k not in skip_tools}
         logger.info(f"Skipping tools: {skip_tools}")
-    
+
     # Generate bash scripts
     created_tools = []
     for tool_name, tool in tools.items():
         try:
-            create_bash_script(tool, str(dataset_dir), max_runs=1, warmups=0, hyperfine=hyperfine)
+            create_bash_script(
+                tool, str(dataset_dir), max_runs=1, warmups=0, hyperfine=hyperfine
+            )
             created_tools.append(tool_name)
             logger.debug(f"  ✓ Created bash script for {tool_name}")
         except Exception as e:
             logger.error(f"  ✗ Failed to create script for {tool_name}: {e}")
-    
+
     logger.info(f"Created {len(created_tools)} bash scripts")
-    
+
     # Generate SLURM job scripts
     created_jobs = create_slurm_job_scripts(
-        str(dataset_dir),
-        slurm_opts=slurm_opts,
-        threads=slurm_threads
+        str(dataset_dir), slurm_opts=slurm_opts, threads=slurm_threads
     )
     logger.info(f"Created {len(created_jobs)} SLURM job scripts")
-    
-    return {
-        'tools': created_tools,
-        'jobs': created_jobs,
-        'max_distance': max_distance
-    }
+
+    return {"tools": created_tools, "jobs": created_jobs, "max_distance": max_distance}
+
 
 def check_job_status(user=None):
     """
     Check current SLURM job status.
-    
+
     Args:
         user: Username to check (default: current user via $USER)
-    
+
     Returns:
         DataFrame with job status information
     """
     if user is None:
-            user = os.environ.get('USER', 'uneri')
-        
-    cmd = ['squeue', '-u', user, '-o', "%.10i,%.20j,%.10T,%.10D,%.10C,%.10c,%.10M,%.20V,%.10L", '--noheader']
+        user = os.environ.get("USER", "uneri")
+
+    cmd = [
+        "squeue",
+        "-u",
+        user,
+        "-o",
+        "%.10i,%.20j,%.10T,%.10D,%.10C,%.10c,%.10M,%.20V,%.10L",
+        "--noheader",
+    ]
 
     # print(" ".join(cmd))
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        lines = result.stdout.strip().split('\n')
-        
+        lines = result.stdout.strip().split("\n")
+
         if len(lines) <= 1:
             print("No jobs currently running or pending")
             return pl.DataFrame()
-        
+
         # Parse the output
         # print (header)
         data = []
@@ -446,15 +465,29 @@ def check_job_status(user=None):
             parts = line.split(",")
             parts = [xy.strip() for xy in parts]
             # if len(parts) <14:
-                # parts +=[x for x in 13-len(parts)
+            # parts +=[x for x in 13-len(parts)
             data.append(parts)
         print(data)
         if not data:
             return pl.DataFrame()
-        
-        df = pl.DataFrame(data, schema=["JobId","JobName", "State", "AllocNodes", "MaxCPUs", "MinCPUs", "TimeUsed", "SubmitTime", "TimeLimit"],orient="row")
+
+        df = pl.DataFrame(
+            data,
+            schema=[
+                "JobId",
+                "JobName",
+                "State",
+                "AllocNodes",
+                "MaxCPUs",
+                "MinCPUs",
+                "TimeUsed",
+                "SubmitTime",
+                "TimeLimit",
+            ],
+            orient="row",
+        )
         return df
-        
+
     except subprocess.CalledProcessError as e:
         print(f"Error running squeue: {e}")
         return pl.DataFrame()
@@ -465,12 +498,10 @@ def get_jobs_by_pattern(pattern, user=None):
     df = check_job_status(user)
     if df.height == 0:
         return df
-    return df.filter(pl.col('NAME').str.contains_any(pattern))
+    return df.filter(pl.col("NAME").str.contains_any(pattern))
 
 
 if __name__ == "__main__":
     result_df = pyseff()
     print(result_df)
     result_df.write_csv("slurm_efficiency.tsv", separator="\t")
-
-

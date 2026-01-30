@@ -27,58 +27,63 @@ def load_tool_configs(
 ) -> Dict[str, Any]:
     """
     Load and configure tool configurations from JSON files.
-    
+
     This is the new, clean version that takes explicit parameters instead of
     relying on an args object with arbitrary attributes.
-    
+
     Args:
         results_dir: Base directory for results (used to determine default file paths)
         threads: Number of threads to use for tool execution
         contigs_file: Path to contigs file (optional, will use default if not provided)
         spacers_file: Path to spacers file (optional, will use default if not provided)
         max_mismatches: Maximum number of mismatches/distance for tools that support it (default: 5)
-    
+
     Returns:
         Dictionary mapping tool names to their configuration dictionaries
     """
     # Determine file paths with defaults
     if contigs_file is None:
         contigs_file = f"{results_dir}/simulated_data/simulated_contigs.fa"
-    
+
     if spacers_file is None:
         spacers_file = f"{results_dir}/simulated_data/simulated_spacers.fa"
-    
+
     output_dir = f"{results_dir}/raw_outputs/"
-    
+
     # Get tool config directory
     config_dir = get_tool_config_dir()
     logger.debug(f"Using config_dir: {config_dir}")
-    
+
     # Find all tool config files
     tool_config_files = list(config_dir.glob("*.json"))
     logger.info(f"Found {len(tool_config_files)} tool config files")
-    
+
     # Load and process each tool configuration
     tools = {}
-    required_keys = ["name", "output_file", "parse_function_name", "script_name", "command"]
-    
+    required_keys = [
+        "name",
+        "output_file",
+        "parse_function_name",
+        "script_name",
+        "command",
+    ]
+
     for config_file in tool_config_files:
         logger.debug(f"Loading config from {config_file.name}")
         try:
             with open(config_file, "r") as f:
                 tool_config = json.load(f)
-            
+
             # Validate required keys
             if not all(key in tool_config for key in required_keys):
                 logger.warning(f"Skipping {config_file.name}: missing required keys")
                 continue
-            
+
             # Substitute placeholders in output file path
             tool_config["output_file"] = tool_config["output_file"].format(
-                output_dir=output_dir,
-                results_dir=results_dir
+                output_dir=output_dir, results_dir=results_dir
             )
-            
+
             # Substitute placeholders in commands
             if isinstance(tool_config["command"], list):
                 tool_config["command"] = [
@@ -88,27 +93,31 @@ def load_tool_configs(
                         spacers_file=spacers_file,
                         output_dir=output_dir,
                         results_dir=results_dir,
-                        max_mismatches=max_mismatches if tool_config["name"]!="bowtie1" else min(3,max_mismatches), # hardcoding a limit of 3 for bowtie1
+                        max_mismatches=max_mismatches
+                        if tool_config["name"] != "bowtie1"
+                        else min(
+                            3, max_mismatches
+                        ),  # hardcoding a limit of 3 for bowtie1
                     )
                     for cmd in tool_config["command"]
                 ]
-            
+
             # Set default parse function if not specified
             if not tool_config.get("parse_function_name"):
                 tool_config["parse_function_name"] = "parse_sam"
-            
+
             # Add actual function reference
             tool_config["parse_function"] = get_parse_function(
                 tool_config["parse_function_name"]
             )
-            
+
             # Add to tools dictionary
             tools[tool_config["name"]] = tool_config
-            
+
         except Exception as e:
             logger.error(f"Error loading {config_file.name}: {e}", exc_info=True)
             continue
-    
+
     logger.info(f"Successfully loaded {len(tools)} tool configurations")
     # Ensure we return deep copies of all tool configs
     return {name: copy.deepcopy(config) for name, config in tools.items()}
@@ -117,24 +126,24 @@ def load_tool_configs(
 def populate_tools(args):
     """
     Legacy wrapper for backwards compatibility with argparse-based code.
-    
+
     This function maintains compatibility with existing code that passes an
     args object. New code should use load_tool_configs() directly.
-    
+
     DEPRECATED: Use load_tool_configs() instead for new code.
     """
     # Extract values from args object with defaults
-    threads = getattr(args, 'threads', 1)
+    threads = getattr(args, "threads", 1)
     results_dir = args.results_dir
-    contigs_file = getattr(args, 'contigs_file', None)
-    spacers_file = getattr(args, 'spacers_file', None)
-    
+    contigs_file = getattr(args, "contigs_file", None)
+    spacers_file = getattr(args, "spacers_file", None)
+
     # Call the new implementation
     return load_tool_configs(
         results_dir=results_dir,
         threads=threads,
         contigs_file=contigs_file,
-        spacers_file=spacers_file
+        spacers_file=spacers_file,
     )
 
 
