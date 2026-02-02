@@ -19,10 +19,6 @@
         "color": "#305566",
         "marker": "D"
     },
-    "lexicmap": {
-        "color": "#F021D8",
-        "marker": "P"
-    },
     "minimap2": {
         "color": "#172CBB",
         "marker": "*"
