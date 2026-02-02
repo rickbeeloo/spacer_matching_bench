@@ -1095,6 +1095,7 @@ def parse_sassy(
     max_mismatches: int = 5,
     spacer_lendf: Optional[pl.DataFrame] = None,
     max_gaps: int = 5,
+    max_ns: int = 5, # sassy v0.1.4 didn't have the `max_n_frac` set by default, hence target regions with N's were reported. 
     **kwargs,
 ) -> pl.DataFrame:
     """Parse Sassy TSV output format and return standardized coordinates.
@@ -1106,6 +1107,7 @@ def parse_sassy(
         max_mismatches (int): Maximum mismatches allowed.
         spacer_lendf (pl.DataFrame): Length info for spacers.
         max_gaps (int): Maximum gaps allowed in CIGAR.
+        max_ns (int): Maximum number of Ns allowed in the matched region before discarding the hit.
 
     Returns:
         pl.DataFrame: (optionally filtered) results.
@@ -1126,7 +1128,16 @@ def parse_sassy(
                 "slice_str": pl.Utf8,
                 "cigar": pl.Utf8,
             },
-        ).drop("slice_str")
+        )
+        # Filter by max_ns in match_region (slice_str)
+        if max_ns > 1:
+            results = results.filter(
+                pl.col("slice_str").str.count_matches("N") <= max_ns
+            ).drop("slice_str")
+        elif max_ns <= 1:
+            results = results.filter(
+                ~pl.col("slice_str").str.contains_any("N") 
+            ).drop("slice_str")
 
         if max_gaps == 1:
             results = results.filter(

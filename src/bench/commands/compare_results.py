@@ -26,7 +26,13 @@ from bench.utils.tool_commands import load_tool_configs
 
 # Logger is configured by cli.py with RichHandler
 logger = logging.getLogger(__name__)
-console = Console()
+console = Console(soft_wrap=False)
+
+# so printing to stdout doesn't break, line wrap, or truncate.
+pl.Config.set_tbl_rows(123123)
+pl.Config.set_tbl_cols(123123)  # should be large enough
+pl.Config.set_fmt_str_lengths(2100)
+pl.Config.set_tbl_width_chars(2100)
 
 
 def merge_overlapping_intervals(
@@ -1078,12 +1084,28 @@ def compare_all_tools(
         coordinate_tolerance=5,  # Allow 5bp tolerance for coordinate matching
     )
 
-    # Step 1.5: Display example alignments for each classification
+    # Step 1.5: Create synthetic "all_tools_combined" entry
+    # This combines all unique alignments from all tools into a single tool-independent view
+    logger.debug("Creating tool-independent combined results...")
+    
+    # Get unique alignments by coordinates (drop the tool column, deduplicate, then add new tool name)
+    all_tools_combined = (
+        tools_results
+        .select([col for col in tools_results.columns if col != "tool"])
+        .unique(subset=["spacer_id", "contig_id", "start", "end", "strand"])
+        .with_columns(pl.lit("all_tools_combined").alias("tool"))
+    )
+    
+    # Add the combined results to tools_results for unified processing
+    tools_results_with_combined = vstack_easy(tools_results, all_tools_combined)
+    logger.debug(f"Added 'all_tools_combined' with {all_tools_combined.height} unique alignments")
+
+    # Step 2: Display example alignments for each classification
     if contigs_file and spacers_file:
         try:
             display_example_alignments(
                 alignment_classifications=alignment_classifications,
-                tools_results=tools_results,
+                tools_results=tools_results_with_combined,
                 contigs_file=contigs_file,
                 spacers_file=spacers_file,
                 max_distance=max_mismatches,
@@ -1100,7 +1122,7 @@ def compare_all_tools(
             # First, show how many FNs each tool has
             logger.debug("\n[bold cyan]FALSE NEGATIVE COUNTS BY TOOL:[/bold cyan]")
             for tool_name in sorted(tools.keys()):
-                tool_alignments = tools_results.filter(pl.col("tool") == tool_name)
+                tool_alignments = tools_results_with_combined.filter(pl.col("tool") == tool_name)
                 # Use ground truth coordinates (start_gt, end_gt) from matches
                 tool_found_gt = (
                     tool_alignments.join(
@@ -1136,7 +1158,7 @@ def compare_all_tools(
             display_false_negatives(
                 ground_truth=ground_truth,
                 alignment_classifications=alignment_classifications,
-                tools_results=tools_results,
+                tools_results=tools_results_with_combined,
                 contigs_file=contigs_file,
                 spacers_file=spacers_file,
                 num_examples=1,
@@ -1150,7 +1172,7 @@ def compare_all_tools(
             display_false_negatives(
                 ground_truth=ground_truth,
                 alignment_classifications=alignment_classifications,
-                tools_results=tools_results,
+                tools_results=tools_results_with_combined,
                 contigs_file=contigs_file,
                 spacers_file=spacers_file,
                 num_examples=1,
@@ -1165,7 +1187,7 @@ def compare_all_tools(
             display_false_negatives(
                 ground_truth=ground_truth,
                 alignment_classifications=alignment_classifications,
-                tools_results=tools_results,
+                tools_results=tools_results_with_combined,
                 contigs_file=contigs_file,
                 spacers_file=spacers_file,
                 num_examples=1,
@@ -1184,7 +1206,7 @@ def compare_all_tools(
     )
     try:
         results_df = calculate_all_tool_performance(
-            tools_results=tools_results,
+            tools_results=tools_results_with_combined,
             alignment_classifications=alignment_classifications,
             ground_truth=ground_truth,
         )
@@ -1485,7 +1507,7 @@ def run_compare_results(
     pl.Config.set_tbl_cols(-1)
     pl.Config.set_tbl_rows(15)
     logger.info("")  # Add newline
-    console.print(summary_table)  # Use console for polars table formatting
+    print(summary_table)  # Use regular print to avoid Rich padding/whitespace
 
     logger.info("Results processing completed successfully")
 

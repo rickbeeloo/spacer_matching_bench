@@ -38,7 +38,7 @@ def setup_logging(verbose: bool = False, logfile: str = None):
     # Show file paths and line numbers only in verbose mode
     # Disable soft wrapping to prevent line breaks
     from rich.console import Console
-    console = Console(soft_wrap=False)
+    console = Console(soft_wrap=False, width=380)
     
     rich_handler = RichHandler(
         console=console,
@@ -824,6 +824,20 @@ def full_run(
 @click.option(
     "--skip-hyperfine", "-s", is_flag=True, help="Skip hyperfine benchmarking"
 )
+@click.option(
+    "--contigs",
+    type=click.Path(exists=True),
+    required=False,
+    default = None,
+    help="Path to custom contigs file",
+)
+@click.option(
+    "--spacers",
+    type=click.Path(exists=True),
+    required=False,
+    default = None,
+    help="Path to custom spacers file",
+)
 def compare_results(
     input_dir,
     max_mismatches,
@@ -838,6 +852,8 @@ def compare_results(
     gap_extend_penalty,
     verbose,
     skip_hyperfine,
+    contigs,
+    spacers
 ):
     """
     Compare and validate alignment tool results.
@@ -890,8 +906,8 @@ def compare_results(
             verify_false_positives=verify_false_positives,
             skip_tools=skip_tools,
             only_tools=only_tools,
-            contigs=None,
-            spacers=None,
+            contigs=contigs,
+            spacers=spacers,
             distance_metric=distance,
             gap_open_penalty=gap_open_penalty,
             gap_extend_penalty=gap_extend_penalty,
