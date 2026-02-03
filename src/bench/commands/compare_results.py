@@ -1034,8 +1034,6 @@ def compare_all_tools(
     tools_results: pl.DataFrame,
     contigs_file: Optional[str] = None,
     spacers_file: Optional[str] = None,
-    verify_false_positives: bool = True,
-    estimate_spurious: bool = False,
     hyperfine_results: Optional[pl.DataFrame] = None,
     max_mismatches: int = 5,
     distance_metric: str = "hamming",
@@ -1058,8 +1056,6 @@ def compare_all_tools(
         tools_results: Combined results from all tools
         contigs_file: Path to contigs FASTA file (for FP verification and spurious estimation)
         spacers_file: Path to spacers FASTA file (for FP verification and spurious estimation)
-        verify_false_positives: Whether to verify false positives by checking actual alignments
-        estimate_spurious: Whether to estimate expected spurious alignments
         hyperfine_results: Optional DataFrame with hyperfine benchmark results
         max_mismatches: Maximum number of mismatches to consider valid
         distance_metric: Distance metric for validation: 'hamming' (substitutions only) or 'edit' (substitutions + indels)
@@ -1248,7 +1244,6 @@ def run_compare_results(
     only_tools=None,
     contigs=None,
     spacers=None,
-    verify_false_positives=True,
     distance_metric="hamming",
     gap_open_penalty=5,
     gap_extend_penalty=5,
@@ -1270,11 +1265,10 @@ def run_compare_results(
         only_tools: Comma-separated list of tools to process (overrides skip_tools)
         contigs: Path to custom contigs file (optional)
         spacers: Path to custom spacers file (optional)
-        verify_false_positives: Whether to verify false positives by alignment checking (default: True)
         distance_metric: Distance metric for validation: 'hamming' (substitutions only) or 'edit' (substitutions + indels). Default: 'hamming'
         gap_open_penalty: Gap open penalty for alignment validation (default: 5)
         gap_extend_penalty: Gap extension penalty for alignment validation (default: 5)
-        logfile: Path to log file for DEBUG output (handled by CLI, included here for documentation)
+        logfile: Path to log file for DEBUG output (handled by CLI, included here for documentation, do not set!)
         skip_hyperfine: If True, skip reading hyperfine results (default: False)
 
     Returns:
@@ -1443,8 +1437,6 @@ def run_compare_results(
         tools_results=tools_results,
         contigs_file=contigs_path,
         spacers_file=spacers_path,
-        verify_false_positives=verify_false_positives,
-        estimate_spurious=False,  # estimate_spurious,
         hyperfine_results=None if skip_hyperfine else hyperfine_results,
         max_mismatches=max_mismatches,
         distance_metric=distance_metric,

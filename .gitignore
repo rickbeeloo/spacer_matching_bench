@@ -22,8 +22,11 @@ tmp/
 *.tsv.gz
 *.sam.gz
 *fa.gz
-slurmsout/
-outputs/
+*fa
+**/*.fna
+**/*.fasta
+**/*.fa
+
 imgvr4_data/
 imgvr4_data/crispr-host-prediction/nucleotide_db/
 **/raw_outputs
@@ -32,8 +35,10 @@ imgvr4_data/crispr-host-prediction/nucleotide_db/
 **/bash_scripts
 **/tools_results.tsv
 **/.parquet
-results/real_data/raw_outputs/
-results/real_data/results/
+results/blastn_test/
+results/real_data/subsamples/
+results/real_data/subsamples_analysis
+results/simulated/ns_*
 **/tools_results.tsv
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -199,15 +204,11 @@ cython_debug/
 rust_simulator/src/target/debug/
 
 # run_t_*
-results/simulated/run_t_*
 # pixi environments
 .pixi
 *.egg-info
 
 
-results/*
-results_mismatches/*
-*.tsv
 
 .ruff_cache/
 IMGVR4_SEQUENCES.fna.zst
