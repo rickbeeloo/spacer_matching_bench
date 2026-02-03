@@ -591,12 +591,6 @@ def execute_tools(input_dir, skip_tools, only_tools, debug):
     help="Maximum number of mismatches for comparison",
 )
 @click.option(
-    "--augment-ground-truth",
-    is_flag=True,
-    default=False,
-    help="Count verified non-planned alignments as true positives",
-)
-@click.option(
     "--distance",
     type=click.Choice(["hamming", "edit"]),
     default="hamming",
@@ -638,7 +632,6 @@ def full_run(
     skip_tools,
     only_tools,
     max_mismatches,
-    augment_ground_truth,
     distance,
     gap_open_penalty,
     gap_extend_penalty,
@@ -714,7 +707,6 @@ def full_run(
             threads=threads,
             skip_tools=skip_tools,
             only_tools=only_tools,
-            augment_ground_truth=augment_ground_truth,
             distance_metric=distance,
             gap_open_penalty=gap_open_penalty,
             gap_extend_penalty=gap_extend_penalty,
@@ -877,7 +869,6 @@ def compare_results(
     \b
     Example:
       spacer_bencher compare-results -i tests/validation -mm 3 -o results.tsv
-      spacer_bencher compare-results -i tests/validation --augment-ground-truth
     """
     from bench.commands.compare_results import run_compare_results
 

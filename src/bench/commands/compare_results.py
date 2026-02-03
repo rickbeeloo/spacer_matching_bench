@@ -994,10 +994,6 @@ def calculate_all_tool_performance(
     # Calculate metrics for PLANNED ONLY mode (strict)
     performance = performance.with_columns(
         [
-            # FP (planned only) = verified non-planned + invalid alignments
-            (pl.col("positives_not_in_plan") + pl.col("invalid_alignments")).alias(
-                "false_positives_planned"
-            ),
             # Precision (planned only) = planned TP / (planned TP + all FP)
             (
                 pl.col("planned_true_positives")
@@ -1022,8 +1018,6 @@ def calculate_all_tool_performance(
     # Calculate metrics for AUGMENTED mode (including non-planned)
     performance = performance.with_columns(
         [
-            # FP (augmented) = only invalid alignments (non-planned positives are now TPs)
-            pl.col("invalid_alignments").alias("false_positives_augmented"),
             # FN (augmented) = augmented GT - all TPs found by this tool
             (pl.col("ground_truth_augmented") - pl.col("all_true_positives")).alias(
                 "false_negatives_augmented"
@@ -1042,25 +1036,6 @@ def calculate_all_tool_performance(
         ]
     )
 
-    # Add percentage columns for easier interpretation (planned mode)
-    performance = performance.with_columns(
-        [
-            (pl.col("recall_planned") * 100).alias("identified_pct_planned"),
-            ((1 - pl.col("recall_planned")) * 100).alias("missed_pct_planned"),
-            (
-                (
-                    pl.col("false_positives_planned")
-                    / (
-                        pl.col("planned_true_positives")
-                        + pl.col("false_positives_planned")
-                    )
-                )
-                * 100
-            )
-            .fill_null(0.0)
-            .alias("false_positive_pct_planned"),
-        ]
-    )
 
     return performance
 

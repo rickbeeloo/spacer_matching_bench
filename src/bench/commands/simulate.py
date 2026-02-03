@@ -43,6 +43,9 @@ def run_simulate(
     spacer_t_frac=None,
     spacer_c_frac=None,
     spacer_g_frac=None,
+    verbose = False,
+    distance_metric:str = "hamming"
+
 ):
     """
     Core simulation function that can be called from both CLI interfaces.
@@ -80,10 +83,15 @@ def run_simulate(
         spacer_t_frac: T base fraction for spacers (optional)
         spacer_c_frac: C base fraction for spacers (optional)
         spacer_g_frac: G base fraction for spacers (optional)
+        verbose(bool): set log level to DEBUG
+        distance_metric(str): 'hamming', 'edit' or 'gap_affine' - ONLY USED IN THE VERIFY STEP
 
     Returns:
         Tuple of (contigs, spacers, ground_truth) dictionaries/lists
     """
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+
     logger.info(f"Starting simulation: {num_contigs} contigs, {num_spacers} spacers")
     logger.debug(f"Output directory: {output_dir}")
 
@@ -105,7 +113,7 @@ def run_simulate(
         n_insertion_range=indel_insertions,
         n_deletion_range=indel_deletions,
         prop_rc=reverse_complement,
-        debug=False,
+        debug=verbose,
         threads=threads,
         results_dir=output_dir,
         id_prefix=id_prefix,
@@ -127,6 +135,8 @@ def run_simulate(
         spacer_c_frac=spacer_c_frac,
         spacer_g_frac=spacer_g_frac,
         verify=verify,
+        distance_metric = distance_metric,
+
     )
 
     logger.info(f"Generated {len(contigs_out)} contigs and {len(spacers_out)} spacers")

@@ -407,6 +407,8 @@ def simulate_data_rust(
     spacer_c_frac: Optional[float] = None,
     spacer_g_frac: Optional[float] = None,
     data_subdir: Optional[str] = None,
+    distance_metric:str = "hamming",
+
 ) -> tuple:
     """Simulate CRISPR spacer data using Rust implementation.
 
@@ -446,6 +448,8 @@ def simulate_data_rust(
         spacer_c_frac(float): C fraction for spacers
         spacer_g_frac(float): G fraction for spacers
         data_subdir(str): Data subdirectory
+        distance_metric(str): 'hamming', 'edit' or 'gap_affine' - ONLY USED IN THE VERIFY STEP
+
 
     Returns:
         tuple: (contigs_dict, spacers_dict, ground_truth_df)
@@ -582,24 +586,24 @@ def simulate_data_rust(
             orient="row",
         )
 
-        if verify:
-            verrify_df = verify_simulated_data(
-                contigs_dict, spacers_dict, ground_truth_df
-            )
-            if (
-                verrify_df.filter(
-                    pl.col("alignment_test") > pl.col("mismatches")
-                ).height
-                > 0
-            ):
-                logger.info(
-                    verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches"))
-                )
-                raise ValueError("Simulated data is not correct")
-            else:
-                logger.info("Simulated data is correct")
-
-        return contigs_dict, spacers_dict, ground_truth_df
+        # if verify:
+        #     verrify_df = verify_simulated_data(
+        #         contigs_dict, spacers_dict, ground_truth_df
+        #     )
+        #     if (
+        #         verrify_df.filter(
+        #             pl.col("alignment_test") > pl.col("mismatches")
+        #         ).height
+        #         > 0
+        #     ):
+        #         logger.info(
+        #             verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches"))
+        #         )
+        #         raise ValueError("Simulated data is not correct")
+        #     else:
+        #         logger.info("Simulated data is correct")
+        # return contigs_dict, spacers_dict, ground_truth_df
+    
 
     if threads is None:
         import multiprocessing
@@ -732,8 +736,9 @@ def simulate_data_rust(
         },
         orient="row",
     )
+
     if verify:
-        verrify_df = verify_simulated_data(contigs, spacers, ground_truth_df)
+        verrify_df = verify_simulated_data(contigs = contigs, spacers = spacers, ground_truth = ground_truth_df, distance_metric = distance_metric)
         if (
             verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches")).height
             > 0
@@ -754,6 +759,7 @@ def verify_simulated_data(
     return_fraction: bool = False,
     return_bool: bool = False,
     return_positive_only: bool = False,
+    distance_metric:str = "hamming"
 ) -> Any:
     """Verify the simulated data by checking the ground truth against the contigs and spacers.
 
@@ -764,6 +770,7 @@ def verify_simulated_data(
         return_fraction(bool): Return fraction instead of count
         return_bool(bool): Return boolean result
         return_positive_only(bool): Return only positive results
+        distance_metric(str): 'hamming', 'edit' or 'gap_affine'
 
     Returns:
         Verification results
@@ -810,7 +817,7 @@ def verify_simulated_data(
         ground_truth = ground_truth.join(spacer_df, on="spacer_id", how="left")
 
     # check if the ground truth is correct
-    verify_df = test_alignment_polars(ground_truth, ignore_region_strands=False)
+    verify_df = test_alignment_polars(ground_truth, ignore_region_strands=False, distance_metric=distance_metric)
     if return_bool:
         return (
             verify_df.filter(pl.col("alignment_test") != pl.col("mismatches")).height
@@ -1077,7 +1084,7 @@ def cast_cols_to_match(
 
 
 def vstack_easy(df1_to_stack: pl.DataFrame, df2_to_stack: pl.DataFrame) -> pl.DataFrame:
-    """Vstack two dataframes after matching column types and order.
+    """Vstack two dataframes after matching column types and order (similar to relaxed/coaleced join).
 
     Args:
         df1_to_stack: Base dataframe.
@@ -1131,16 +1138,16 @@ def parse_sassy(
             },
         )
         # Filter by max_ns in match_region (slice_str)
-        if max_ns > 1:
-            results = results.filter(
-                pl.col("slice_str").str.count_matches("N") <= max_ns
-            ).drop("slice_str")
-        elif max_ns <= 1:
+        if max_ns == 0:
             results = results.filter(
                 ~pl.col("slice_str").str.contains_any("N") 
             ).drop("slice_str")
+        else:
+            results = results.filter(
+                pl.col("slice_str").str.count_matches("N") <= max_ns
+            ).drop("slice_str")
 
-        if max_gaps == 1:
+        if max_gaps == 0:
             results = results.filter(
                 ~pl.col("cigar").str.contains_any(patterns=["I", "D", "N"])
             )
@@ -1316,107 +1323,107 @@ def parse_blastn(
     return results
 
 
-def parse_lexicmap(
-    tsv_file: str,
-    max_mismatches: int = 5,
-    spacer_lendf: Optional[pl.DataFrame] = None,
-    **kwargs,
-) -> pl.DataFrame:
-    """Parse LexicMap TSV output format and return standardized coordinates.
+# def parse_lexicmap(
+#     tsv_file: str,
+#     max_mismatches: int = 5,
+#     spacer_lendf: Optional[pl.DataFrame] = None,
+#     **kwargs,
+# ) -> pl.DataFrame:
+#     """Parse LexicMap TSV output format and return standardized coordinates.
 
-    LexicMap output columns (1-based positions):
-    1.  query,    Query sequence ID.
-    2.  qlen,     Query sequence length.
-    3.  hits,     Number of subject genomes.
-    4.  sgenome,  Subject genome ID.
-    5.  sseqid,   Subject sequence ID.
-    6.  qcovGnm,  Query coverage (percentage) per genome: $(aligned bases in the genome)/$qlen.
-    7.  cls,      Nth HSP cluster in the genome. (just for improving readability)
-                  It's useful to show if multiple adjacent HSPs are collinear.
-    8.  hsp,      Nth HSP in the genome.         (just for improving readability)
-    9.  qcovHSP   Query coverage (percentage) per HSP: $(aligned bases in a HSP)/$qlen.
-    10. alenHSP,  Aligned length in the current HSP.
-    11. pident,   Percentage of identical matches in the current HSP.
-    12. gaps,     Gaps in the current HSP.
-    13. qstart,   Start of alignment in query sequence.
-    14. qend,     End of alignment in query sequence.
-    15. sstart,   Start of alignment in subject sequence.
-    16. send,     End of alignment in subject sequence.
-    17. sstr,     Subject strand.
-    18. slen,     Subject sequence length.
-    19. evalue,   Expect value.
-    20. bitscore, Bit score.
-    21. cigar,    CIGAR string of the alignment.                      (optional with -a/--all)
-    22. qseq,     Aligned part of query sequence.                      (optional with -a/--all)
-    23. sseq,     Aligned part of subject sequence.                    (optional with -a/--all)
-    24. align,    Alignment text ("|" and " ") between qseq and sseq. (optional with -a/--all)
+#     LexicMap output columns (1-based positions):
+#     1.  query,    Query sequence ID.
+#     2.  qlen,     Query sequence length.
+#     3.  hits,     Number of subject genomes.
+#     4.  sgenome,  Subject genome ID.
+#     5.  sseqid,   Subject sequence ID.
+#     6.  qcovGnm,  Query coverage (percentage) per genome: $(aligned bases in the genome)/$qlen.
+#     7.  cls,      Nth HSP cluster in the genome. (just for improving readability)
+#                   It's useful to show if multiple adjacent HSPs are collinear.
+#     8.  hsp,      Nth HSP in the genome.         (just for improving readability)
+#     9.  qcovHSP   Query coverage (percentage) per HSP: $(aligned bases in a HSP)/$qlen.
+#     10. alenHSP,  Aligned length in the current HSP.
+#     11. pident,   Percentage of identical matches in the current HSP.
+#     12. gaps,     Gaps in the current HSP.
+#     13. qstart,   Start of alignment in query sequence.
+#     14. qend,     End of alignment in query sequence.
+#     15. sstart,   Start of alignment in subject sequence.
+#     16. send,     End of alignment in subject sequence.
+#     17. sstr,     Subject strand.
+#     18. slen,     Subject sequence length.
+#     19. evalue,   Expect value.
+#     20. bitscore, Bit score.
+#     21. cigar,    CIGAR string of the alignment.                      (optional with -a/--all)
+#     22. qseq,     Aligned part of query sequence.                      (optional with -a/--all)
+#     23. sseq,     Aligned part of subject sequence.                    (optional with -a/--all)
+#     24. align,    Alignment text ("|" and " ") between qseq and sseq. (optional with -a/--all)
 
-    Args:
-        tsv_file (str): Input path.
-        max_mismatches (int): Mismatch threshold.
-        spacer_lendf (pl.DataFrame): Length lookup.
+#     Args:
+#         tsv_file (str): Input path.
+#         max_mismatches (int): Mismatch threshold.
+#         spacer_lendf (pl.DataFrame): Length lookup.
 
-    Returns:
-        pl.DataFrame: Results in standard format.
-    """
-    try:
-        results = pl.read_csv(
-            tsv_file,
-            separator="\t",
-            has_header=True,
-            infer_schema_length=100000,
-        )
-        results = results.rename(
-            {
-                "query": "spacer_id",
-                "sseqid": "contig_id",
-                "sstr": "strand",
-            }
-        )
-        if results.height == 0:
-            raise ValueError(f"No results found in {tsv_file}")
-    except Exception as e:
-        logger.warning(
-            f"Failed to create read from file {tsv_file}: {e}, returning empty dataframe"
-        )
-        return pl.DataFrame(
-            schema={
-                "spacer_id": pl.Utf8,
-                "contig_id": pl.Utf8,
-                "spacer_length": pl.UInt32,
-                "strand": pl.Utf8,
-                "start": pl.UInt32,
-                "end": pl.UInt32,
-                "mismatches": pl.UInt32,
-            },
-            orient="row",
-        )
+#     Returns:
+#         pl.DataFrame: Results in standard format.
+#     """
+#     try:
+#         results = pl.read_csv(
+#             tsv_file,
+#             separator="\t",
+#             has_header=True,
+#             infer_schema_length=100000,
+#         )
+#         results = results.rename(
+#             {
+#                 "query": "spacer_id",
+#                 "sseqid": "contig_id",
+#                 "sstr": "strand",
+#             }
+#         )
+#         if results.height == 0:
+#             raise ValueError(f"No results found in {tsv_file}")
+#     except Exception as e:
+#         logger.warning(
+#             f"Failed to create read from file {tsv_file}: {e}, returning empty dataframe"
+#         )
+#         return pl.DataFrame(
+#             schema={
+#                 "spacer_id": pl.Utf8,
+#                 "contig_id": pl.Utf8,
+#                 "spacer_length": pl.UInt32,
+#                 "strand": pl.Utf8,
+#                 "start": pl.UInt32,
+#                 "end": pl.UInt32,
+#                 "mismatches": pl.UInt32,
+#             },
+#             orient="row",
+#         )
 
-    # results = results.filter(pl.col("alenHSP") >= 17, pl.col("gaps") == 0) # we don't really need this here, but keeping commented to remember it was done previously. Potentially, with a max mismatch >3 this could have over restrict the max mismatch arguments values.
-    results = results.with_columns(pl.col("spacer_id").cast(pl.Utf8))
-    results = results.with_columns(
-        pl.col("align").str.count_matches("|", literal=True).alias("matches")
-    )
+#     # results = results.filter(pl.col("alenHSP") >= 17, pl.col("gaps") == 0) # we don't really need this here, but keeping commented to remember it was done previously. Potentially, with a max mismatch >3 this could have over restrict the max mismatch arguments values.
+#     results = results.with_columns(pl.col("spacer_id").cast(pl.Utf8))
+#     results = results.with_columns(
+#         pl.col("align").str.count_matches("|", literal=True).alias("matches")
+#     )
 
-    results = spacer_lendf.join(results, on="spacer_id", how="inner")
-    results = results.with_columns(
-        (pl.col("length") - pl.col("matches")).alias("mismatches"),
-        (pl.col("sstart") - 1).alias("start"),  # 1-based
-        (pl.col("send")).alias("end"),  # 1-based
-    )
-    results = results.filter(pl.col("mismatches") <= max_mismatches)
-    results = results.rename({"length": "spacer_length"})
-    results = results.select(
-        "spacer_id",
-        "contig_id",
-        "spacer_length",
-        "strand",
-        "start",
-        "end",
-        "mismatches",
-    ).unique()
-    results = results.with_columns(pl.col("spacer_id").cast(pl.Utf8))
-    return results
+#     results = spacer_lendf.join(results, on="spacer_id", how="inner")
+#     results = results.with_columns(
+#         (pl.col("length") - pl.col("matches")).alias("mismatches"),
+#         (pl.col("sstart") - 1).alias("start"),  # 1-based
+#         (pl.col("send")).alias("end"),  # 1-based
+#     )
+#     results = results.filter(pl.col("mismatches") <= max_mismatches)
+#     results = results.rename({"length": "spacer_length"})
+#     results = results.select(
+#         "spacer_id",
+#         "contig_id",
+#         "spacer_length",
+#         "strand",
+#         "start",
+#         "end",
+#         "mismatches",
+#     ).unique()
+#     results = results.with_columns(pl.col("spacer_id").cast(pl.Utf8))
+#     return results
 
 
 def parse_samVn_with_lens_polars(
@@ -2884,7 +2891,7 @@ def calculate_edit_distance(
 
 
 
-def test_row(row, ignore_region_strands=False):
+def test_row(row, ignore_region_strands=False, distance_metric = "hamming"):
     if ignore_region_strands:
         return test_alignment(
             row["spacer_seq"],
@@ -2892,7 +2899,7 @@ def test_row(row, ignore_region_strands=False):
             None,
             None,
             None,
-            gaps_as_mismatch=True,
+            distance_metric=distance_metric,
         )
     else:
         return test_alignment(
@@ -2901,7 +2908,7 @@ def test_row(row, ignore_region_strands=False):
             row["strand"],
             row["start"],
             row["end"],
-            gaps_as_mismatch=True,
+            distance_metric=distance_metric,
         )
 
 
@@ -3002,7 +3009,7 @@ def prettify_alignment_hamming(
     return f"{spacer_seq}\n{ali_str}\n{aligned_region}"
 
 
-def test_alignment_polars(results: pl.DataFrame, ignore_region_strands=False, **kwargs):
+def test_alignment_polars(results: pl.DataFrame, ignore_region_strands=False,distance_metric ="hamming", **kwargs):
     """Test if an alignment matches between a spacer and contig.
     Input is a pl.df with columns: spacer_id, contig_id, spacer_length, start, end, strand, mismatches, tool, spacer_seq, contig_seq
     """
@@ -3018,7 +3025,7 @@ def test_alignment_polars(results: pl.DataFrame, ignore_region_strands=False, **
             pl.col("end"),
         )
         .map_elements(
-            lambda x: test_row(x, ignore_region_strands=ignore_region_strands),
+            lambda x: test_row(x, ignore_region_strands=ignore_region_strands,distance_metric = distance_metric),
             return_dtype=pl.Int32(),
         )
         .alias("alignment_test")
