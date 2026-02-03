@@ -781,12 +781,6 @@ def full_run(
     "--threads", "-t", type=int, default=4, help="Number of threads for processing"
 )
 @click.option(
-    "--verify-false-positives",
-    is_flag=True,
-    default=True,
-    help="Count verified non-planned alignments as true positives",
-)
-@click.option(
     "--skip-tools",
     "-st",
     type=str,
@@ -862,24 +856,21 @@ def compare_results(
     precision, recall, and F1 scores.
 
     \b
-    Metrics Calculated:
-      - True Positives: Correctly identified spacer locations (that were in the simulation plan)
-      - False Positives: Incorrectly reported locations
-      - False Positives: Incorrectly reported locations
-      - False Negatives: Missed spacer locations
-      - Precision: TP / (TP + FP)
+    Metrics Calculated: (either counts or %age)
+      - Planned True Positives: Correctly identified spacer locations (that were in the simulation plan)
+      - Unplanned True Positives: regions/matches reported by tools, not in the ground truth/plan, that were validated to actually fit our requirements (e.g. the distance metric + thershold used).
+      - invalid alignemnts: alignemnts not passing the distance metric + thershold requested.
+      - False Negatives: Missed (planned) spacer locations 
       - Recall: TP / (TP + FN)
-      - F1 Score: Harmonic mean of precision and recall
 
     \b
-    Augmented Ground Truth Mode (--augment-ground-truth):
-      When enabled, verified non-planned alignments (valid alignments found by tools
-      but not in the original simulation plan) are counted as true positives rather
-      than false positives. This gives a more realistic performance assessment when
-      sequences contain naturally occurring similar regions.
+    Augmented Ground Truth Mode ("*_augnemnted" suffix):
+      Verified non-planned alignments (valid alignments found by tools
+      but not in the original simulation plan) are counted as regular true positives. 
+      This should give a more realistic assessment as we observe that spacer-like (short) sequences with up to some amount of distance happen to naturally occur in the contigs, by chance alone (i.e. we did not explicitly placed one of the simulated spacers in that location).
 
     \b
-    Gap Penalty Options:
+    Gap Penalty Options: these are not really used much, as we moved to edlib's NW instead of parasail's SW. Some legacy functions may still accept these.
       --gap-open-penalty: Penalty for opening a gap
       --gap-extend-penalty: Penalty for extending a gap
 

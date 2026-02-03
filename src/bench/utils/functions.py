@@ -23,6 +23,7 @@ import time
 import polars_bio as pb
 import _duckdb as duckdb
 from rust_simulator import Simulator, BaseComposition, DistributionType
+import edlib 
 
 # Configure logger for this module
 logger = logging.getLogger(__name__)
@@ -2432,7 +2433,7 @@ def populate_pldf_withseqs_needletail(
     return pldf
 
 
-def prettify_alignment(
+def prettify_alignment_gap_affine(
     spacer_seq: str,
     contig_seq: str,
     strand: bool = False,
@@ -2493,6 +2494,59 @@ def prettify_alignment(
     if return_comp_str:
         return ali.comp
     return f"{ali.query}\n{ali.comp}\n{ali.ref}"
+
+
+def prettify_alignment_edit(
+    spacer_seq: str,
+    contig_seq: str,
+    strand: bool = False,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    return_ref_region: bool = False,
+    return_query_region: bool = False,
+    return_comp_str: bool = False,
+    **kwargs,
+) -> str:
+    """given a spacer and contig sequence and coordinates, return | for a match and . for a mismatch and " " (space) for an indel
+
+    Args:
+        spacer_seq: Query sequence.
+        contig_seq: Reference sequence.
+        strand: Rev-comp if True.
+        start: Start coord.
+        end: End coord.
+        return_ref_region: Return traceback ref.
+        return_query_region: Return traceback query.
+        return_comp_str: Return comparison string (| .).
+        gap_cost: Penalty.
+        extend_cost: Penalty.
+        cost_matrix: Scoring matrix.
+
+    Returns:
+        str: Alignment string representation.
+    """
+    if start is not None and end is not None:
+        aligned_region = contig_seq[start:end]
+    else:
+        aligned_region = contig_seq
+
+    if strand:  # True means reverse strand
+        aligned_region = reverse_complement(aligned_region)
+
+    alignment = edlib.align(spacer_seq, aligned_region, mode="NW",task='path',)
+
+    ali = edlib.getNiceAlignment(alignment,spacer_seq, aligned_region, " ")
+
+
+    if return_ref_region:
+        return ali["target_aligned"]
+    if return_query_region:
+        return ali["query_aligned"]
+    if return_comp_str:
+        return ali["matched_aligned"]
+    return f'{ali["query_aligned"]}\n{ali["matched_aligned"]}\n{ali["target_aligned"]}'
+
+
 
 
 def match_intervals_with_tolerance(
@@ -2596,7 +2650,7 @@ def test_alignment(
         end (int): End index.
         gap_cost (int): Opening penalty.
         extend_cost (int): Extension penalty.
-        distance_metric (str): Distance metric for validation: 'hamming' (substitutions only) or 'edit' (substitutions + indels). If 'hamming', the gap values are ignored.
+        distance_metric (str): Distance metric for validation: 'hamming' (substitutions only) or 'edit' (substitutions + indels) or 'gap_affine'. If 'hamming', the gap values are ignored.
 
     Returns:
         int: Distance count.
@@ -2614,26 +2668,12 @@ def test_alignment(
         aligned_region = reverse_complement(aligned_region)
 
     if distance_metric == "edit":
-        # Edit distance: spacer length minus matched positions
-        # This counts all differences including substitutions and indels
-        # Always use nw_trace to get the alignment string for accurate counting
-        alignment = ps.nw_trace(
-            spacer_seq,
-            aligned_region,
-            open=gap_cost,
-            extend=extend_cost,
-            matrix=ps.nuc44,
-        )
-
-        # In parasail's comp string:
-        # '|' = match
-        # '.' = mismatch (substitution)
-        # ' ' (space) = gap/indel
-
-        comp_string = alignment.traceback.comp
-        matches = comp_string.count("|")
-        distance = len(comp_string) - matches
-    else:
+        # Edit distance: spacer length minus matched positions FROM minimum edit alignment (using edlib)
+        # This counts all differences including substitutions and indels, after a global alignment.
+        edit_distance = edlib.align(spacer_seq, aligned_region, mode="NW")['editDistance']
+        distance = edit_distance
+        
+    elif distance_metric == "hamming":
         # Hamming distance: allows only substitutions. No indels.
         distance = calculate_hamming_distance(
             spacer_seq,
@@ -2642,7 +2682,31 @@ def test_alignment(
             start=None,
             end=None,
             silent=True,
+        )        
+    elif distance_metric == "gap_affine":
+        # Gap affine distance: use parasail's gap affine alignment (NW)
+
+        # Use Needleman-Wunsch global alignment (allows indels)
+        # NW aligns the full sequences, giving edit distance from the alignment traceback (parasail let's us set the gap open/extend costs --- not neccessarlay the absoulte minimal edit distance)
+        alignment = ps.nw_trace(
+            spacer_seq,
+            aligned_region,
+            open=gap_cost,
+            extend=extend_cost,
+            matrix=ps.nuc44,
         )
+
+        comp_string = alignment.traceback.comp
+
+        # True edit distance: count all non-match operations
+        # '|' = match (0 cost)
+        # '.' = substitution (1 cost)
+        # ' ' = gap/indel (1 cost per gap)
+        substitutions = comp_string.count(".")
+        indels = comp_string.count(" ")
+
+        edit_distance = substitutions + indels
+        return edit_distance
 
     return distance
 
@@ -2714,7 +2778,7 @@ def calculate_hamming_distance(
     return hamming
 
 
-def calculate_edit_distance(
+def calculate_gap_affine_edit(
     spacer_seq: str,
     contig_seq: str,
     strand: bool = False,
@@ -2776,6 +2840,48 @@ def calculate_edit_distance(
 
     edit_distance = substitutions + indels
     return edit_distance
+
+
+
+def calculate_edit_distance(
+    spacer_seq: str,
+    contig_seq: str,
+    strand: bool = False,
+    start: int = None,
+    end: Optional[int] = None,
+):
+    """
+    Calculate minimal edit distance (allowing indels) using NW from edlib.
+
+    Args:
+        spacer_seq(str): Query sequence
+        contig_seq(str): Target sequence (may be pre-trimmed to region)
+        strand(bool): If True, reverse complement contig_seq
+        start(int): Region start coordinate (only used for slicing if sequence is full-length)
+        end(int): Region end coordinate (only used for slicing if sequence is full-length)
+
+    Returns:
+        True edit distance: count of substitutions + insertions + deletions
+    """
+    if start is not None and end is not None:
+        # Check if sequence is already trimmed to region
+        expected_length = end - start
+        if len(contig_seq) == expected_length:
+            # Already trimmed, use as-is
+            aligned_region = contig_seq
+        else:
+            # Full sequence, need to trim
+            aligned_region = contig_seq[start:end]
+    else:
+        aligned_region = contig_seq
+
+    if strand:
+        aligned_region = reverse_complement(aligned_region)
+
+    edit_distance = edlib.align(spacer_seq, aligned_region, mode="NW")['editDistance']
+    return edit_distance
+
+
 
 
 def test_row(row, ignore_region_strands=False):
@@ -3915,3 +4021,156 @@ def load_fraction_results_lazy(fraction_parquet_files, add_fraction_col=True):
     return combined
 
 
+def get_system_info(use_slurm: bool = True, also_out_to="system_info.json") -> dict:
+    """Collect system information and return as a dictionary.
+    
+    Args:
+        use_slurm: If True, try to get CPU and RAM info from SLURM environment variables first.
+                   Falls back to system detection if SLURM info is unavailable.
+    """
+    import platform
+    import sys
+    import subprocess
+
+    def run_command(cmd, default="N/A"):
+        """Helper to run shell command and return output or default."""
+        try:
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=5
+            )
+            return result.stdout.strip() if result.returncode == 0 else default
+        except Exception:
+            return default
+
+    # Get CPU info
+    cpu_info = "N/A"
+    cpu_freq = "N/A"
+    cpu_cache_l3 = "N/A"
+    ram = "N/A"
+    ram_total_bytes = "N/A"
+    ram_source = "system"
+    
+    if not use_slurm:
+        logger.debug("Not using SLURM for system info, detecting from system")
+        try:
+            if platform.system() == "Linux":
+                cpu_info = run_command(
+                    "grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d':' -f2 | xargs"
+                )
+                cpu_freq = run_command(
+                    "lscpu 2>/dev/null | grep 'CPU MHz' | awk '{print $3 \" MHz\"}'"
+                )
+                cpu_cache_l3 = run_command(
+                    "lscpu 2>/dev/null | grep 'L3 cache' | awk '{print $3}'"
+                )
+                cpu_cores = psutil.cpu_count(logical=False) or "N/A"
+                cpu_threads = psutil.cpu_count(logical=True) or "N/A"
+                mem = psutil.virtual_memory()
+                ram_total_bytes = mem.total
+                ram_gb = mem.total / (1024**3)
+                ram = f"{ram_gb:.1f}G"
+                ram_source = "system"
+
+
+            elif platform.system() == "Darwin":
+                cpu_info = run_command("sysctl -n machdep.cpu.brand_string 2>/dev/null")
+                cpu_freq_hz = run_command("sysctl -n hw.cpufrequency 2>/dev/null")
+                if cpu_freq_hz != "N/A":
+                    try:
+                        cpu_freq = f"{int(cpu_freq_hz) / 1000000} MHz"
+                    except ValueError:
+                        cpu_freq = "N/A"
+                cpu_cache_bytes = run_command("sysctl -n hw.l3cachesize 2>/dev/null")
+                if cpu_cache_bytes != "N/A":
+                    try:
+                        cpu_cache_l3 = f"{int(cpu_cache_bytes) / 1024 / 1024} MiB"
+                    except ValueError:
+                        cpu_cache_l3 = "N/A"
+        except Exception:
+            pass
+    else:
+        # fill in place holders using specs of a typical SLURM node
+        cpu_info = "AMD EPYC 7543 32-Core Processor X 2"
+        cpu_freq = "3705.616 MHz"
+        cpu_cache_l3 = "32768K"
+        cpu_threads = 64  # 2x AMD 7543 (32 cores each)
+        cpu_cores = 64
+        ram = "512.0G"
+        ram_gb = 512  # 512 GB (max!!)
+        ram_total_bytes = int(ram_gb * 1024 * 1024 * 1024)
+        ram_source = "slurm"
+        slurm_source = True
+
+    
+    # Get disk device and filesystem (same for slurm / local)
+    disk_device = run_command("df . 2>/dev/null | tail -1 | awk '{print $1}'")
+    if platform.system() == "Linux":
+        filesystem = run_command("df -T . 2>/dev/null | tail -1 | awk '{print $2}'")
+    else:
+        filesystem = "N/A"
+
+    disk_model = run_command(
+        "lsblk -d -o name,model 2>/dev/null | grep -v 'NAME' | head -1 | awk '{$1=\"\"; print $0}' | xargs"
+    )
+
+    # Get Python info
+    try:
+        python_version = (
+            f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        )
+        python_path = sys.executable
+    except Exception:
+        python_version = "N/A"
+        python_path = "N/A"
+
+    # Get tool versions
+    hyperfine_version = run_command("hyperfine --version 2>/dev/null | cut -d' ' -f2")
+
+    if also_out_to:
+        import json
+        with open(also_out_to, "w") as f:
+            json.dump(
+                {
+                    "os": platform.system(),
+                    "kernel": platform.release(),
+                    "architecture": platform.machine(),
+                    "cpu": cpu_info,
+                    "cpu_cores": str(cpu_cores),
+                    "cpu_threads": str(cpu_threads),
+                    "cpu_source": "slurm" if use_slurm else "system",
+                    "cpu_frequency": cpu_freq,
+                    "cpu_cache_l3": cpu_cache_l3,
+                    "ram": ram,
+                    "ram_total_bytes": str(ram_total_bytes),
+                    "ram_source": ram_source,
+                    "disk_device": disk_device,
+                    "filesystem": filesystem,
+                    "disk_model": disk_model,
+                    "python_version": python_version,
+                    "python_path": python_path,
+                    "hyperfine_version": hyperfine_version,
+                },
+                f,
+                indent=4,
+            )
+
+    return {
+        "os": platform.system(),
+        "kernel": platform.release(),
+        "architecture": platform.machine(),
+        "cpu": cpu_info,
+        "cpu_cores": str(cpu_cores),
+        "cpu_threads": str(cpu_threads),
+        "cpu_source": "slurm" if slurm_source else "system",
+        "cpu_frequency": cpu_freq,
+        "cpu_cache_l3": cpu_cache_l3,
+        "ram": ram,
+        "ram_total_bytes": str(ram_total_bytes),
+        "ram_source": ram_source,
+        "disk_device": disk_device,
+        "filesystem": filesystem,
+        "disk_model": disk_model,
+        "python_version": python_version,
+        "python_path": python_path,
+        "hyperfine_version": hyperfine_version,
+    }

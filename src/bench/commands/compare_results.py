@@ -16,7 +16,8 @@ from bench.utils.functions import (
     read_hyperfine_results,
     test_alignment,
     populate_pldf_withseqs_needletail,
-    prettify_alignment,
+    prettify_alignment_edit,
+    prettify_alignment_gap_affine,
     prettify_alignment_hamming,
     get_seq_from_fastx,
     vstack_easy,
@@ -429,6 +430,16 @@ def display_example_alignments(
                 gap_cost=gap_open_penalty,
                 extend_cost=gap_extend_penalty,
             )
+            # gap_affine_distance = test_alignment(
+            #     spacer_seq,
+            #     contig_seq,
+            #     strand=strand,
+            #     start=start,
+            #     end=end,
+            #     distance_metric="gap_affine",
+            #     gap_cost=gap_open_penalty,
+            #     extend_cost=gap_extend_penalty,
+            # ) # added this for past reference, this is what was actually used in the past, now moved to minimal edit distance (via edlib)
 
             # Determine if there are indels (gaps)
             has_indels = edit_distance != hamming_distance
@@ -443,8 +454,18 @@ def display_example_alignments(
                     start=start,
                     end=end,
                 )
-            else:
-                alignment_str = prettify_alignment(
+            elif distance_metric == "edit":
+                # alignment_str = prettify_alignment_gap_affine(
+                alignment_str = prettify_alignment_edit(
+                    spacer_seq,
+                    contig_seq,
+                    strand=strand,
+                    start=start,
+                    end=end,
+                )
+            elif distance_metric == "gap_affine":
+                alignment_str = prettify_alignment_gap_affine(
+                # alignment_str = prettify_alignment_edit(
                     spacer_seq,
                     contig_seq,
                     strand=strand,
@@ -453,7 +474,6 @@ def display_example_alignments(
                     gap_cost=gap_open_penalty,
                     extend_cost=gap_extend_penalty,
                 )
-
             # Add labels to the alignment
             strand_str = "(-)" if strand else "(+)"
             location_str = f"{contig_id}:{start}-{end} {strand_str}"
@@ -712,17 +732,34 @@ def _display_fn_examples(
             gap_cost=gap_open_penalty,
             extend_cost=gap_extend_penalty,
         )
+        if distance_metric == "hamming":
+            alignment_str = prettify_alignment_hamming(
+                spacer_seq,
+                contig_seq,
+                strand=strand,
+                start=start,
+                end=end,
+            )
 
         # Generate alignment visualization
-        alignment_str = prettify_alignment(
-            spacer_seq,
-            contig_seq,
-            strand=strand,
-            start=start,
-            end=end,
-            gap_cost=gap_open_penalty,
-            extend_cost=gap_extend_penalty,
-        )
+        elif distance_metric == "edit":
+            alignment_str = prettify_alignment_edit(
+                spacer_seq,
+                contig_seq,
+                strand=strand,
+                start=start,
+                end=end,
+            )
+        elif distance_metric == "gap_affine":
+            alignment_str = prettify_alignment_gap_affine(
+                spacer_seq,
+                contig_seq,
+                strand=strand,
+                start=start,
+                end=end,
+                gap_cost=gap_open_penalty,
+                extend_cost=gap_extend_penalty,
+            )
 
         # Check which tools reported this location (even if wrongly classified)
         tools_that_reported = tools_results.filter(
