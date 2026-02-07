@@ -1,46 +1,68 @@
 {
     "blastn": {
         "color": "#7C3018",
-        "marker": "o"
+        "marker": "+",
+        "marker_word": "plus",
+        "letsplot_shape_num": 3
     },
     "bowtie1": {
         "color": "#0275DC",
-        "marker": "s"
+        "marker": "s",
+        "marker_word": "square",
+        "letsplot_shape_num": 15
     },
     "bowtie2": {
         "color": "#70FC28",
-        "marker": "^"
+        "marker": "⊞",
+        "marker_word": "square-plus",
+        "letsplot_shape_num": 17
     },
     "indelfree_bruteforce": {
         "color": "#116B28",
-        "marker": "v"
+        "marker": "○",
+        "marker_word": "circle",
+        "letsplot_shape_num": 1
     },
     "indelfree_indexed": {
         "color": "#305566",
-        "marker": "D"
+        "marker": "⊕",
+        "marker_word": "circle_plus",
+        "letsplot_shape_num": 13
     },
     "minimap2": {
         "color": "#172CBB",
-        "marker": "*"
+        "marker": "*",
+        "marker_word": "star",
+        "letsplot_shape_num": 8
     },
     "mmseqs2": {
         "color": "#8B7937",
-        "marker": "X"
+        "marker": "X",
+        "marker_word": "cross",
+        "letsplot_shape_num": 4
     },
     "mummer4": {
         "color": "#F97762",
-        "marker": "h"
+        "marker": "v",
+        "marker_word": "triangle-down",
+        "letsplot_shape_num": 6
     },
     "sassy": {
         "color": "#EBA60A",
-        "marker": "p"
+        "marker": "D",
+        "marker_word": "diamond",
+        "letsplot_shape_num": 18
     },
     "strobealign": {
         "color": "#ED3415",
-        "marker": "<"
+        "marker": "^",
+        "marker_word": "triangle-up",
+        "letsplot_shape_num": 17
     },
     "x_mapper": {
         "color": "#E1FC16",
-        "marker": ">"
+        "marker": "^",
+        "marker_word": "triangle-up",
+        "letsplot_shape_num": 24
     }
 }

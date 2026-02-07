@@ -1,0 +1,184 @@
+            <iframe src='about:blank' style='border:none !important;' width='800' height='500' srcdoc="&lt;html lang=&quot;en&quot;>
+   &lt;head>
+       &lt;meta charset=&quot;UTF-8&quot;>
+       &lt;style> html, body { margin: 0; padding: 0; overflow: hidden; } &lt;/style>
+       &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;library&quot; src=&quot;https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js&quot;>&lt;/script>
+   &lt;/head>
+   &lt;body>
+          &lt;div id=&quot;IwqbV1&quot; >&lt;/div>
+   &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;plot&quot;>
+   
+   (function() {
+   // ----------
+   
+   const forceImmediateRender = false;
+   const responsive = false;
+   
+   let sizing = {
+       width_mode: &quot;FIXED&quot;,
+       height_mode: &quot;FIXED&quot;,
+       width: 800.0, 
+       height: 500.0 
+   };
+   
+   const preferredWidth = document.body.dataset.letsPlotPreferredWidth;
+   if (preferredWidth !== undefined) {
+       sizing = {
+           width_mode: 'FIXED',
+           height_mode: 'SCALED',
+           width: parseFloat(preferredWidth)
+       };
+   }
+   
+   const containerDiv = document.getElementById(&quot;IwqbV1&quot;);
+   let fig = null;
+   
+   function renderPlot() {
+       if (fig === null) {
+           const plotSpec = {
+&quot;data&quot;:{
+&quot;tool&quot;:[&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;indelfree_bruteforce&quot;,&quot;indelfree_indexed&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;sassy&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;],
+&quot;mean_recall&quot;:[0.7864883988395683,0.9999468829104743,0.9731810502815099,0.3045709147119154,0.5684787533749096,3.591732904880551E-4,0.7495734816397712,0.5433283803542176,0.9758964623459366,0.5143945547700252,0.4675006777660974],
+&quot;lower_error&quot;:[0.7836629584943422,0.9999305697173471,0.9726573693952697,0.3045709147119154,-0.041701325962140046,3.1021641073959206E-4,0.7362342174477222,0.5366668538662438,0.9758964623459366,0.3027758197593099,0.17965607090221025],
+&quot;upper_error&quot;:[0.7893138391847945,0.9999631961036015,0.9737047311677501,0.3045709147119154,1.1786588327119594,4.0813017023651817E-4,0.7629127458318202,0.5499899068421914,0.9758964623459366,0.7260132897807404,0.7553452846299845]
+},
+&quot;mapping&quot;:{
+&quot;x&quot;:&quot;tool&quot;,
+&quot;y&quot;:&quot;mean_recall&quot;
+},
+&quot;data_meta&quot;:{
+&quot;series_annotations&quot;:[{
+&quot;type&quot;:&quot;str&quot;,
+&quot;column&quot;:&quot;tool&quot;
+},{
+&quot;type&quot;:&quot;float&quot;,
+&quot;column&quot;:&quot;mean_recall&quot;
+},{
+&quot;type&quot;:&quot;float&quot;,
+&quot;column&quot;:&quot;std_recall&quot;
+},{
+&quot;type&quot;:&quot;float&quot;,
+&quot;column&quot;:&quot;min_recall&quot;
+},{
+&quot;type&quot;:&quot;float&quot;,
+&quot;column&quot;:&quot;max_recall&quot;
+},{
+&quot;type&quot;:&quot;float&quot;,
+&quot;column&quot;:&quot;lower_error&quot;
+},{
+&quot;type&quot;:&quot;float&quot;,
+&quot;column&quot;:&quot;upper_error&quot;
+},{
+&quot;type&quot;:&quot;int&quot;,
+&quot;column&quot;:&quot;n_fractions&quot;
+}]
+},
+&quot;ggtitle&quot;:{
+&quot;text&quot;:&quot;Tool Performance Consistency Across Dataset Sizes (Hamming ≤ 3)&quot;
+},
+&quot;guides&quot;:{
+&quot;x&quot;:{
+&quot;title&quot;:&quot;Tool&quot;
+},
+&quot;y&quot;:{
+&quot;title&quot;:&quot;Mean Recall ± Std (across all fractions)&quot;
+}
+},
+&quot;ggsize&quot;:{
+&quot;width&quot;:800.0,
+&quot;height&quot;:500.0
+},
+&quot;theme&quot;:{
+&quot;name&quot;:&quot;minimal&quot;,
+&quot;axis_text_x&quot;:{
+&quot;angle&quot;:45.0,
+&quot;hjust&quot;:1.0,
+&quot;blank&quot;:false
+},
+&quot;legend_position&quot;:&quot;none&quot;,
+&quot;plot_title&quot;:{
+&quot;face&quot;:&quot;bold&quot;,
+&quot;size&quot;:14.0,
+&quot;blank&quot;:false
+}
+},
+&quot;kind&quot;:&quot;plot&quot;,
+&quot;scales&quot;:[{
+&quot;name&quot;:&quot;Tool&quot;,
+&quot;aesthetic&quot;:&quot;color&quot;,
+&quot;breaks&quot;:[&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;indelfree_bruteforce&quot;,&quot;indelfree_indexed&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;sassy&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;],
+&quot;values&quot;:[&quot;#7C3018&quot;,&quot;#0275DC&quot;,&quot;#70FC28&quot;,&quot;#116B28&quot;,&quot;#305566&quot;,&quot;#172CBB&quot;,&quot;#8B7937&quot;,&quot;#F97762&quot;,&quot;#EBA60A&quot;,&quot;#ED3415&quot;,&quot;#E1FC16&quot;]
+},{
+&quot;aesthetic&quot;:&quot;y&quot;,
+&quot;limits&quot;:[0.0,1.05]
+}],
+&quot;layers&quot;:[{
+&quot;geom&quot;:&quot;errorbar&quot;,
+&quot;mapping&quot;:{
+&quot;ymin&quot;:&quot;lower_error&quot;,
+&quot;ymax&quot;:&quot;upper_error&quot;
+},
+&quot;data_meta&quot;:{
+},
+&quot;width&quot;:0.3,
+&quot;size&quot;:1.0,
+&quot;data&quot;:{
+}
+},{
+&quot;geom&quot;:&quot;point&quot;,
+&quot;mapping&quot;:{
+&quot;color&quot;:&quot;tool&quot;
+},
+&quot;data_meta&quot;:{
+},
+&quot;size&quot;:4.0,
+&quot;shape&quot;:19.0,
+&quot;data&quot;:{
+}
+}],
+&quot;metainfo_list&quot;:[],
+&quot;spec_id&quot;:&quot;35&quot;
+};
+           fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
+       } else {
+           fig.updateView({});
+       }
+   }
+   
+   const renderImmediately = 
+       forceImmediateRender || (
+           sizing.width_mode === 'FIXED' &amp;&amp; 
+           (sizing.height_mode === 'FIXED' || sizing.height_mode === 'SCALED')
+       );
+   
+   if (renderImmediately) {
+       renderPlot();
+   }
+   
+   if (!renderImmediately || responsive) {
+       // Set up observer for initial sizing or continuous monitoring
+       var observer = new ResizeObserver(function(entries) {
+           for (let entry of entries) {
+               if (entry.contentBoxSize &amp;&amp; 
+                   entry.contentBoxSize[0].inlineSize > 0) {
+                   if (!responsive &amp;&amp; observer) {
+                       observer.disconnect();
+                       observer = null;
+                   }
+                   renderPlot();
+                   if (!responsive) {
+                       break;
+                   }
+               }
+           }
+       });
+       
+       observer.observe(containerDiv);
+   }
+   
+   // ----------
+   })();
+   
+   &lt;/script>
+   &lt;/body>
+&lt;/html>"></iframe>    

@@ -1,0 +1,169 @@
+<html lang="en">
+   <head>
+       <meta charset="UTF-8">
+       <style> html, body { margin: 0; padding: 0; } </style>
+       <script type="text/javascript" data-lets-plot-script="library" src="https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js"></script>
+   </head>
+   <body>
+          <div id="fn5vj6" ></div>
+   <script type="text/javascript" data-lets-plot-script="plot">
+   
+   (function() {
+   // ----------
+   
+   const forceImmediateRender = false;
+   const responsive = false;
+   
+   let sizing = {
+       width_mode: "MIN",
+       height_mode: "SCALED",
+       width: null, 
+       height: null 
+   };
+   
+   const preferredWidth = document.body.dataset.letsPlotPreferredWidth;
+   if (preferredWidth !== undefined) {
+       sizing = {
+           width_mode: 'FIXED',
+           height_mode: 'SCALED',
+           width: parseFloat(preferredWidth)
+       };
+   }
+   
+   const containerDiv = document.getElementById("fn5vj6");
+   let fig = null;
+   
+   function renderPlot() {
+       if (fig === null) {
+           const plotSpec = {
+"data":{
+"tool":["blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper","blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper","blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper","blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper","blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper","blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper","blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper","blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper","blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper","blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper","blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper"],
+"tool_compared":["blastn","blastn","blastn","blastn","blastn","blastn","blastn","blastn","blastn","blastn","blastn","bowtie1","bowtie1","bowtie1","bowtie1","bowtie1","bowtie1","bowtie1","bowtie1","bowtie1","bowtie1","bowtie1","bowtie2","bowtie2","bowtie2","bowtie2","bowtie2","bowtie2","bowtie2","bowtie2","bowtie2","bowtie2","bowtie2","indelfree_bruteforce","indelfree_bruteforce","indelfree_bruteforce","indelfree_bruteforce","indelfree_bruteforce","indelfree_bruteforce","indelfree_bruteforce","indelfree_bruteforce","indelfree_bruteforce","indelfree_bruteforce","indelfree_bruteforce","indelfree_indexed","indelfree_indexed","indelfree_indexed","indelfree_indexed","indelfree_indexed","indelfree_indexed","indelfree_indexed","indelfree_indexed","indelfree_indexed","indelfree_indexed","indelfree_indexed","minimap2","minimap2","minimap2","minimap2","minimap2","minimap2","minimap2","minimap2","minimap2","minimap2","minimap2","mmseqs2","mmseqs2","mmseqs2","mmseqs2","mmseqs2","mmseqs2","mmseqs2","mmseqs2","mmseqs2","mmseqs2","mmseqs2","mummer4","mummer4","mummer4","mummer4","mummer4","mummer4","mummer4","mummer4","mummer4","mummer4","mummer4","sassy","sassy","sassy","sassy","sassy","sassy","sassy","sassy","sassy","sassy","sassy","strobealign","strobealign","strobealign","strobealign","strobealign","strobealign","strobealign","strobealign","strobealign","strobealign","strobealign","x_mapper","x_mapper","x_mapper","x_mapper","x_mapper","x_mapper","x_mapper","x_mapper","x_mapper","x_mapper","x_mapper"],
+"recall_diff":[0.0,0.22008139937651539,0.19673736377927575,0.22008139937651539,0.22008139937651539,-0.779612187258533,-0.05930763901841152,-0.3100203831499294,0.2200414324158695,-0.2345094721696731,-0.36696664091018094,-0.22008139937651539,0.0,-0.023344035597239632,0.0,0.0,-0.9996935866350484,-0.2793890383949269,-0.5301017825264448,-3.996696064589855E-5,-0.4545908715461885,-0.5870480402866963,-0.19673736377927575,0.023344035597239632,0.0,0.023344035597239632,0.023344035597239632,-0.9763495510378087,-0.25604500279768727,-0.5067577469292052,0.023304068636593733,-0.43124683594894886,-0.5637040046894567,-0.22008139937651539,0.0,-0.023344035597239632,0.0,0.0,-0.9996935866350484,-0.2793890383949269,-0.5301017825264448,-3.996696064589855E-5,-0.4545908715461885,-0.5870480402866963,-0.22008139937651539,0.0,-0.023344035597239632,0.0,0.0,-0.9996935866350484,-0.2793890383949269,-0.5301017825264448,-3.996696064589855E-5,-0.4545908715461885,-0.5870480402866963,0.779612187258533,0.9996935866350484,0.9763495510378087,0.9996935866350484,0.9996935866350484,0.0,0.7203045482401215,0.46959180410860357,0.9996536196744025,0.5451027150888599,0.41264554634835204,0.05930763901841152,0.2793890383949269,0.25604500279768727,0.2793890383949269,0.2793890383949269,-0.7203045482401215,0.0,-0.2507127441315179,0.279349071434281,-0.1752018331512616,-0.3076590018917694,0.3100203831499294,0.5301017825264448,0.5067577469292052,0.5301017825264448,0.5301017825264448,-0.46959180410860357,0.2507127441315179,0.0,0.5300618155657989,0.07551091098025631,-0.05694625776025153,-0.2200414324158695,3.996696064589855E-5,-0.023304068636593733,3.996696064589855E-5,3.996696064589855E-5,-0.9996536196744025,-0.279349071434281,-0.5300618155657989,0.0,-0.4545509045855426,-0.5870080733260504,0.2345094721696731,0.4545908715461885,0.43124683594894886,0.4545908715461885,0.4545908715461885,-0.5451027150888599,0.1752018331512616,-0.07551091098025631,0.4545509045855426,0.0,-0.13245716874050784,0.36696664091018094,0.5870480402866963,0.5637040046894567,0.5870480402866963,0.5870480402866963,-0.41264554634835204,0.3076590018917694,0.05694625776025153,0.5870080733260504,0.13245716874050784,0.0]
+},
+"mapping":{
+"x":"tool_compared",
+"y":"tool",
+"fill":"recall_diff"
+},
+"data_meta":{
+"series_annotations":[{
+"type":"str",
+"column":"tool"
+},{
+"type":"str",
+"column":"tool_compared"
+},{
+"type":"float",
+"column":"recall_diff"
+}]
+},
+"ggtitle":{
+"text":"Recall Differences (row minus column) at Hamming<=3 (ns_100000_nc_20000)"
+},
+"guides":{
+"x":{
+"title":"Tool (compared to)"
+},
+"y":{
+"title":"Tool"
+}
+},
+"ggsize":{
+"width":800.0,
+"height":800.0
+},
+"theme":{
+"name":"minimal",
+"axis_text_x":{
+"angle":45.0,
+"hjust":1.0,
+"blank":false
+},
+"plot_title":{
+"face":"bold",
+"size":14.0,
+"blank":false
+}
+},
+"kind":"plot",
+"scales":[{
+"name":"Recall\nDifference",
+"aesthetic":"fill",
+"limits":[-1.0,1.0],
+"low":"#2166AC",
+"mid":"#F7F7F7",
+"high":"#B2182B",
+"midpoint":0.0,
+"scale_mapper_kind":"color_gradient2"
+}],
+"layers":[{
+"geom":"tile",
+"mapping":{
+},
+"data_meta":{
+},
+"color":"white",
+"size":0.5,
+"data":{
+}
+},{
+"geom":"text",
+"mapping":{
+"label":"recall_diff"
+},
+"data_meta":{
+},
+"label_format":".2",
+"color":"white",
+"size":6.0,
+"fontface":"bold",
+"data":{
+}
+}],
+"metainfo_list":[],
+"spec_id":"28"
+};
+           fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
+       } else {
+           fig.updateView({});
+       }
+   }
+   
+   const renderImmediately = 
+       forceImmediateRender || (
+           sizing.width_mode === 'FIXED' && 
+           (sizing.height_mode === 'FIXED' || sizing.height_mode === 'SCALED')
+       );
+   
+   if (renderImmediately) {
+       renderPlot();
+   }
+   
+   if (!renderImmediately || responsive) {
+       // Set up observer for initial sizing or continuous monitoring
+       var observer = new ResizeObserver(function(entries) {
+           for (let entry of entries) {
+               if (entry.contentBoxSize && 
+                   entry.contentBoxSize[0].inlineSize > 0) {
+                   if (!responsive && observer) {
+                       observer.disconnect();
+                       observer = null;
+                   }
+                   renderPlot();
+                   if (!responsive) {
+                       break;
+                   }
+               }
+           }
+       });
+       
+       observer.observe(containerDiv);
+   }
+   
+   // ----------
+   })();
+   
+   </script>
+   </body>
+</html>

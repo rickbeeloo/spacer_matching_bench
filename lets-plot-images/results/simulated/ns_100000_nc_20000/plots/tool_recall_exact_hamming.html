@@ -1,0 +1,166 @@
+            <iframe src='about:blank' style='border:none !important;' width='700' height='450' srcdoc="&lt;html lang=&quot;en&quot;>
+   &lt;head>
+       &lt;meta charset=&quot;UTF-8&quot;>
+       &lt;style> html, body { margin: 0; padding: 0; overflow: hidden; } &lt;/style>
+       &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;library&quot; src=&quot;https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js&quot;>&lt;/script>
+   &lt;/head>
+   &lt;body>
+          &lt;div id=&quot;IyKPwf&quot; >&lt;/div>
+   &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;plot&quot;>
+   
+   (function() {
+   // ----------
+   
+   const forceImmediateRender = false;
+   const responsive = false;
+   
+   let sizing = {
+       width_mode: &quot;FIXED&quot;,
+       height_mode: &quot;FIXED&quot;,
+       width: 700.0, 
+       height: 450.0 
+   };
+   
+   const preferredWidth = document.body.dataset.letsPlotPreferredWidth;
+   if (preferredWidth !== undefined) {
+       sizing = {
+           width_mode: 'FIXED',
+           height_mode: 'SCALED',
+           width: parseFloat(preferredWidth)
+       };
+   }
+   
+   const containerDiv = document.getElementById(&quot;IyKPwf&quot;);
+   let fig = null;
+   
+   function renderPlot() {
+       if (fig === null) {
+           const plotSpec = {
+&quot;data&quot;:{
+&quot;tool&quot;:[&quot;bowtie1&quot;,&quot;indelfree_indexed&quot;,&quot;indelfree_bruteforce&quot;,&quot;x_mapper&quot;,&quot;mummer4&quot;,&quot;strobealign&quot;,&quot;minimap2&quot;,&quot;sassy&quot;,&quot;blastn&quot;,&quot;mmseqs2&quot;,&quot;bowtie2&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;indelfree_indexed&quot;,&quot;bowtie1&quot;,&quot;mummer4&quot;,&quot;x_mapper&quot;,&quot;strobealign&quot;,&quot;blastn&quot;,&quot;bowtie2&quot;,&quot;sassy&quot;,&quot;indelfree_bruteforce&quot;,&quot;minimap2&quot;,&quot;mummer4&quot;,&quot;indelfree_bruteforce&quot;,&quot;blastn&quot;,&quot;x_mapper&quot;,&quot;indelfree_indexed&quot;,&quot;strobealign&quot;,&quot;bowtie2&quot;,&quot;bowtie1&quot;,&quot;sassy&quot;,&quot;mmseqs2&quot;,&quot;bowtie1&quot;,&quot;x_mapper&quot;,&quot;minimap2&quot;,&quot;strobealign&quot;,&quot;bowtie2&quot;,&quot;mummer4&quot;,&quot;blastn&quot;,&quot;indelfree_indexed&quot;,&quot;mmseqs2&quot;,&quot;sassy&quot;,&quot;indelfree_bruteforce&quot;,&quot;blastn&quot;,&quot;x_mapper&quot;,&quot;bowtie2&quot;,&quot;indelfree_bruteforce&quot;,&quot;strobealign&quot;,&quot;sassy&quot;,&quot;mmseqs2&quot;,&quot;bowtie1&quot;,&quot;minimap2&quot;,&quot;mummer4&quot;,&quot;indelfree_indexed&quot;,&quot;sassy&quot;,&quot;bowtie2&quot;,&quot;x_mapper&quot;,&quot;indelfree_bruteforce&quot;,&quot;mummer4&quot;,&quot;mmseqs2&quot;,&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;minimap2&quot;,&quot;indelfree_indexed&quot;,&quot;strobealign&quot;],
+&quot;threshold&quot;:[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,5.0,5.0,5.0,5.0,5.0,5.0,5.0,5.0,5.0,5.0,5.0],
+&quot;recall_augmented&quot;:[1.0,1.0,1.0,0.9897669814601782,1.0,0.98303860456406,0.0012306375237432783,1.0,1.0,0.9968030177372321,1.0,6.129043003231071E-4,0.9392691782418974,1.0,1.0,0.7744778654941541,0.7123680090603245,0.8328969721195163,0.9056593717730922,1.0,1.0,1.0,4.094038279257911E-4,0.5950640138485295,1.0,0.834333851021507,0.5357182589657213,1.0,0.6790451990726113,0.9993324937588166,1.0,1.0,0.8389262939608485,1.0,0.4129519597133037,3.0641336495164E-4,0.5454091284538115,0.9766559644027604,0.4698982174735552,0.7799186006234846,1.0,0.7206109616050731,0.9999600330393541,1.0,0.8428344295713787,0.4090078440944986,0.967327268289143,1.0,0.5411600551527587,0.9989147573212648,0.7463434908529546,0.9904010449996371,3.0347211684995945E-4,0.4881909763225777,0.9999835069501712,0.9832388032224979,0.857114888419404,0.3624053603102107,1.0,0.446158746299884,0.6723326291059234,0.7991373944754675,0.8773563127704774,2.6883370005756547E-4,0.9965606819025244,0.48067173359749166]
+},
+&quot;mapping&quot;:{
+&quot;x&quot;:&quot;threshold&quot;,
+&quot;y&quot;:&quot;recall_augmented&quot;,
+&quot;color&quot;:&quot;tool&quot;,
+&quot;group&quot;:&quot;tool&quot;
+},
+&quot;data_meta&quot;:{
+&quot;series_annotations&quot;:[{
+&quot;type&quot;:&quot;str&quot;,
+&quot;column&quot;:&quot;tool&quot;
+},{
+&quot;type&quot;:&quot;int&quot;,
+&quot;column&quot;:&quot;threshold&quot;
+},{
+&quot;type&quot;:&quot;float&quot;,
+&quot;column&quot;:&quot;recall_augmented&quot;
+}]
+},
+&quot;ggtitle&quot;:{
+&quot;text&quot;:&quot;Tool Recall vs Hamming Distance Threshold (ns_100000_nc_20000)&quot;
+},
+&quot;guides&quot;:{
+&quot;x&quot;:{
+&quot;title&quot;:&quot;Hamming Distance Threshold&quot;
+},
+&quot;y&quot;:{
+&quot;title&quot;:&quot;Recall (tool-detected / all valid alignments)&quot;
+}
+},
+&quot;ggsize&quot;:{
+&quot;width&quot;:700.0,
+&quot;height&quot;:450.0
+},
+&quot;theme&quot;:{
+&quot;name&quot;:&quot;minimal&quot;,
+&quot;legend_position&quot;:&quot;right&quot;,
+&quot;plot_title&quot;:{
+&quot;face&quot;:&quot;bold&quot;,
+&quot;size&quot;:14.0,
+&quot;blank&quot;:false
+}
+},
+&quot;kind&quot;:&quot;plot&quot;,
+&quot;scales&quot;:[{
+&quot;name&quot;:&quot;Tool&quot;,
+&quot;aesthetic&quot;:&quot;color&quot;,
+&quot;breaks&quot;:[&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;indelfree_bruteforce&quot;,&quot;indelfree_indexed&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;sassy&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;],
+&quot;values&quot;:[&quot;#7C3018&quot;,&quot;#0275DC&quot;,&quot;#70FC28&quot;,&quot;#116B28&quot;,&quot;#305566&quot;,&quot;#172CBB&quot;,&quot;#8B7937&quot;,&quot;#F97762&quot;,&quot;#EBA60A&quot;,&quot;#ED3415&quot;,&quot;#E1FC16&quot;]
+},{
+&quot;name&quot;:&quot;Tool&quot;,
+&quot;aesthetic&quot;:&quot;shape&quot;,
+&quot;breaks&quot;:[&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;indelfree_bruteforce&quot;,&quot;indelfree_indexed&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;sassy&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;],
+&quot;values&quot;:[3.0,15.0,17.0,1.0,13.0,8.0,4.0,6.0,18.0,17.0,24.0]
+},{
+&quot;aesthetic&quot;:&quot;y&quot;,
+&quot;limits&quot;:[0.0,1.05]
+}],
+&quot;layers&quot;:[{
+&quot;geom&quot;:&quot;line&quot;,
+&quot;mapping&quot;:{
+},
+&quot;data_meta&quot;:{
+},
+&quot;size&quot;:1.5,
+&quot;data&quot;:{
+}
+},{
+&quot;geom&quot;:&quot;point&quot;,
+&quot;mapping&quot;:{
+&quot;shape&quot;:&quot;tool&quot;
+},
+&quot;data_meta&quot;:{
+},
+&quot;size&quot;:4.0,
+&quot;data&quot;:{
+}
+}],
+&quot;metainfo_list&quot;:[],
+&quot;spec_id&quot;:&quot;5&quot;
+};
+           fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
+       } else {
+           fig.updateView({});
+       }
+   }
+   
+   const renderImmediately = 
+       forceImmediateRender || (
+           sizing.width_mode === 'FIXED' &amp;&amp; 
+           (sizing.height_mode === 'FIXED' || sizing.height_mode === 'SCALED')
+       );
+   
+   if (renderImmediately) {
+       renderPlot();
+   }
+   
+   if (!renderImmediately || responsive) {
+       // Set up observer for initial sizing or continuous monitoring
+       var observer = new ResizeObserver(function(entries) {
+           for (let entry of entries) {
+               if (entry.contentBoxSize &amp;&amp; 
+                   entry.contentBoxSize[0].inlineSize > 0) {
+                   if (!responsive &amp;&amp; observer) {
+                       observer.disconnect();
+                       observer = null;
+                   }
+                   renderPlot();
+                   if (!responsive) {
+                       break;
+                   }
+               }
+           }
+       });
+       
+       observer.observe(containerDiv);
+   }
+   
+   // ----------
+   })();
+   
+   &lt;/script>
+   &lt;/body>
+&lt;/html>"></iframe>    

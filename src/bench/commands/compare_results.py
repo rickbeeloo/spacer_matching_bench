@@ -22,8 +22,17 @@ from bench.utils.functions import (
     get_seq_from_fastx,
     vstack_easy,
     match_intervals_with_tolerance,
+    calculate_hamming_distance,
+    calculate_edit_distance,
+    calculate_gap_affine_edit,
+
 )
 from bench.utils.tool_commands import load_tool_configs
+
+import warnings
+from pathlib import Path
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 
 # Logger is configured by cli.py with RichHandler
 logger = logging.getLogger(__name__)
@@ -1261,6 +1270,7 @@ def run_compare_results(
     gap_extend_penalty=5,
     logfile=None,
     skip_hyperfine=False,
+    tools_results_out_file=None,
 ):
     """
     This function reads alignment tool outputs, compares them against ground truth,
@@ -1282,6 +1292,7 @@ def run_compare_results(
         gap_extend_penalty: Gap extension penalty for alignment validation (default: 5)
         logfile: Path to log file for DEBUG output (handled by CLI, included here for documentation, do not set!)
         skip_hyperfine: If True, skip reading hyperfine results (default: False)
+        tools_results_out_file: Optional path to save the combined tools results TSV (Default: <input_dir>/tools_results.tsv)
 
     Returns:
         Tuple of (tools_results, hyperfine_results, performance_results)
@@ -1304,6 +1315,10 @@ def run_compare_results(
     logger.debug(f"Contigs: {contigs_path}")
     logger.debug(f"Spacers: {spacers_path}")
 
+    if tools_results_out_file:
+        logger.debug(f"Tools results will be saved to: {tools_results_out_file}")
+    else:
+        logger.debug(f"No custom tools results output file specified, will be saved to {input_dir}/tools_results.tsv")
     # Load tool configurations using the new clean function
     logger.debug("Loading tool configurations...")
     tools = load_tool_configs(
@@ -1350,7 +1365,12 @@ def run_compare_results(
     logger.info(f"Read {tools_results.height} total alignment results")
 
     # Write tools results
-    tools_output = f"{input_dir}/tools_results.tsv"
+
+    if tools_results_out_file:
+        tools_output = tools_results_out_file
+    else:
+        tools_output = f"{input_dir}/tools_results.tsv"
+        
     tools_results.write_csv(tools_output, separator="\t")
     logger.debug(f"Wrote tool results to {tools_output}")
 
@@ -1520,3 +1540,346 @@ def run_compare_results(
         None if skip_hyperfine else hyperfine_results,
         performance_results,
     )
+
+
+def calculate_all_distances_for_alignment(
+    spacer_seq: str,
+    contig_seq: str,
+    strand: bool,
+    gap_open: int = 5,
+    gap_extend: int = 5,
+) -> dict:
+    """
+    Calculate all three distance metrics for a single alignment.
+    
+    Args:
+        spacer_seq: Query sequence
+        contig_seq: Target sequence (already trimmed to region)
+        strand: Reverse complement flag
+        gap_open: Gap opening penalty for gap-affine
+        gap_extend: Gap extension penalty for gap-affine
+        
+    Returns:
+        Dictionary with hamming, edit, and gap_affine distances
+    """
+    # Calculate hamming distance
+    hamming_dist = calculate_hamming_distance(
+        spacer_seq=spacer_seq,
+        contig_seq=contig_seq,
+        strand=strand,
+        start=None,
+        end=None,
+        silent=True,
+    )
+    
+    # Calculate edit distance (minimal)
+    edit_dist = calculate_edit_distance(
+        spacer_seq=spacer_seq,
+        contig_seq=contig_seq,
+        strand=strand,
+        start=None,
+        end=None,
+    )
+    
+    # Calculate gap-affine distance
+    gap_affine_dist = calculate_gap_affine_edit(
+        spacer_seq=spacer_seq,
+        contig_seq=contig_seq,
+        strand=strand,
+        start=None,
+        end=None,
+        gap_open=gap_open,
+        gap_extend=gap_extend,
+    )
+    
+    return {
+        'distance_hamming': hamming_dist,
+        'distance_edit': edit_dist,
+        'distance_gap_affine': gap_affine_dist,
+    }
+
+
+def analyze_simulation_multi_metric(
+    sim_dir: str,
+    max_distance_threshold: int = 5,
+    coordinate_tolerance: int = 5,
+    gap_open: int = 5,
+    gap_extend: int = 5,
+    spacer_file: Optional[str] = None,
+    contig_file: Optional[str] = None,
+    ground_truth_file: Optional[str] = None,
+) -> pl.DataFrame:
+    """
+    Analyze all unique alignments in a simulation using three distance metrics.
+    
+    Args:
+        sim_dir: Path to simulation directory
+        max_distance_threshold: Maximum distance to classify as valid (applied to ALL metrics)
+        coordinate_tolerance: Tolerance for matching to ground truth
+        gap_open: Gap opening penalty for gap-affine alignment
+        gap_extend: Gap extension penalty for gap-affine alignment
+        spacer_file: Optional custom path to spacer FASTA file (default: sim_dir/simulated_data/simulated_spacers.fa)
+        contig_file: Optional custom path to contig FASTA file (default: sim_dir/simulated_data/simulated_contigs.fa)
+        ground_truth_file: Optional custom path to ground truth TSV file (default: sim_dir/simulated_data/planned_ground_truth.tsv)
+        
+    Returns:
+        DataFrame with all unique alignments and their distances calculated via all 3 metrics
+    """
+    sim_path = Path(sim_dir)
+    
+    # Determine file paths (use custom or defaults)
+    if ground_truth_file is None:
+        gt_file = sim_path / "simulated_data" / "planned_ground_truth.tsv"
+    else:
+        gt_file = Path(ground_truth_file)
+    
+    # Load ground truth (if exists)
+    if gt_file.exists():
+        ground_truth = pl.read_csv(str(gt_file), separator='\t')
+        print(f"Loaded ground truth: {ground_truth.height} entries")
+    else:
+        ground_truth = pl.DataFrame({
+            'spacer_id': [],
+            'contig_id': [],
+            'start': [],
+            'end': [],
+            'strand': [],
+            'mismatches': [],
+        })
+        print("No ground truth file found - all alignments will be 'not_in_plan'")
+    
+    # Load tool configs and results
+    tool_configs_dir = "/clusterfs/jgi/scratch/science/metagen/neri/code/blits/spacer_bench/tool_configs"
+    tools = load_tool_configs(tool_configs_dir)
+    
+    # Filter to tools that have output files in this simulation
+    raw_outputs_dir = sim_path / "raw_outputs"
+    available_tools = {}
+    for tool_name, tool_config in tools.items():
+        # Extract just the filename from the output_file path (after {output_dir}/)
+        output_filename = Path(tool_config['output_file']).name
+        output_file = raw_outputs_dir / output_filename
+        if output_file.exists():
+            available_tools[tool_name] = tool_config.copy()
+            available_tools[tool_name]['output_file'] = str(output_file)
+    
+    print(f"Found {len(available_tools)} tools with results: {list(available_tools.keys())}")
+    
+    # Debug: show what we found
+    if len(available_tools) > 0:
+        print("Sample tool config:")
+        first_tool = list(available_tools.keys())[0]
+        print(f"  {first_tool}: {available_tools[first_tool]['output_file']}")
+    
+    # Determine spacer and contig file paths (use custom or defaults)
+    if spacer_file is None:
+        spacer_file_path = str(sim_path / "simulated_data" / "simulated_spacers.fa")
+    else:
+        spacer_file_path = spacer_file
+    
+    if contig_file is None:
+        contig_file_path = str(sim_path / "simulated_data" / "simulated_contigs.fa")
+    else:
+        contig_file_path = contig_file
+    
+    # Load spacer lengths for filtering - convert dict to DataFrame
+    spacer_lengths_dict = read_fasta(spacer_file_path)
+    spacer_lengths = pl.DataFrame({
+        'spacer_id': list(spacer_lengths_dict.keys()),
+        'length': [len(seq) for seq in spacer_lengths_dict.values()]
+    })
+    
+    print("Reading tool results...")
+    all_tool_results = read_results(
+        tools=available_tools,
+        max_mismatches=max_distance_threshold,
+        spacer_lendf=spacer_lengths,
+        ref_file=contig_file_path,
+        threads=8,
+        use_duckdb=True,
+    )
+    
+    print(f"Total alignments from all tools: {all_tool_results.height}")
+    print(f"unique alignments from all tools: {all_tool_results.select(['spacer_id', 'contig_id', 'start', 'end', 'strand', 'mismatches']).unique().height}")
+
+    # Get unique alignments (by coordinates)
+    unique_alignments = all_tool_results.select(
+        ["spacer_id", "contig_id", "start", "end", "strand", "mismatches"]
+    ).unique()
+    
+    print(f"Unique alignment regions: {unique_alignments.height}")
+    
+    # Add alignment index
+    unique_alignments = unique_alignments.with_row_index("alignment_idx")
+    
+    # Create region index by merging overlapping intervals
+    merged_regions = merge_overlapping_intervals(
+        unique_alignments, tolerance=coordinate_tolerance
+    )
+    merged_regions = merged_regions.with_row_index("region_idx")
+    
+    # Join back to get region_idx for each alignment
+    unique_alignments = unique_alignments.join(
+        merged_regions,
+        on=["spacer_id", "contig_id", "strand"],
+        how="left",
+        suffix="_region"
+    ).filter(
+        # Keep only if alignment falls within merged region
+        (pl.col("start") >= pl.col("start_region") - coordinate_tolerance) &
+        (pl.col("start") <= pl.col("end_region") + coordinate_tolerance)
+    ).select(
+        [c for c in unique_alignments.columns] + ["region_idx"]
+    )
+    
+    print(f"Merged into {merged_regions.height} unique regions (with {coordinate_tolerance}bp tolerance)")
+    
+    # Match to ground truth
+    if ground_truth.height > 0:
+        matches_with_tolerance = match_intervals_with_tolerance(
+            ground_truth=ground_truth,
+            tool_results=unique_alignments,
+            tolerance=coordinate_tolerance,
+        )
+        
+        # Join ground truth mismatches to matches
+        matches_with_gt_data = matches_with_tolerance.join(
+            ground_truth.select(["spacer_id", "contig_id", "start", "end", "strand", "mismatches"]),
+            left_on=["spacer_id", "contig_id", "start_gt", "end_gt", "strand"],
+            right_on=["spacer_id", "contig_id", "start", "end", "strand"],
+            how="left",
+            suffix="_gt_data"
+        ).rename({"mismatches": "mismatches_gt"})
+        
+        # Add classification to unique alignments
+        unique_alignments = unique_alignments.join(
+            matches_with_gt_data.select([
+                "spacer_id", "contig_id", "start", "end", "strand",
+                "classification", "start_gt", "end_gt", "mismatches_gt"
+            ]),
+            on=["spacer_id", "contig_id", "start", "end", "strand"],
+            how="left"
+        )
+        
+        # Fill in classifications for non-matches (will verify later)
+        unique_alignments = unique_alignments.with_columns(
+            pl.col("classification").fill_null("needs_verification")
+        )
+    else:
+        # No ground truth - all alignments need verification
+        unique_alignments = unique_alignments.with_columns([
+            pl.lit("needs_verification").alias("classification"),
+            pl.lit(None).cast(pl.Int64).alias("start_gt"),
+            pl.lit(None).cast(pl.Int64).alias("end_gt"),
+            pl.lit(None).cast(pl.Int64).alias("mismatches_gt"),
+        ])
+    
+    # Load sequences for all alignments
+    print("Loading sequences for distance calculations...")
+    unique_alignments = populate_pldf_withseqs_needletail(
+        unique_alignments,
+        seqfile=spacer_file_path,
+        idcol="spacer_id",
+        seqcol="spacer_seq",
+        trim_to_region=False,
+        reverse_by_strand_col=False,
+    )
+    
+    unique_alignments = populate_pldf_withseqs_needletail(
+        unique_alignments,
+        seqfile=contig_file_path,
+        idcol="contig_id",
+        seqcol="contig_seq",
+        trim_to_region=True,
+        reverse_by_strand_col=True,
+    )
+    
+    # Calculate all three distance metrics for each alignment
+    print("Calculating all distance metrics (hamming, edit, gap_affine)...")
+    unique_alignments = unique_alignments.with_columns(
+        pl.struct(
+            pl.col("spacer_seq"),
+            pl.col("contig_seq"),
+            pl.col("strand")
+        ).map_elements(
+            lambda x: calculate_all_distances_for_alignment(
+                spacer_seq=x["spacer_seq"],
+                contig_seq=x["contig_seq"],
+                strand=x["strand"],
+                gap_open=gap_open,
+                gap_extend=gap_extend,
+            ),
+            return_dtype=pl.Struct({
+                'distance_hamming': pl.Int64,
+                'distance_edit': pl.Int64,
+                'distance_gap_affine': pl.Int64,
+            })
+        ).alias("distances")
+    ).unnest("distances")
+    
+    # Update classification based on all three metrics
+    # Only mark as invalid if ALL three metrics exceed threshold
+    unique_alignments = unique_alignments.with_columns(
+        pl.when(pl.col("classification") == "needs_verification")
+        .then(
+            pl.when(
+                (pl.col("distance_hamming") > max_distance_threshold) &
+                (pl.col("distance_edit") > max_distance_threshold) &
+                (pl.col("distance_gap_affine") > max_distance_threshold)
+            )
+            .then(pl.lit("invalid_alignment"))
+            .otherwise(pl.lit("positive_not_in_plan"))
+        )
+        .otherwise(pl.col("classification"))
+        .alias("classification")
+    )
+    
+    # Add planned_mismatches column (from GT if available, else recalculated hamming)
+    unique_alignments = unique_alignments.with_columns(
+        pl.when(pl.col("mismatches_gt").is_not_null())
+        .then(pl.col("mismatches_gt"))
+        .otherwise(pl.col("distance_hamming"))
+        .alias("planned_mismatches")
+    )
+    
+    # Collect which tools reported each alignment
+    tool_assignments = all_tool_results.group_by(
+        ["spacer_id", "contig_id", "start", "end", "strand"]
+    ).agg(
+        pl.col("tool").unique().alias("tools")
+    )
+    
+    # Join tools list
+    unique_alignments = unique_alignments.join(
+        tool_assignments,
+        on=["spacer_id", "contig_id", "start", "end", "strand"],
+        how="left"
+    )
+    
+    # Select final columns in desired order
+    final_columns = [
+        "alignment_idx",
+        "region_idx",
+        "classification",
+        "tools",
+        "spacer_id",
+        "contig_id",
+        "start",
+        "end",
+        "strand",
+        "distance_hamming",
+        "distance_edit",
+        "distance_gap_affine",
+        "planned_mismatches",
+        "start_gt",
+        "end_gt",
+        "spacer_seq",
+        "contig_seq",
+    ]
+    
+    result = unique_alignments.select(final_columns)
+    
+    print("Classification summary:")
+    print(result['classification'].value_counts(sort=True))
+    
+    return result

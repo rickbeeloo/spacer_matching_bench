@@ -615,6 +615,12 @@ def execute_tools(input_dir, skip_tools, only_tools, debug):
     default=False,
     help="Enable verbose (DEBUG) logging with file paths and line numbers",
 )
+@click.option(
+    "--tools-results-out-file","-tro",
+    type=click.Path(),
+    default=None,
+    help="Output file for combined tools results (default: <output_dir>/tools_results.tsv)",
+)
 def full_run(
     output_dir,
     num_contigs,
@@ -636,6 +642,7 @@ def full_run(
     gap_open_penalty,
     gap_extend_penalty,
     verbose,
+    tools_results_out_file,
 ):
     """
     Run the complete benchmarking pipeline.
@@ -710,6 +717,8 @@ def full_run(
             distance_metric=distance,
             gap_open_penalty=gap_open_penalty,
             gap_extend_penalty=gap_extend_penalty,
+            verbose=verbose,
+            tools_results_out_file=tools_results_out_file,
         )
         click.echo(click.style("✓ Step 4/4: Results comparison completed", fg="green"))
 
@@ -824,6 +833,12 @@ def full_run(
     default = None,
     help="Path to custom spacers file",
 )
+@click.option(
+    "--tools-results-out-file","-tro",
+    type=click.Path(),
+    default=None,
+    help="Output file for combined tools results (default: <input_dir>/tools_results.tsv)",
+)
 def compare_results(
     input_dir,
     max_mismatches,
@@ -838,7 +853,9 @@ def compare_results(
     verbose,
     skip_hyperfine,
     contigs,
-    spacers
+    spacers,
+    tools_results_out_file,
+
 ):
     """
     Compare and validate alignment tool results.
@@ -893,6 +910,7 @@ def compare_results(
             gap_extend_penalty=gap_extend_penalty,
             logfile=logfile,
             skip_hyperfine=skip_hyperfine,
+            tools_results_out_file=tools_results_out_file,
         )
     except Exception as e:
         logger.exception(f"Results comparison failed: {e}")

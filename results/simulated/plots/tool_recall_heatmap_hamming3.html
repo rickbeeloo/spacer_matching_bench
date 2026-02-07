@@ -1,0 +1,170 @@
+<html lang="en">
+   <head>
+       <meta charset="UTF-8">
+       <style> html, body { margin: 0; padding: 0; } </style>
+       <script type="text/javascript" data-lets-plot-script="library" src="https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js"></script>
+   </head>
+   <body>
+          <div id="gpK99G" ></div>
+   <script type="text/javascript" data-lets-plot-script="plot">
+   
+   (function() {
+   // ----------
+   
+   const forceImmediateRender = false;
+   const responsive = false;
+   
+   let sizing = {
+       width_mode: "MIN",
+       height_mode: "SCALED",
+       width: null, 
+       height: null 
+   };
+   
+   const preferredWidth = document.body.dataset.letsPlotPreferredWidth;
+   if (preferredWidth !== undefined) {
+       sizing = {
+           width_mode: 'FIXED',
+           height_mode: 'SCALED',
+           width: parseFloat(preferredWidth)
+       };
+   }
+   
+   const containerDiv = document.getElementById("gpK99G");
+   let fig = null;
+   
+   function renderPlot() {
+       if (fig === null) {
+           const plotSpec = {
+"data":{
+"tool":["minimap2","indelfree_bruteforce","strobealign","bowtie1","mummer4","x_mapper","mmseqs2","indelfree_indexed","blastn","sassy","bowtie2","bowtie1","x_mapper","minimap2","strobealign","bowtie2","mummer4","blastn","indelfree_indexed","mmseqs2","sassy","indelfree_bruteforce","sassy","indelfree_bruteforce","mummer4","bowtie1","strobealign","indelfree_indexed","minimap2","x_mapper","bowtie2","mmseqs2","blastn","sassy","x_mapper","indelfree_bruteforce","mummer4","blastn","mmseqs2","strobealign","bowtie1","indelfree_indexed","bowtie2","minimap2","strobealign","sassy","indelfree_bruteforce","blastn","mmseqs2","indelfree_indexed","x_mapper","mummer4","bowtie2","bowtie1","minimap2"],
+"simulation":["ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000"],
+"recall_augmented":[2.2486732827631698E-4,1.0,0.5834607581526899,1.0,0.473100870486413,0.44853536413516026,0.723073386701846,1.0,0.7817537652784857,0.9999600235860842,0.9765988067040446,1.0,0.4129519597133037,3.0641336495164E-4,0.5454091284538115,0.9766559644027604,0.4698982174735552,0.7799186006234846,1.0,0.7206109616050731,0.9999600330393541,1.0,0.9999899819675416,1.0,0.4715688238829894,1.0,0.5831897415347626,1.0,2.304147465437788E-4,0.46809256661991583,0.9771188138649569,0.7208775796433581,0.7796633941093969,0.9999976153116072,0.05471905986044803,1.0,0.500133542549995,0.7786246071225873,0.5291075065221228,0.18783475063313476,1.0,1.0,0.9782993356258137,0.0,0.5838184942913097,0.9999800162534472,1.0,0.780804945311147,0.7234116252114946,1.0,0.4738212920158271,0.47182957860939767,0.9771186101970397,1.0,3.0641744714299035E-4],
+"label":["0.0","1.0","0.58","1.0","0.47","0.45","0.72","1.0","0.78","1.0","0.98","1.0","0.41","0.0","0.55","0.98","0.47","0.78","1.0","0.72","1.0","1.0","1.0","1.0","0.47","1.0","0.58","1.0","0.0","0.47","0.98","0.72","0.78","1.0","0.05","1.0","0.5","0.78","0.53","0.19","1.0","1.0","0.98","0.0","0.58","1.0","1.0","0.78","0.72","1.0","0.47","0.47","0.98","1.0","0.0"]
+},
+"mapping":{
+"x":"simulation",
+"y":"tool",
+"fill":"recall_augmented"
+},
+"data_meta":{
+"series_annotations":[{
+"type":"str",
+"column":"tool"
+},{
+"type":"str",
+"column":"simulation"
+},{
+"type":"float",
+"column":"recall_augmented"
+},{
+"type":"str",
+"column":"label"
+}]
+},
+"ggtitle":{
+"text":"Tool Recall Across Simulations (Hamming Distance=<3)"
+},
+"guides":{
+"x":{
+"title":"Simulation"
+},
+"y":{
+"title":"Tool"
+}
+},
+"ggsize":{
+"width":900.0,
+"height":600.0
+},
+"theme":{
+"name":"minimal",
+"axis_text_x":{
+"angle":45.0,
+"hjust":1.0,
+"blank":false
+},
+"plot_title":{
+"face":"bold",
+"size":14.0,
+"blank":false
+}
+},
+"kind":"plot",
+"scales":[{
+"name":"Recall\n(Augmented)",
+"aesthetic":"fill",
+"limits":[0.0,1.0],
+"low":"#440154",
+"high":"#FDE724",
+"scale_mapper_kind":"color_gradient"
+}],
+"layers":[{
+"geom":"tile",
+"mapping":{
+},
+"data_meta":{
+},
+"color":"white",
+"size":0.5,
+"data":{
+}
+},{
+"geom":"text",
+"mapping":{
+"label":"label"
+},
+"data_meta":{
+},
+"color":"white",
+"size":6.0,
+"fontface":"bold",
+"data":{
+}
+}],
+"metainfo_list":[],
+"spec_id":"22"
+};
+           fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
+       } else {
+           fig.updateView({});
+       }
+   }
+   
+   const renderImmediately = 
+       forceImmediateRender || (
+           sizing.width_mode === 'FIXED' && 
+           (sizing.height_mode === 'FIXED' || sizing.height_mode === 'SCALED')
+       );
+   
+   if (renderImmediately) {
+       renderPlot();
+   }
+   
+   if (!renderImmediately || responsive) {
+       // Set up observer for initial sizing or continuous monitoring
+       var observer = new ResizeObserver(function(entries) {
+           for (let entry of entries) {
+               if (entry.contentBoxSize && 
+                   entry.contentBoxSize[0].inlineSize > 0) {
+                   if (!responsive && observer) {
+                       observer.disconnect();
+                       observer = null;
+                   }
+                   renderPlot();
+                   if (!responsive) {
+                       break;
+                   }
+               }
+           }
+       });
+       
+       observer.observe(containerDiv);
+   }
+   
+   // ----------
+   })();
+   
+   </script>
+   </body>
+</html>
