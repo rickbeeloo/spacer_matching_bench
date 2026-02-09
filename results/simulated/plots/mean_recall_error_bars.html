@@ -5,7 +5,7 @@
        <script type="text/javascript" data-lets-plot-script="library" src="https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js"></script>
    </head>
    <body>
-          <div id="FvbTUW" ></div>
+          <div id="Kv7PyV" ></div>
    <script type="text/javascript" data-lets-plot-script="plot">
    
    (function() {
@@ -30,17 +30,17 @@
        };
    }
    
-   const containerDiv = document.getElementById("FvbTUW");
+   const containerDiv = document.getElementById("Kv7PyV");
    let fig = null;
    
    function renderPlot() {
        if (fig === null) {
            const plotSpec = {
 "data":{
-"tool":["sassy","mmseqs2","mummer4","indelfree_bruteforce","indelfree_indexed","bowtie1","minimap2","bowtie2","strobealign","blastn","x_mapper"],
-"mean_recall":[0.9999775340316068,0.6834162119367788,0.47730620660046996,1.0,1.0,1.0,2.1362257738294523E-4,0.9771583061589231,0.49674257461314164,0.7801530624890203,0.371624048468931],
-"std_max":[0.9999946897214282,0.7696865785661204,0.49011793400047926,1.0,1.0,1.0,3.39384301535124E-4,0.977842131892385,0.6702129243791477,0.7813381915884814,0.5503714751029292],
-"std_min":[0.9999603783417854,0.5971458453074372,0.46449447920046066,1.0,1.0,1.0,8.786085323076644E-5,0.9764744804254611,0.3232722248471356,0.7789679333895592,0.19287662183493276]
+"tool":["indelfree_bruteforce","sassy","mummer4","strobealign","blastn","minimap2","indelfree_indexed","x_mapper","bowtie2","mmseqs2","bowtie1"],
+"mean_recall":[1.0,0.9831600381069382,0.509957775677998,0.47405591444284806,0.7765586270327943,2.5921064361645923E-4,1.0,0.3716071784604396,0.9757762886568381,0.6856203944988585,1.0],
+"std_max":[1.0,0.9836543368061433,0.5169139277919932,0.6413350648029579,0.7787242557703982,3.023472830256183E-4,1.0,0.550342527177208,0.9785494536189187,0.7629094207872275,1.0],
+"std_min":[1.0,0.982665739407733,0.5030016235640029,0.30677676408273824,0.7743929982951905,2.1607400420730016E-4,1.0,0.19287182974367126,0.9730031236947575,0.6083313682104895,1.0]
 },
 "mapping":{
 "x":"tool",
@@ -99,11 +99,6 @@
 "breaks":["blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper"],
 "values":["#7C3018","#0275DC","#70FC28","#116B28","#305566","#172CBB","#8B7937","#F97762","#EBA60A","#ED3415","#E1FC16"]
 },{
-"name":"tool",
-"aesthetic":"shape",
-"breaks":["blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper"],
-"values":[3.0,15.0,17.0,1.0,13.0,8.0,4.0,6.0,18.0,17.0,24.0]
-},{
 "aesthetic":"y",
 "limits":[0.0,1.05]
 }],
@@ -131,7 +126,7 @@
 }
 }],
 "metainfo_list":[],
-"spec_id":"42"
+"spec_id":"47"
 };
            fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
        } else {

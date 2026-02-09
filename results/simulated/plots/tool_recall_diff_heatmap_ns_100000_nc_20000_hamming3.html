@@ -5,7 +5,7 @@
        <script type="text/javascript" data-lets-plot-script="library" src="https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js"></script>
    </head>
    <body>
-          <div id="E0YAlw" ></div>
+          <div id="TENyVM" ></div>
    <script type="text/javascript" data-lets-plot-script="plot">
    
    (function() {
@@ -30,7 +30,7 @@
        };
    }
    
-   const containerDiv = document.getElementById("E0YAlw");
+   const containerDiv = document.getElementById("TENyVM");
    let fig = null;
    
    function renderPlot() {
@@ -59,7 +59,7 @@
 }]
 },
 "ggtitle":{
-"text":"Recall Differences (row minus column) at Hamming<=3 (ns_100000_nc_20000)"
+"text":"Recall Differences (row minus column) at Hamming ≤ 3 (ns_100000_nc_20000)"
 },
 "guides":{
 "x":{
@@ -70,8 +70,8 @@
 }
 },
 "ggsize":{
-"width":800.0,
-"height":800.0
+"width":1000.0,
+"height":900.0
 },
 "theme":{
 "name":"minimal",
@@ -114,15 +114,15 @@
 },
 "data_meta":{
 },
-"label_format":".2",
-"color":"white",
-"size":6.0,
+"label_format":".3f",
+"color":"black",
+"size":5.0,
 "fontface":"bold",
 "data":{
 }
 }],
 "metainfo_list":[],
-"spec_id":"50"
+"spec_id":"56"
 };
            fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
        } else {

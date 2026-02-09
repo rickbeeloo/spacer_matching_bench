@@ -5,7 +5,7 @@
        <script type="text/javascript" data-lets-plot-script="library" src="https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js"></script>
    </head>
    <body>
-          <div id="gpK99G" ></div>
+          <div id="eIewML" ></div>
    <script type="text/javascript" data-lets-plot-script="plot">
    
    (function() {
@@ -30,22 +30,22 @@
        };
    }
    
-   const containerDiv = document.getElementById("gpK99G");
+   const containerDiv = document.getElementById("eIewML");
    let fig = null;
    
    function renderPlot() {
        if (fig === null) {
            const plotSpec = {
 "data":{
-"tool":["minimap2","indelfree_bruteforce","strobealign","bowtie1","mummer4","x_mapper","mmseqs2","indelfree_indexed","blastn","sassy","bowtie2","bowtie1","x_mapper","minimap2","strobealign","bowtie2","mummer4","blastn","indelfree_indexed","mmseqs2","sassy","indelfree_bruteforce","sassy","indelfree_bruteforce","mummer4","bowtie1","strobealign","indelfree_indexed","minimap2","x_mapper","bowtie2","mmseqs2","blastn","sassy","x_mapper","indelfree_bruteforce","mummer4","blastn","mmseqs2","strobealign","bowtie1","indelfree_indexed","bowtie2","minimap2","strobealign","sassy","indelfree_bruteforce","blastn","mmseqs2","indelfree_indexed","x_mapper","mummer4","bowtie2","bowtie1","minimap2"],
-"simulation":["ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000"],
-"recall_augmented":[2.2486732827631698E-4,1.0,0.5834607581526899,1.0,0.473100870486413,0.44853536413516026,0.723073386701846,1.0,0.7817537652784857,0.9999600235860842,0.9765988067040446,1.0,0.4129519597133037,3.0641336495164E-4,0.5454091284538115,0.9766559644027604,0.4698982174735552,0.7799186006234846,1.0,0.7206109616050731,0.9999600330393541,1.0,0.9999899819675416,1.0,0.4715688238829894,1.0,0.5831897415347626,1.0,2.304147465437788E-4,0.46809256661991583,0.9771188138649569,0.7208775796433581,0.7796633941093969,0.9999976153116072,0.05471905986044803,1.0,0.500133542549995,0.7786246071225873,0.5291075065221228,0.18783475063313476,1.0,1.0,0.9782993356258137,0.0,0.5838184942913097,0.9999800162534472,1.0,0.780804945311147,0.7234116252114946,1.0,0.4738212920158271,0.47182957860939767,0.9771186101970397,1.0,3.0641744714299035E-4],
-"label":["0.0","1.0","0.58","1.0","0.47","0.45","0.72","1.0","0.78","1.0","0.98","1.0","0.41","0.0","0.55","0.98","0.47","0.78","1.0","0.72","1.0","1.0","1.0","1.0","0.47","1.0","0.58","1.0","0.0","0.47","0.98","0.72","0.78","1.0","0.05","1.0","0.5","0.78","0.53","0.19","1.0","1.0","0.98","0.0","0.58","1.0","1.0","0.78","0.72","1.0","0.47","0.47","0.98","1.0","0.0"]
+"tool":["bowtie2","strobealign","mmseqs2","minimap2","indelfree_indexed","indelfree_bruteforce","bowtie1","mummer4","x_mapper","sassy","blastn","x_mapper","indelfree_indexed","mummer4","strobealign","sassy","mmseqs2","bowtie1","indelfree_bruteforce","blastn","bowtie2","minimap2","minimap2","bowtie1","strobealign","bowtie2","mmseqs2","blastn","indelfree_indexed","mummer4","sassy","blastn","indelfree_indexed","strobealign","x_mapper","bowtie1","minimap2","bowtie2","mmseqs2","indelfree_bruteforce","mummer4","strobealign","indelfree_bruteforce","indelfree_indexed","mummer4","blastn","bowtie1","mmseqs2","x_mapper","bowtie2","sassy","indelfree_bruteforce","blastn","minimap2","sassy","x_mapper","strobealign","bowtie1","bowtie2","mummer4","indelfree_indexed","mmseqs2"],
+"simulation":["ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_500000_nc_100000","ns_500000_nc_100000","ns_500000_nc_100000","ns_500000_nc_100000","ns_500000_nc_100000","ns_500000_nc_100000","ns_500000_nc_100000","ns_500000_nc_100000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000"],
+"recall":[0.9763789364275077,0.5858393547806794,0.722493728700067,2.2486732827631698E-4,1.0,1.0,1.0,0.5093544808562948,0.44852037297994185,0.9838994992954158,0.7790903367013462,0.41293530681303453,1.0,0.5073672430790547,0.5478604353734247,0.9829374383842691,0.7199814819749007,1.0,1.0,0.7773740374623644,0.9764028403186699,3.0641336495164E-4,2.2794033116756984E-4,1.0,0.3506640661648015,0.9702118325477651,0.6991907787895245,0.7729694480672642,1.0,0.5029797417204804,0.9831596874373872,0.7765477860148267,1.0,0.5855640152274093,0.4680424764576237,1.0,2.304147465437788E-4,0.9769384892807053,0.7203265878581446,1.0,0.5082348226808255,0.1881777487354255,1.0,1.0,0.5234038696814536,0.7753695944060613,1.0,0.5289176768556036,0.054723105284621675,0.9777802156394657,0.9825499450288688,1.0,0.7780005595449034,3.0641744714299035E-4,0.9832536203887505,0.4738146307669762,0.586229866375348,1.0,0.9769454177269155,0.5084064960498794,1.0,0.7228121128149105],
+"label":["0.98","0.59","0.72","0.0","1.0","1.0","1.0","0.51","0.45","0.98","0.78","0.41","1.0","0.51","0.55","0.98","0.72","1.0","1.0","0.78","0.98","0.0","0.0","1.0","0.35","0.97","0.7","0.77","1.0","0.5","0.98","0.78","1.0","0.59","0.47","1.0","0.0","0.98","0.72","1.0","0.51","0.19","1.0","1.0","0.52","0.78","1.0","0.53","0.05","0.98","0.98","1.0","0.78","0.0","0.98","0.47","0.59","1.0","0.98","0.51","1.0","0.72"]
 },
 "mapping":{
 "x":"simulation",
 "y":"tool",
-"fill":"recall_augmented"
+"fill":"recall"
 },
 "data_meta":{
 "series_annotations":[{
@@ -56,14 +56,14 @@
 "column":"simulation"
 },{
 "type":"float",
-"column":"recall_augmented"
+"column":"recall"
 },{
 "type":"str",
 "column":"label"
 }]
 },
 "ggtitle":{
-"text":"Tool Recall Across Simulations (Hamming Distance=<3)"
+"text":"Tool Recall Across Simulations (Hamming Distance ≤ 3)"
 },
 "guides":{
 "x":{
@@ -123,7 +123,7 @@
 }
 }],
 "metainfo_list":[],
-"spec_id":"22"
+"spec_id":"44"
 };
            fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
        } else {

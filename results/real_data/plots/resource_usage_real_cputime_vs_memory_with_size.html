@@ -1,0 +1,225 @@
+<html lang="en">
+   <head>
+       <meta charset="UTF-8">
+       <style> html, body { margin: 0; padding: 0; } </style>
+       <script type="text/javascript" data-lets-plot-script="library" src="https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js"></script>
+   </head>
+   <body>
+          <div id="ZYXCZp" ></div>
+   <script type="text/javascript" data-lets-plot-script="plot">
+   
+   (function() {
+   // ----------
+   
+   const forceImmediateRender = false;
+   const responsive = false;
+   
+   let sizing = {
+       width_mode: "MIN",
+       height_mode: "SCALED",
+       width: null, 
+       height: null 
+   };
+   
+   const preferredWidth = document.body.dataset.letsPlotPreferredWidth;
+   if (preferredWidth !== undefined) {
+       sizing = {
+           width_mode: 'FIXED',
+           height_mode: 'SCALED',
+           width: parseFloat(preferredWidth)
+       };
+   }
+   
+   const containerDiv = document.getElementById("ZYXCZp");
+   let fig = null;
+   
+   function renderPlot() {
+       if (fig === null) {
+           const plotSpec = {
+"data":{
+"Peak_Memory_Gb":[0.6315422058105469,0.6804008483886719,0.6959114074707031,1.309326171875,2.8206253051757813,0.17908477783203125,0.5047492980957031,0.8279571533203125,1.2249336242675781,4.152011871337891,8.023822784423828,146.3696632385254,0.778076171875,0.7788581848144531,1.0963478088378906,1.8389434814453125,6.27984619140625,11.623619079589844,151.4826431274414,22.03622055053711,27.816650390625,15.603828430175781,27.876842498779297,28.41602325439453,31.405658721923828,35.8313102722168,40.75720977783203,0.761932373046875,0.7609748840332031,1.122314453125,1.6501884460449219,5.146064758300781,9.847667694091797,90.6913948059082,9.994888305664063,9.981986999511719,10.333229064941406,10.748485565185547,15.302726745605469,22.83514404296875,141.7624626159668,0.38628387451171875,0.12126541137695313,0.2599945068359375,0.278717041015625,0.4282646179199219,2.3141326904296875,9.023921966552734,2.9534835815429688,3.1424636840820313,10.425003051757813,27.940441131591797,0.6333770751953125,0.6698341369628906,2.023406982421875,3.546672821044922,11.724372863769531,21.288227081298828,116.66894912719727,6.043067932128906,6.067150115966797,4.178245544433594,7.346378326416016,10.748245239257813,10.859634399414063,244.27741622924805],
+"CPU_Time_Hours":[9.02,44.79055555555556,94.7238888888889,556.6355555555556,1135.9816666666666,0.041666666666666664,0.0425,0.09194444444444444,0.10611111111111111,4.071111111111111,10.273333333333333,117.29,0.0525,0.0625,0.16,2.8833333333333333,13.633333333333333,30.73777777777778,994.8672222222223,197.76666666666668,371.13166666666666,2.877222222222222,4.056111111111111,20.726111111111113,44.38055555555555,185.8361111111111,418.19555555555553,0.029166666666666667,0.043333333333333335,0.14666666666666667,2.607222222222222,15.636111111111111,34.18666666666667,517.35,0.06666666666666667,0.06583333333333333,0.07194444444444445,0.07277777777777777,0.07166666666666667,0.13361111111111112,5.366666666666666,0.006666666666666667,0.008333333333333333,0.034444444444444444,0.08166666666666667,0.25833333333333336,4.644444444444445,47.87555555555556,26.244444444444444,37.25222222222222,212.27833333333334,439.59777777777776,0.005277777777777778,0.005,0.009444444444444445,0.015,0.03333333333333333,0.08083333333333333,0.32083333333333336,0.025,0.029166666666666667,0.058611111111111114,0.065,0.42777777777777776,3.363888888888889,45.495555555555555],
+"base_tool":["blastn","blastn","blastn","blastn","blastn","bowtie1","bowtie1","bowtie1","bowtie1","bowtie1","bowtie1","bowtie1","bowtie2","bowtie2","bowtie2","bowtie2","bowtie2","bowtie2","bowtie2","indelfree_bruteforce","indelfree_bruteforce","indelfree_indexed","indelfree_indexed","indelfree_indexed","indelfree_indexed","indelfree_indexed","indelfree_indexed","minimap2","minimap2","minimap2","minimap2","minimap2","minimap2","minimap2","mmseqs2","mmseqs2","mmseqs2","mmseqs2","mmseqs2","mmseqs2","mmseqs2","mummer4","mummer4","mummer4","mummer4","mummer4","mummer4","mummer4","sassy","sassy","sassy","sassy","strobealign","strobealign","strobealign","strobealign","strobealign","strobealign","strobealign","x_mapper","x_mapper","x_mapper","x_mapper","x_mapper","x_mapper","x_mapper"],
+"size_rank":[2.0,3.0,4.0,5.0,6.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,1.0,2.0,1.0,2.0,3.0,4.0,5.0,6.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,1.0,2.0,3.0,4.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0]
+},
+"mapping":{
+"x":"CPU_Time_Hours",
+"y":"Peak_Memory_Gb",
+"color":"base_tool"
+},
+"data_meta":{
+"series_annotations":[{
+"type":"str",
+"column":"tool"
+},{
+"type":"str",
+"column":"fraction"
+},{
+"type":"float",
+"column":"fraction_float"
+},{
+"type":"str",
+"column":"BaseJobID"
+},{
+"type":"str",
+"column":"status"
+},{
+"type":"bool",
+"column":"is_long_retry"
+},{
+"type":"bool",
+"column":"replaced_failed_job"
+},{
+"type":"int",
+"column":"Elapsed_Seconds"
+},{
+"type":"int",
+"column":"CPU_Time_Seconds"
+},{
+"type":"float",
+"column":"MaxRSS_MB"
+},{
+"type":"float",
+"column":"ReqMem_MB"
+},{
+"type":"int",
+"column":"AllocCPUS"
+},{
+"type":"float",
+"column":"Peak_Memory_Gb"
+},{
+"type":"float",
+"column":"CPU_Time_Hours"
+},{
+"type":"float",
+"column":"Walltime_Hours"
+},{
+"type":"str",
+"column":"max_distance"
+},{
+"type":"str",
+"column":"tool_display"
+},{
+"type":"float",
+"column":"total_size_Mbp"
+},{
+"type":"int",
+"column":"num_contigs_val"
+},{
+"type":"str",
+"column":"base_tool"
+},{
+"type":"int",
+"column":"size_rank"
+}]
+},
+"ggtitle":{
+"text":"Memory vs CPU Time (marker size ∝ dataset size)"
+},
+"guides":{
+"x":{
+"title":"Total CPU Time (hours)"
+},
+"y":{
+"title":"Peak Memory (GB)"
+}
+},
+"ggsize":{
+"width":800.0,
+"height":650.0
+},
+"theme":{
+"name":"minimal",
+"axis_title":{
+"face":"bold",
+"size":11.0,
+"blank":false
+},
+"plot_title":{
+"face":"bold",
+"size":14.0,
+"blank":false
+}
+},
+"kind":"plot",
+"scales":[{
+"name":"Tool",
+"aesthetic":"color",
+"breaks":["blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper"],
+"values":["#7C3018","#0275DC","#70FC28","#116B28","#305566","#172CBB","#8B7937","#F97762","#EBA60A","#ED3415","#E1FC16"]
+},{
+"name":"Tool",
+"aesthetic":"shape",
+"breaks":["blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper"],
+"values":[3.0,15.0,17.0,1.0,13.0,8.0,4.0,6.0,18.0,17.0,24.0]
+},{
+"name":"Dataset Size (Mbp)",
+"aesthetic":"size",
+"breaks":[1.0,2.0,3.0,4.0,5.0,6.0,7.0],
+"labels":["7.0","9.7","57.1","123.7","715.1","1504.5","18870.6"],
+"range":[4.0,12.0]
+},{
+"aesthetic":"x",
+"trans":"log10"
+},{
+"aesthetic":"y",
+"trans":"log10"
+}],
+"layers":[{
+"geom":"point",
+"mapping":{
+"shape":"base_tool",
+"size":"size_rank"
+},
+"data_meta":{
+},
+"alpha":0.4,
+"data":{
+}
+}],
+"metainfo_list":[],
+"spec_id":"25"
+};
+           fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
+       } else {
+           fig.updateView({});
+       }
+   }
+   
+   const renderImmediately = 
+       forceImmediateRender || (
+           sizing.width_mode === 'FIXED' && 
+           (sizing.height_mode === 'FIXED' || sizing.height_mode === 'SCALED')
+       );
+   
+   if (renderImmediately) {
+       renderPlot();
+   }
+   
+   if (!renderImmediately || responsive) {
+       // Set up observer for initial sizing or continuous monitoring
+       var observer = new ResizeObserver(function(entries) {
+           for (let entry of entries) {
+               if (entry.contentBoxSize && 
+                   entry.contentBoxSize[0].inlineSize > 0) {
+                   if (!responsive && observer) {
+                       observer.disconnect();
+                       observer = null;
+                   }
+                   renderPlot();
+                   if (!responsive) {
+                       break;
+                   }
+               }
+           }
+       });
+       
+       observer.observe(containerDiv);
+   }
+   
+   // ----------
+   })();
+   
+   </script>
+   </body>
+</html>
