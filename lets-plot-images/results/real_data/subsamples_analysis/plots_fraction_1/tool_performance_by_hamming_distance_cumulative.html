@@ -5,7 +5,7 @@
        &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;library&quot; src=&quot;https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js&quot;>&lt;/script>
    &lt;/head>
    &lt;body>
-          &lt;div id=&quot;Gks3qs&quot; >&lt;/div>
+          &lt;div id=&quot;fEV8h5&quot; >&lt;/div>
    &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;plot&quot;>
    
    (function() {
@@ -30,16 +30,16 @@
        };
    }
    
-   const containerDiv = document.getElementById(&quot;Gks3qs&quot;);
+   const containerDiv = document.getElementById(&quot;fEV8h5&quot;);
    let fig = null;
    
    function renderPlot() {
        if (fig === null) {
            const plotSpec = {
 &quot;data&quot;:{
-&quot;tool&quot;:[&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;indelfree_indexed&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;,&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;indelfree_indexed&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;,&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;indelfree_indexed&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;,&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;indelfree_indexed&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;],
-&quot;distance_hamming&quot;:[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0],
-&quot;recall&quot;:[1.0,1.0,1.0,0.10655784738344312,0.001002224207439679,0.9757475919801197,1.0,0.7871702728502906,0.5459809311228669,0.918407901360169,0.999982033557565,0.9999850800412822,0.11301540645873295,5.853154485470772E-4,0.9268835315214202,0.8620729493805639,0.6049730019050679,0.42648241116531593,0.8538530307304798,0.9999707763030613,0.9992594010188268,0.12128078707944172,4.260178232712279E-4,0.8539743033872311,0.7044629702215076,0.4702543701082289,0.3388977753943977,0.7884862868675158,0.9999584180799574,0.9728107519756718,0.13701628153073617,3.245555488321826E-4,0.7401411974735345,0.5480387909069176,0.3647575122178293,0.26396380432466693]
+&quot;tool&quot;:[&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;,&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;,&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;,&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;],
+&quot;distance_hamming&quot;:[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0],
+&quot;recall&quot;:[1.0,1.0,1.0,0.0010029593243828774,0.9750854966391713,1.0,0.7871760116812906,0.5460097739448023,0.9183085310615563,0.999973196700919,0.9999783391943474,5.850755023222643E-4,0.9254155348960643,0.8618126307586089,0.6045275291308617,0.42618803870053557,0.8533277626735952,0.9999514963215025,0.9992328834791661,4.2498730669487164E-4,0.8510956879097875,0.7033249582893834,0.4690652650669433,0.33807392175671835,0.7866364715222657,0.9999282035854322,0.9716903989171108,3.224397589650083E-4,0.734704647714274,0.5451041436622209,0.3623734228567063,0.26226328492385653]
 },
 &quot;mapping&quot;:{
 &quot;x&quot;:&quot;distance_hamming&quot;,
@@ -60,7 +60,7 @@
 }]
 },
 &quot;ggtitle&quot;:{
-&quot;text&quot;:&quot;Tool Performance by Hamming Distance Threshold (Cumulative, Fraction 1)&quot;
+&quot;text&quot;:&quot;Tool Performance by Hamming Distance Threshold (Cumulative)&quot;
 },
 &quot;guides&quot;:{
 &quot;x&quot;:{
@@ -122,7 +122,7 @@
 }
 }],
 &quot;metainfo_list&quot;:[],
-&quot;spec_id&quot;:&quot;2&quot;
+&quot;spec_id&quot;:&quot;14&quot;
 };
            fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
        } else {

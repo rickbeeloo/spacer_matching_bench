@@ -5,7 +5,7 @@
        &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;library&quot; src=&quot;https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js&quot;>&lt;/script>
    &lt;/head>
    &lt;body>
-          &lt;div id=&quot;IwqbV1&quot; >&lt;/div>
+          &lt;div id=&quot;PCw3XR&quot; >&lt;/div>
    &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;plot&quot;>
    
    (function() {
@@ -30,7 +30,7 @@
        };
    }
    
-   const containerDiv = document.getElementById(&quot;IwqbV1&quot;);
+   const containerDiv = document.getElementById(&quot;PCw3XR&quot;);
    let fig = null;
    
    function renderPlot() {
@@ -38,9 +38,9 @@
            const plotSpec = {
 &quot;data&quot;:{
 &quot;tool&quot;:[&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;indelfree_bruteforce&quot;,&quot;indelfree_indexed&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;sassy&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;],
-&quot;mean_recall&quot;:[0.7864883988395683,0.9999468829104743,0.9731810502815099,0.3045709147119154,0.5684787533749096,3.591732904880551E-4,0.7495734816397712,0.5433283803542176,0.9758964623459366,0.5143945547700252,0.4675006777660974],
-&quot;lower_error&quot;:[0.7836629584943422,0.9999305697173471,0.9726573693952697,0.3045709147119154,-0.041701325962140046,3.1021641073959206E-4,0.7362342174477222,0.5366668538662438,0.9758964623459366,0.3027758197593099,0.17965607090221025],
-&quot;upper_error&quot;:[0.7893138391847945,0.9999631961036015,0.9737047311677501,0.3045709147119154,1.1786588327119594,4.0813017023651817E-4,0.7629127458318202,0.5499899068421914,0.9758964623459366,0.7260132897807404,0.7553452846299845]
+&quot;mean_recall&quot;:[0.78427784616998,0.9999294138177921,0.9708600153041349,0.8171631422365416,0.8768611575358406,4.544947169485156E-4,0.7510511968332888,0.5421780834264488,0.9769168846145656,0.6028409990562116,0.6276508519963232],
+&quot;lower_error&quot;:[0.7782824350420627,0.9998963714272652,0.9672472783325646,0.474788329092206,0.5512137304079286,2.9381392679546267E-4,0.7377412179423913,0.5275684107249191,0.9743313149486283,0.4772467317603545,0.42709670875773487],
+&quot;upper_error&quot;:[0.7902732572978972,0.999962456208319,0.9744727522757052,1.1595379553808773,1.2025085846637524,6.151755071015686E-4,0.7643611757241863,0.5567877561279785,0.9795024542805029,0.7284352663520687,0.8282049952349115]
 },
 &quot;mapping&quot;:{
 &quot;x&quot;:&quot;tool&quot;,
@@ -137,7 +137,7 @@
 }
 }],
 &quot;metainfo_list&quot;:[],
-&quot;spec_id&quot;:&quot;35&quot;
+&quot;spec_id&quot;:&quot;2&quot;
 };
            fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
        } else {
