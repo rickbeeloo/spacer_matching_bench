@@ -203,3 +203,19 @@ The panels (from top to bottom) are sorted by number of mismatches. The sets in 
 #### D. 3 mismatches   
 
 ![](figures/supp/upset_3.svg)  
+
+
+
+
+supplementary note nnn: Coordinate Tolerance Matching Example
+To illustrate the necessity for this coordinate tolerance matching, consider the following case from our synthetic dataset where three different tools detected the same biological match but reported slightly different coordinates:
+
+| Source | Spacer ID | Contig ID | Query Start | Query End | Target Start | Target End | Strand | Mismatches/Cost (tool - reported) | Notes |
+|:-------|:-------|:-------|-------:|-------:|-------:|-------:|:-------|-------:|:-------|
+| Ground Truth | 1c47e31b_spacer_10034 | 1c47e31b_contig_1828 | \- | \- | 5001 | 5036 | reverse | 1 |  |
+| BLASTn | 1c47e31b_spacer_10034 | 1c47e31b_contig_1828 | 1 | 34 | 5036 | 5003 | reverse | 0 |  |
+| MMseqs2 | 1c47e31b_spacer_10034 | 1c47e31b_contig_1828 | 1 | 35 | 5036 | 5002 | reverse | 1 |  |
+| Sassy | 1c47e31b_spacer_10034 | 1c47e31b_contig_1828 | \- | \- | 5000 | 5036 | reverse | 1 | CIGAR: 34=1I1= |
+
+In this example, BLASTn reports the ungapped alignment at contig positions 5003-5036 (0 reported mismatches), MMseqs2 reports 5002-5036 (1 reported mismatch over the terminal base), and Sassy reports 5000-5036 (1 reported insertion, suggesting the position 5000 in the contig matches that of the last position in the spacer). The ground truth planned occurrence was at 5001-5036. Despite these coordinate variations, all three tools detected the same biological match. 
+Critically, all three alignment regions are acceptable matches to the ground truth occurrence, under a maximum hamming distance of 1. 
