@@ -2656,29 +2656,25 @@ def calculate_hamming_distance(
     silent: bool = True,
 ):
     """
-    Calculate hamming distance (substitutions only, no indels) using ungapped alignment.
+    Calculate Hamming distance (substitutions only, no indels) using ungapped alignment.
+
+    If sequences differ in length, slides the shorter over the longer and returns the minimum.
 
     Args:
         spacer_seq(str): Query sequence
-        contig_seq(str): Target sequence (may be pre-trimmed to region)
+        contig_seq(str): Target sequence
         strand(bool): If True, reverse complement contig_seq
-        start(int): Region start coordinate (only used for slicing if sequence is full-length)
-        end(int): Region end coordinate (only used for slicing if sequence is full-length)
+        start(int): Optional start coordinate for slicing contig_seq
+        end(int): Optional end coordinate for slicing contig_seq
 
     Returns:
-        Hamming distance (number of substitutions only)
-
-    Note:
-        If sequences are of different lengths, it will attempt to pad the shorter sequence with "@" characters on either side and compute two hamming distances, returning the minimum.
+        Minimum Hamming distance (int)
     """
     if start is not None and end is not None:
-        # Check if sequence is already trimmed to region
         expected_length = end - start
         if len(contig_seq) == expected_length:
-            # Already trimmed, use as-is
             aligned_region = contig_seq
         else:
-            # Full sequence, need to trim
             aligned_region = contig_seq[start:end]
     else:
         aligned_region = contig_seq
@@ -2686,32 +2682,29 @@ def calculate_hamming_distance(
     if strand:
         aligned_region = reverse_complement(aligned_region)
 
-    # If lengths don't match, can't do proper hamming distance, trying with padding (the shorter) from each side as "good enough effort"
-    if len(spacer_seq) != len(aligned_region):
-        if not silent:
-            logger.info(
-                "Sequences of different lengths, cannot compute hamming distance accurately."
-            )
-        if len(spacer_seq) < len(aligned_region):
-            # Pad spacer_seq (RIGHT)
-            spacer_seq_r = spacer_seq.ljust(len(aligned_region), "@")
-            ham_rght = sum(1 for a, b in zip(spacer_seq_r, aligned_region) if a != b)
-            # Pad spacer_seq (LEFT)
-            spacer_seq_l = spacer_seq.rjust(len(aligned_region), "@")
-            ham_lft = sum(1 for a, b in zip(spacer_seq_l, aligned_region) if a != b)
-        else:
-            # Pad aligned_region (RIGHT)
-            aligned_region_r = aligned_region.ljust(len(spacer_seq), "@")
-            ham_rght = sum(1 for a, b in zip(spacer_seq, aligned_region_r) if a != b)
-            # Pad aligned_region (LEFT)
-            aligned_region_l = aligned_region.rjust(len(spacer_seq), "@")
-            ham_lft = sum(1 for a, b in zip(spacer_seq, aligned_region_l) if a != b)
-        # Return the minimum of the two padding attempts
-        return min(ham_rght, ham_lft)
-    # if they're the same length, proceed normally
-    # Simple character-by-character comparison (true hamming distance)
-    hamming = sum(1 for a, b in zip(spacer_seq, aligned_region) if a != b)
-    return hamming
+    len_s = len(spacer_seq)
+    len_c = len(aligned_region)
+
+    # If lengths match, simple Hamming distance
+    if len_s == len_c:
+        return sum(a != b for a, b in zip(spacer_seq, aligned_region))
+
+    # Otherwise, slide the shorter against the longer
+    if len_s < len_c:
+        short_seq, long_seq = spacer_seq, aligned_region
+    else:
+        short_seq, long_seq = aligned_region, spacer_seq
+
+    min_hamming = None
+    max_offset = len(long_seq) - len(short_seq)
+
+    for offset in range(max_offset + 1):
+        window = long_seq[offset:offset + len(short_seq)]
+        hamming = sum(a != b for a, b in zip(short_seq, window))
+        if min_hamming is None or hamming < min_hamming:
+            min_hamming = hamming
+
+    return min_hamming
 
 
 def calculate_edit_distance(
