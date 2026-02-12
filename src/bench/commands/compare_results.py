@@ -137,7 +137,7 @@ def classify_unique_alignments_across_tools(
 
     # Get unique alignments across all tools (by coordinates)
     unique_alignments = all_tool_results.select(
-        ["spacer_id", "contig_id", "start", "end", "strand", "mismatches"]
+        ["spacer_id", "contig_id", "start", "end", "strand"]
     ).unique()
 
     logger.debug(f"Total unique alignments to validate: {unique_alignments.height}")
