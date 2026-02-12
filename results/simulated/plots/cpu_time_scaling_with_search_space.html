@@ -1,0 +1,231 @@
+<html lang="en">
+   <head>
+       <meta charset="UTF-8">
+       <style> html, body { margin: 0; padding: 0; } </style>
+       <script type="text/javascript" data-lets-plot-script="library" src="https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js"></script>
+   </head>
+   <body>
+          <div id="WBlZQ0" ></div>
+   <script type="text/javascript" data-lets-plot-script="plot">
+   
+   (function() {
+   // ----------
+   
+   const forceImmediateRender = false;
+   const responsive = false;
+   
+   let sizing = {
+       width_mode: "MIN",
+       height_mode: "SCALED",
+       width: null, 
+       height: null 
+   };
+   
+   const preferredWidth = document.body.dataset.letsPlotPreferredWidth;
+   if (preferredWidth !== undefined) {
+       sizing = {
+           width_mode: 'FIXED',
+           height_mode: 'SCALED',
+           width: parseFloat(preferredWidth)
+       };
+   }
+   
+   const containerDiv = document.getElementById("WBlZQ0");
+   let fig = null;
+   
+   function renderPlot() {
+       if (fig === null) {
+           const plotSpec = {
+"data":{
+"CPU_Time_Hours":[18.17888888888889,0.23277777777777778,6.236666666666666,131.25722222222223,0.05583333333333333,13.015555555555556,2578.1244444444446,109.49277777777777,6.545555555555556,8.29888888888889,0.0525,2.9916666666666667,210.2422222222222,14.590555555555556,451.0394444444444,0.18833333333333332,0.08166666666666667,0.015833333333333335,7.4094444444444445,25.735,0.06833333333333333,3.35,0.006666666666666666,0.013333333333333332,70.34333333333333,618.215,68.36,0.024166666666666666,0.06861111111111111,0.026666666666666665,0.045,2.5366666666666666,0.18444444444444444,0.04083333333333333,0.004166666666666667,72.12388888888889,32.10388888888889,0.006666666666666666,0.0044444444444444444,0.10333333333333333,0.04,0.059166666666666666,406.9977777777778,0.042777777777777776,6.916111111111111,0.06666666666666667,25.825555555555557,2.1566666666666667,0.024166666666666666,0.18,0.025,141.30055555555555,414.5138888888889,251.31555555555556,3.013333333333333,0.0825,12.993333333333334,0.035833333333333335,0.2275,0.014166666666666666,4.8822222222222225,3.713888888888889,7.092777777777778,3.8316666666666666,653.9544444444444,0.18,0.15916666666666668,0.01611111111111111,2948.612777777778,0.015833333333333335],
+"search_space_size":[2.5E8,1.612807586949E12,1.0E9,5.0E10,3.75E8,2.0E9,5.0E10,1.612807586949E12,1.612807586949E12,5.0E10,2.0E9,2500000.0,5.0E10,5.0E10,1.612807586949E12,2.5E8,1.0E9,2500000.0,2.0E9,2.0E9,2500000.0,2.5E8,1.0E9,2500000.0,5.0E10,1.612807586949E12,1.0E9,2.5E8,2500000.0,2500000.0,3.75E8,3.75E8,2500000.0,2.5E8,2.5E8,1.612807586949E12,1.612807586949E12,3.75E8,2500000.0,2.5E8,2.5E8,1.0E9,3.75E8,2.0E9,2.0E9,1.0E9,3.75E8,2.0E9,3.75E8,2500000.0,2500000.0,2.0E9,5.0E10,2.5E8,3.75E8,1.0E9,1.0E9,2500000.0,5.0E10,2.5E8,3.75E8,2.5E8,1.0E9,1.0E9,1.0E9,3.75E8,2.0E9,3.75E8,2.0E9,2.0E9],
+"tool_display":["sassy_d5","strobealign","indelfree_indexed_d5","bowtie1","x_mapper","indelfree_indexed_d5","blastn","bowtie1","mmseqs2","mmseqs2","minimap2","bowtie1","bowtie2","mummer4","minimap2","bowtie2","x_mapper","indelfree_indexed_d5","bowtie2","blastn","mummer4","blastn","strobealign","minimap2","minimap2","bowtie2","sassy_d5","mmseqs2","x_mapper","sassy_d5","mummer4","indelfree_indexed_d5","bowtie2","mummer4","strobealign","mummer4","x_mapper","strobealign","strobealign","indelfree_indexed_d5","x_mapper","mmseqs2","indelfree_bruteforce_d5","mmseqs2","bowtie1","minimap2","sassy_d5","x_mapper","mmseqs2","indelfree_bruteforce_d5","blastn","sassy_d5","indelfree_indexed_d3","indelfree_bruteforce_d5","bowtie1","mummer4","blastn","mmseqs2","strobealign","minimap2","blastn","bowtie1","bowtie1","bowtie2","indelfree_bruteforce_d5","bowtie2","mummer4","minimap2","indelfree_bruteforce_d5","strobealign"],
+"base_tool":["sassy","strobealign","indelfree_indexed","bowtie1","x_mapper","indelfree_indexed","blastn","bowtie1","mmseqs2","mmseqs2","minimap2","bowtie1","bowtie2","mummer4","minimap2","bowtie2","x_mapper","indelfree_indexed","bowtie2","blastn","mummer4","blastn","strobealign","minimap2","minimap2","bowtie2","sassy","mmseqs2","x_mapper","sassy","mummer4","indelfree_indexed","bowtie2","mummer4","strobealign","mummer4","x_mapper","strobealign","strobealign","indelfree_indexed","x_mapper","mmseqs2","indelfree_bruteforce","mmseqs2","bowtie1","minimap2","sassy","x_mapper","mmseqs2","indelfree_bruteforce","blastn","sassy","indelfree_indexed","indelfree_bruteforce","bowtie1","mummer4","blastn","mmseqs2","strobealign","minimap2","blastn","bowtie1","bowtie1","bowtie2","indelfree_bruteforce","bowtie2","mummer4","minimap2","indelfree_bruteforce","strobealign"]
+},
+"mapping":{
+"x":"search_space_size",
+"y":"CPU_Time_Hours",
+"color":"base_tool",
+"group":"tool_display"
+},
+"data_meta":{
+"series_annotations":[{
+"type":"str",
+"column":"simulation"
+},{
+"type":"str",
+"column":"tool_name"
+},{
+"type":"str",
+"column":"BaseJobID"
+},{
+"type":"int",
+"column":"Elapsed_Seconds"
+},{
+"type":"int",
+"column":"TotalCPU_Seconds"
+},{
+"type":"float",
+"column":"MaxRSS_MB"
+},{
+"type":"float",
+"column":"ReqMem_MB"
+},{
+"type":"int",
+"column":"AllocCPUS"
+},{
+"type":"int",
+"column":"CPU_Time_Seconds"
+},{
+"type":"float",
+"column":"Peak_Memory_Gb"
+},{
+"type":"float",
+"column":"CPU_Time_Hours"
+},{
+"type":"float",
+"column":"Walltime_Hours"
+},{
+"type":"int",
+"column":"num_spacers"
+},{
+"type":"int",
+"column":"total_spacer_bp"
+},{
+"type":"float",
+"column":"total_spacer_Mbp"
+},{
+"type":"int",
+"column":"num_contigs"
+},{
+"type":"int",
+"column":"total_contig_bp"
+},{
+"type":"float",
+"column":"total_contig_Mbp"
+},{
+"type":"int",
+"column":"search_space_size"
+},{
+"type":"str",
+"column":"max_distance_setting"
+},{
+"type":"str",
+"column":"tool_display"
+},{
+"type":"str",
+"column":"base_tool"
+}]
+},
+"ggtitle":{
+"text":"CPU Time Scaling with Search Space"
+},
+"guides":{
+"x":{
+"title":"Search Space Size (spacers × contigs)"
+},
+"y":{
+"title":"Total CPU Time (hours)"
+}
+},
+"ggsize":{
+"width":700.0,
+"height":500.0
+},
+"theme":{
+"name":"minimal",
+"axis_title":{
+"face":"bold",
+"size":11.0,
+"blank":false
+},
+"plot_title":{
+"face":"bold",
+"size":14.0,
+"blank":false
+}
+},
+"kind":"plot",
+"scales":[{
+"name":"Tool",
+"aesthetic":"color",
+"breaks":["blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper"],
+"values":["#7C3018","#0275DC","#70FC28","#116B28","#305566","#172CBB","#8B7937","#F97762","#EBA60A","#ED3415","#E1FC16"]
+},{
+"name":"Tool",
+"aesthetic":"shape",
+"breaks":["blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper"],
+"values":[3.0,15.0,17.0,1.0,13.0,8.0,4.0,6.0,18.0,17.0,24.0]
+},{
+"aesthetic":"x",
+"trans":"log10"
+},{
+"aesthetic":"y",
+"trans":"log10"
+}],
+"layers":[{
+"geom":"line",
+"mapping":{
+},
+"data_meta":{
+},
+"size":1.5,
+"data":{
+}
+},{
+"geom":"point",
+"mapping":{
+"shape":"base_tool"
+},
+"data_meta":{
+},
+"size":4.0,
+"data":{
+}
+}],
+"metainfo_list":[],
+"spec_id":"28"
+};
+           fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
+       } else {
+           fig.updateView({});
+       }
+   }
+   
+   const renderImmediately = 
+       forceImmediateRender || (
+           sizing.width_mode === 'FIXED' && 
+           (sizing.height_mode === 'FIXED' || sizing.height_mode === 'SCALED')
+       );
+   
+   if (renderImmediately) {
+       renderPlot();
+   }
+   
+   if (!renderImmediately || responsive) {
+       // Set up observer for initial sizing or continuous monitoring
+       var observer = new ResizeObserver(function(entries) {
+           for (let entry of entries) {
+               if (entry.contentBoxSize && 
+                   entry.contentBoxSize[0].inlineSize > 0) {
+                   if (!responsive && observer) {
+                       observer.disconnect();
+                       observer = null;
+                   }
+                   renderPlot();
+                   if (!responsive) {
+                       break;
+                   }
+               }
+           }
+       });
+       
+       observer.observe(containerDiv);
+   }
+   
+   // ----------
+   })();
+   
+   </script>
+   </body>
+</html>

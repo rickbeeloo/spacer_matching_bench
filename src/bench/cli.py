@@ -591,12 +591,6 @@ def execute_tools(input_dir, skip_tools, only_tools, debug):
     help="Maximum number of mismatches for comparison",
 )
 @click.option(
-    "--augment-ground-truth",
-    is_flag=True,
-    default=False,
-    help="Count verified non-planned alignments as true positives",
-)
-@click.option(
     "--distance",
     type=click.Choice(["hamming", "edit"]),
     default="hamming",
@@ -621,6 +615,12 @@ def execute_tools(input_dir, skip_tools, only_tools, debug):
     default=False,
     help="Enable verbose (DEBUG) logging with file paths and line numbers",
 )
+@click.option(
+    "--tools-results-out-file","-tro",
+    type=click.Path(),
+    default=None,
+    help="Output file for combined tools results (default: <output_dir>/tools_results.tsv)",
+)
 def full_run(
     output_dir,
     num_contigs,
@@ -638,11 +638,11 @@ def full_run(
     skip_tools,
     only_tools,
     max_mismatches,
-    augment_ground_truth,
     distance,
     gap_open_penalty,
     gap_extend_penalty,
     verbose,
+    tools_results_out_file,
 ):
     """
     Run the complete benchmarking pipeline.
@@ -714,10 +714,11 @@ def full_run(
             threads=threads,
             skip_tools=skip_tools,
             only_tools=only_tools,
-            augment_ground_truth=augment_ground_truth,
             distance_metric=distance,
             gap_open_penalty=gap_open_penalty,
             gap_extend_penalty=gap_extend_penalty,
+            verbose=verbose,
+            tools_results_out_file=tools_results_out_file,
         )
         click.echo(click.style("✓ Step 4/4: Results comparison completed", fg="green"))
 
@@ -781,12 +782,6 @@ def full_run(
     "--threads", "-t", type=int, default=4, help="Number of threads for processing"
 )
 @click.option(
-    "--verify-false-positives",
-    is_flag=True,
-    default=True,
-    help="Count verified non-planned alignments as true positives",
-)
-@click.option(
     "--skip-tools",
     "-st",
     type=str,
@@ -838,6 +833,12 @@ def full_run(
     default = None,
     help="Path to custom spacers file",
 )
+@click.option(
+    "--tools-results-out-file","-tro",
+    type=click.Path(),
+    default=None,
+    help="Output file for combined tools results (default: <input_dir>/tools_results.tsv)",
+)
 def compare_results(
     input_dir,
     max_mismatches,
@@ -852,7 +853,9 @@ def compare_results(
     verbose,
     skip_hyperfine,
     contigs,
-    spacers
+    spacers,
+    tools_results_out_file,
+
 ):
     """
     Compare and validate alignment tool results.
@@ -862,31 +865,27 @@ def compare_results(
     precision, recall, and F1 scores.
 
     \b
-    Metrics Calculated:
-      - True Positives: Correctly identified spacer locations (that were in the simulation plan)
-      - False Positives: Incorrectly reported locations
-      - False Positives: Incorrectly reported locations
-      - False Negatives: Missed spacer locations
-      - Precision: TP / (TP + FP)
+    Metrics Calculated: (either counts or %age)
+      - Planned True Positives: Correctly identified spacer locations (that were in the simulation plan)
+      - Unplanned True Positives: regions/matches reported by tools, not in the ground truth/plan, that were validated to actually fit our requirements (e.g. the distance metric + thershold used).
+      - invalid alignemnts: alignemnts not passing the distance metric + thershold requested.
+      - False Negatives: Missed (planned) spacer locations 
       - Recall: TP / (TP + FN)
-      - F1 Score: Harmonic mean of precision and recall
 
     \b
-    Augmented Ground Truth Mode (--augment-ground-truth):
-      When enabled, verified non-planned alignments (valid alignments found by tools
-      but not in the original simulation plan) are counted as true positives rather
-      than false positives. This gives a more realistic performance assessment when
-      sequences contain naturally occurring similar regions.
+    Augmented Ground Truth Mode ("*_augnemnted" suffix):
+      Verified non-planned alignments (valid alignments found by tools
+      but not in the original simulation plan) are counted as regular true positives. 
+      This should give a more realistic assessment as we observe that spacer-like (short) sequences with up to some amount of distance happen to naturally occur in the contigs, by chance alone (i.e. we did not explicitly placed one of the simulated spacers in that location).
 
     \b
-    Gap Penalty Options:
+    Gap Penalty Options: these are not really used much, as we moved to edlib's NW instead of parasail's SW. Some legacy functions may still accept these.
       --gap-open-penalty: Penalty for opening a gap
       --gap-extend-penalty: Penalty for extending a gap
 
     \b
     Example:
       spacer_bencher compare-results -i tests/validation -mm 3 -o results.tsv
-      spacer_bencher compare-results -i tests/validation --augment-ground-truth
     """
     from bench.commands.compare_results import run_compare_results
 
@@ -911,6 +910,7 @@ def compare_results(
             gap_extend_penalty=gap_extend_penalty,
             logfile=logfile,
             skip_hyperfine=skip_hyperfine,
+            tools_results_out_file=tools_results_out_file,
         )
     except Exception as e:
         logger.exception(f"Results comparison failed: {e}")

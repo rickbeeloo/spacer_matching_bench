@@ -1,0 +1,168 @@
+            <iframe src='about:blank' style='border:none !important;' width='1000' height='600' srcdoc="&lt;html lang=&quot;en&quot;>
+   &lt;head>
+       &lt;meta charset=&quot;UTF-8&quot;>
+       &lt;style> html, body { margin: 0; padding: 0; overflow: hidden; } &lt;/style>
+       &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;library&quot; src=&quot;https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js&quot;>&lt;/script>
+   &lt;/head>
+   &lt;body>
+          &lt;div id=&quot;e3mUvG&quot; >&lt;/div>
+   &lt;script type=&quot;text/javascript&quot; data-lets-plot-script=&quot;plot&quot;>
+   
+   (function() {
+   // ----------
+   
+   const forceImmediateRender = false;
+   const responsive = false;
+   
+   let sizing = {
+       width_mode: &quot;FIXED&quot;,
+       height_mode: &quot;FIXED&quot;,
+       width: 1000.0, 
+       height: 600.0 
+   };
+   
+   const preferredWidth = document.body.dataset.letsPlotPreferredWidth;
+   if (preferredWidth !== undefined) {
+       sizing = {
+           width_mode: 'FIXED',
+           height_mode: 'SCALED',
+           width: parseFloat(preferredWidth)
+       };
+   }
+   
+   const containerDiv = document.getElementById(&quot;e3mUvG&quot;);
+   let fig = null;
+   
+   function renderPlot() {
+       if (fig === null) {
+           const plotSpec = {
+&quot;data&quot;:{
+&quot;tool&quot;:[&quot;strobealign&quot;,&quot;x_mapper&quot;,&quot;mmseqs2&quot;,&quot;blastn&quot;,&quot;minimap2&quot;,&quot;bowtie1&quot;,&quot;mummer4&quot;,&quot;bowtie2&quot;,&quot;indelfree_indexed&quot;,&quot;indelfree_indexed&quot;,&quot;blastn&quot;,&quot;mmseqs2&quot;,&quot;strobealign&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;x_mapper&quot;,&quot;mummer4&quot;,&quot;minimap2&quot;,&quot;blastn&quot;,&quot;mummer4&quot;,&quot;indelfree_indexed&quot;,&quot;x_mapper&quot;,&quot;bowtie2&quot;,&quot;mmseqs2&quot;,&quot;minimap2&quot;,&quot;bowtie1&quot;,&quot;strobealign&quot;,&quot;mmseqs2&quot;,&quot;strobealign&quot;,&quot;blastn&quot;,&quot;minimap2&quot;,&quot;bowtie2&quot;,&quot;indelfree_bruteforce&quot;,&quot;mummer4&quot;,&quot;indelfree_indexed&quot;,&quot;bowtie1&quot;,&quot;sassy&quot;,&quot;x_mapper&quot;,&quot;mmseqs2&quot;,&quot;indelfree_bruteforce&quot;,&quot;strobealign&quot;,&quot;minimap2&quot;,&quot;mummer4&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;blastn&quot;,&quot;x_mapper&quot;,&quot;indelfree_indexed&quot;,&quot;sassy&quot;,&quot;indelfree_bruteforce&quot;,&quot;bowtie2&quot;,&quot;indelfree_indexed&quot;,&quot;mummer4&quot;,&quot;minimap2&quot;,&quot;sassy&quot;,&quot;x_mapper&quot;,&quot;bowtie1&quot;,&quot;mmseqs2&quot;,&quot;strobealign&quot;,&quot;blastn&quot;,&quot;strobealign&quot;,&quot;blastn&quot;,&quot;mummer4&quot;,&quot;mmseqs2&quot;,&quot;sassy&quot;,&quot;indelfree_bruteforce&quot;,&quot;x_mapper&quot;,&quot;bowtie1&quot;,&quot;indelfree_indexed&quot;,&quot;bowtie2&quot;,&quot;minimap2&quot;],
+&quot;fraction&quot;:[&quot;fraction_1&quot;,&quot;fraction_1&quot;,&quot;fraction_1&quot;,&quot;fraction_1&quot;,&quot;fraction_1&quot;,&quot;fraction_1&quot;,&quot;fraction_1&quot;,&quot;fraction_1&quot;,&quot;fraction_1&quot;,&quot;fraction_0.1&quot;,&quot;fraction_0.1&quot;,&quot;fraction_0.1&quot;,&quot;fraction_0.1&quot;,&quot;fraction_0.1&quot;,&quot;fraction_0.1&quot;,&quot;fraction_0.1&quot;,&quot;fraction_0.1&quot;,&quot;fraction_0.1&quot;,&quot;fraction_0.05&quot;,&quot;fraction_0.05&quot;,&quot;fraction_0.05&quot;,&quot;fraction_0.05&quot;,&quot;fraction_0.05&quot;,&quot;fraction_0.05&quot;,&quot;fraction_0.05&quot;,&quot;fraction_0.05&quot;,&quot;fraction_0.05&quot;,&quot;fraction_0.01&quot;,&quot;fraction_0.01&quot;,&quot;fraction_0.01&quot;,&quot;fraction_0.01&quot;,&quot;fraction_0.01&quot;,&quot;fraction_0.01&quot;,&quot;fraction_0.01&quot;,&quot;fraction_0.01&quot;,&quot;fraction_0.01&quot;,&quot;fraction_0.01&quot;,&quot;fraction_0.01&quot;,&quot;fraction_0.005&quot;,&quot;fraction_0.005&quot;,&quot;fraction_0.005&quot;,&quot;fraction_0.005&quot;,&quot;fraction_0.005&quot;,&quot;fraction_0.005&quot;,&quot;fraction_0.005&quot;,&quot;fraction_0.005&quot;,&quot;fraction_0.005&quot;,&quot;fraction_0.005&quot;,&quot;fraction_0.005&quot;,&quot;fraction_0.001&quot;,&quot;fraction_0.001&quot;,&quot;fraction_0.001&quot;,&quot;fraction_0.001&quot;,&quot;fraction_0.001&quot;,&quot;fraction_0.001&quot;,&quot;fraction_0.001&quot;,&quot;fraction_0.001&quot;,&quot;fraction_0.001&quot;,&quot;fraction_0.001&quot;,&quot;fraction_0.001&quot;,&quot;fraction_0.0005&quot;,&quot;fraction_0.0005&quot;,&quot;fraction_0.0005&quot;,&quot;fraction_0.0005&quot;,&quot;fraction_0.0005&quot;,&quot;fraction_0.0005&quot;,&quot;fraction_0.0005&quot;,&quot;fraction_0.0005&quot;,&quot;fraction_0.0005&quot;,&quot;fraction_0.0005&quot;,&quot;fraction_0.0005&quot;],
+&quot;recall&quot;:[0.3623734228567063,0.26226328492385653,0.734704647714274,0.7866364715222657,3.224397589650083E-4,0.9999282035854322,0.5451041436622209,0.9716903989171108,0.13836221127975779,0.9999125722695429,0.7783572113576177,0.7444455058098965,0.5278012087693251,0.999910413560149,0.9706858057841539,0.5187664702780795,0.5280462222855443,3.2272705440325445E-4,0.7808479716410128,0.5335485385201483,0.9999190668172795,0.5681509426981505,0.9704432016704609,0.747362445384554,2.878908928201861E-4,0.9999271601355515,0.5788711208436474,0.7533512687464773,0.6611891992399723,0.7832410414935589,4.2417445772491416E-4,0.9725855466911487,0.30421443471490245,0.5367375754652846,0.9999360833008908,0.9999302726918808,0.9757581392105706,0.6686674530357527,0.7439853026598403,0.9644859308090291,0.6778877976954355,7.024464046901806E-4,0.5283072392505437,0.9999054399070609,0.9679441284936577,0.7774055412214462,0.7111999675793967,0.9999459656611777,0.973955448687641,0.999952203422235,0.9770576426727846,0.999952203422235,0.5639518210496128,6.213555109454163E-4,0.9798298441831564,0.8367268903546506,0.9999044068444699,0.7765032023707102,0.7189561227416117,0.7931364114329414,0.6928081212467829,0.790320274521018,0.5595510437517872,0.7570060051472691,0.9781241063768945,1.0,0.8277809551043752,1.0,1.0,0.9656133828996283,5.004289390906491E-4]
+},
+&quot;mapping&quot;:{
+&quot;x&quot;:&quot;tool&quot;,
+&quot;y&quot;:&quot;recall&quot;,
+&quot;fill&quot;:&quot;tool&quot;
+},
+&quot;data_meta&quot;:{
+&quot;series_annotations&quot;:[{
+&quot;type&quot;:&quot;str&quot;,
+&quot;column&quot;:&quot;tool&quot;
+},{
+&quot;type&quot;:&quot;str&quot;,
+&quot;column&quot;:&quot;fraction&quot;
+},{
+&quot;type&quot;:&quot;float&quot;,
+&quot;column&quot;:&quot;recall&quot;
+}]
+},
+&quot;facet&quot;:{
+&quot;name&quot;:&quot;wrap&quot;,
+&quot;facets&quot;:&quot;fraction&quot;,
+&quot;ncol&quot;:4.0,
+&quot;order&quot;:1.0,
+&quot;dir&quot;:&quot;h&quot;
+},
+&quot;ggtitle&quot;:{
+&quot;text&quot;:&quot;Tool Recall by Dataset Fraction (Multi-panel View)&quot;
+},
+&quot;guides&quot;:{
+&quot;x&quot;:{
+&quot;title&quot;:&quot;Tool&quot;
+},
+&quot;y&quot;:{
+&quot;title&quot;:&quot;Recall (Hamming ≤ 3)&quot;
+}
+},
+&quot;ggsize&quot;:{
+&quot;width&quot;:1000.0,
+&quot;height&quot;:600.0
+},
+&quot;theme&quot;:{
+&quot;name&quot;:&quot;minimal&quot;,
+&quot;axis_text_x&quot;:{
+&quot;size&quot;:8.0,
+&quot;angle&quot;:90.0,
+&quot;hjust&quot;:1.0,
+&quot;blank&quot;:false
+},
+&quot;legend_position&quot;:&quot;bottom&quot;,
+&quot;plot_title&quot;:{
+&quot;face&quot;:&quot;bold&quot;,
+&quot;size&quot;:14.0,
+&quot;blank&quot;:false
+},
+&quot;strip_text&quot;:{
+&quot;face&quot;:&quot;bold&quot;,
+&quot;size&quot;:10.0,
+&quot;blank&quot;:false
+}
+},
+&quot;kind&quot;:&quot;plot&quot;,
+&quot;scales&quot;:[{
+&quot;name&quot;:&quot;Tool&quot;,
+&quot;aesthetic&quot;:&quot;fill&quot;,
+&quot;breaks&quot;:[&quot;blastn&quot;,&quot;bowtie1&quot;,&quot;bowtie2&quot;,&quot;indelfree_bruteforce&quot;,&quot;indelfree_indexed&quot;,&quot;minimap2&quot;,&quot;mmseqs2&quot;,&quot;mummer4&quot;,&quot;sassy&quot;,&quot;strobealign&quot;,&quot;x_mapper&quot;],
+&quot;values&quot;:[&quot;#7C3018&quot;,&quot;#0275DC&quot;,&quot;#70FC28&quot;,&quot;#116B28&quot;,&quot;#305566&quot;,&quot;#172CBB&quot;,&quot;#8B7937&quot;,&quot;#F97762&quot;,&quot;#EBA60A&quot;,&quot;#ED3415&quot;,&quot;#E1FC16&quot;]
+},{
+&quot;aesthetic&quot;:&quot;y&quot;,
+&quot;limits&quot;:[0.0,1.05]
+}],
+&quot;layers&quot;:[{
+&quot;geom&quot;:&quot;bar&quot;,
+&quot;stat&quot;:&quot;identity&quot;,
+&quot;mapping&quot;:{
+},
+&quot;data_meta&quot;:{
+},
+&quot;data&quot;:{
+}
+}],
+&quot;metainfo_list&quot;:[],
+&quot;spec_id&quot;:&quot;8&quot;
+};
+           fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
+       } else {
+           fig.updateView({});
+       }
+   }
+   
+   const renderImmediately = 
+       forceImmediateRender || (
+           sizing.width_mode === 'FIXED' &amp;&amp; 
+           (sizing.height_mode === 'FIXED' || sizing.height_mode === 'SCALED')
+       );
+   
+   if (renderImmediately) {
+       renderPlot();
+   }
+   
+   if (!renderImmediately || responsive) {
+       // Set up observer for initial sizing or continuous monitoring
+       var observer = new ResizeObserver(function(entries) {
+           for (let entry of entries) {
+               if (entry.contentBoxSize &amp;&amp; 
+                   entry.contentBoxSize[0].inlineSize > 0) {
+                   if (!responsive &amp;&amp; observer) {
+                       observer.disconnect();
+                       observer = null;
+                   }
+                   renderPlot();
+                   if (!responsive) {
+                       break;
+                   }
+               }
+           }
+       });
+       
+       observer.observe(containerDiv);
+   }
+   
+   // ----------
+   })();
+   
+   &lt;/script>
+   &lt;/body>
+&lt;/html>"></iframe>    

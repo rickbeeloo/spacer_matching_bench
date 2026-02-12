@@ -1,0 +1,229 @@
+<html lang="en">
+   <head>
+       <meta charset="UTF-8">
+       <style> html, body { margin: 0; padding: 0; } </style>
+       <script type="text/javascript" data-lets-plot-script="library" src="https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js"></script>
+   </head>
+   <body>
+          <div id="lR8K9R" ></div>
+   <script type="text/javascript" data-lets-plot-script="plot">
+   
+   (function() {
+   // ----------
+   
+   const forceImmediateRender = false;
+   const responsive = false;
+   
+   let sizing = {
+       width_mode: "MIN",
+       height_mode: "SCALED",
+       width: null, 
+       height: null 
+   };
+   
+   const preferredWidth = document.body.dataset.letsPlotPreferredWidth;
+   if (preferredWidth !== undefined) {
+       sizing = {
+           width_mode: 'FIXED',
+           height_mode: 'SCALED',
+           width: parseFloat(preferredWidth)
+       };
+   }
+   
+   const containerDiv = document.getElementById("lR8K9R");
+   let fig = null;
+   
+   function renderPlot() {
+       if (fig === null) {
+           const plotSpec = {
+"data":{
+"Peak_Memory_Gb":[0.0596466064453125,93.28548812866211,39.30362319946289,207.0077362060547,14.328010559082031,29.50729751586914,33.08041000366211,182.05007934570313,172.09563064575195,217.16351699829102,9.983757019042969,3.6397552490234375,208.14885711669922,1.8947868347167969,77.41864776611328,3.7742958068847656,21.947734832763672,7.555110931396484,12.208202362060547,2.1281051635742188,0.2751274108886719,0.6979103088378906,3.7997207641601563,2.685863494873047,89.59324645996094,164.30214309692383,0.1156768798828125,11.286487579345703,13.157676696777344,0.09033966064453125,0.26401519775390625,85.12519454956055,4.0885467529296875,0.2612152099609375,2.269634246826172,20.54366683959961,229.8221664428711,2.3057174682617188,1.8490676879882813,66.20088958740234,15.747459411621094,14.126338958740234,85.46659469604492,20.159549713134766,8.129585266113281,5.330875396728516,0.077056884765625,29.34197998046875,11.441299438476563,27.46990203857422,1.4605484008789063,0.15027618408203125,70.63277816772461,85.4627799987793,3.6656837463378906,0.2733001708984375,1.142791748046875,11.205272674560547,141.82569122314453,2.6366043090820313,0.6911697387695313,3.2899513244628906,5.689212799072266,6.5179595947265625,105.35144805908203,3.72186279296875,0.2760353088378906,2.6251983642578125,32.37925720214844,7.579639434814453],
+"CPU_Time_Hours":[18.17888888888889,0.23277777777777778,6.236666666666666,131.25722222222223,0.05583333333333333,13.015555555555556,2578.1244444444446,109.49277777777777,6.545555555555556,8.29888888888889,0.0525,2.9916666666666667,210.2422222222222,14.590555555555556,451.0394444444444,0.18833333333333332,0.08166666666666667,0.015833333333333335,7.4094444444444445,25.735,0.06833333333333333,3.35,0.006666666666666666,0.013333333333333332,70.34333333333333,618.215,68.36,0.024166666666666666,0.06861111111111111,0.026666666666666665,0.045,2.5366666666666666,0.18444444444444444,0.04083333333333333,0.004166666666666667,72.12388888888889,32.10388888888889,0.006666666666666666,0.0044444444444444444,0.10333333333333333,0.04,0.059166666666666666,406.9977777777778,0.042777777777777776,6.916111111111111,0.06666666666666667,25.825555555555557,2.1566666666666667,0.024166666666666666,0.18,0.025,141.30055555555555,414.5138888888889,251.31555555555556,3.013333333333333,0.0825,12.993333333333334,0.035833333333333335,0.2275,0.014166666666666666,4.8822222222222225,3.713888888888889,7.092777777777778,3.8316666666666666,653.9544444444444,0.18,0.15916666666666668,0.01611111111111111,2948.612777777778,0.015833333333333335],
+"base_tool":["sassy","strobealign","indelfree_indexed","bowtie1","x_mapper","indelfree_indexed","blastn","bowtie1","mmseqs2","mmseqs2","minimap2","bowtie1","bowtie2","mummer4","minimap2","bowtie2","x_mapper","indelfree_indexed","bowtie2","blastn","mummer4","blastn","strobealign","minimap2","minimap2","bowtie2","sassy","mmseqs2","x_mapper","sassy","mummer4","indelfree_indexed","bowtie2","mummer4","strobealign","mummer4","x_mapper","strobealign","strobealign","indelfree_indexed","x_mapper","mmseqs2","indelfree_bruteforce","mmseqs2","bowtie1","minimap2","sassy","x_mapper","mmseqs2","indelfree_bruteforce","blastn","sassy","indelfree_indexed","indelfree_bruteforce","bowtie1","mummer4","blastn","mmseqs2","strobealign","minimap2","blastn","bowtie1","bowtie1","bowtie2","indelfree_bruteforce","bowtie2","mummer4","minimap2","indelfree_bruteforce","strobealign"],
+"size_normalized":[5.409786812472117,10.0,6.135204926181719,8.182282681799038,5.621958009404113,6.497913983036521,8.182282681799038,10.0,10.0,8.182282681799038,6.497913983036521,3.0,8.182282681799038,8.182282681799038,10.0,5.409786812472117,6.135204926181719,3.0,6.497913983036521,6.497913983036521,3.0,5.409786812472117,6.135204926181719,3.0,8.182282681799038,10.0,6.135204926181719,5.409786812472117,3.0,3.0,5.621958009404113,5.621958009404113,3.0,5.409786812472117,5.409786812472117,10.0,10.0,5.621958009404113,3.0,5.409786812472117,5.409786812472117,6.135204926181719,5.621958009404113,6.497913983036521,6.497913983036521,6.135204926181719,5.621958009404113,6.497913983036521,5.621958009404113,3.0,3.0,6.497913983036521,8.182282681799038,5.409786812472117,5.621958009404113,6.135204926181719,6.135204926181719,3.0,8.182282681799038,5.409786812472117,5.621958009404113,5.409786812472117,6.135204926181719,6.135204926181719,6.135204926181719,5.621958009404113,6.497913983036521,5.621958009404113,6.497913983036521,6.497913983036521]
+},
+"mapping":{
+"x":"CPU_Time_Hours",
+"y":"Peak_Memory_Gb",
+"color":"base_tool"
+},
+"data_meta":{
+"series_annotations":[{
+"type":"str",
+"column":"simulation"
+},{
+"type":"str",
+"column":"tool_name"
+},{
+"type":"str",
+"column":"BaseJobID"
+},{
+"type":"int",
+"column":"Elapsed_Seconds"
+},{
+"type":"int",
+"column":"TotalCPU_Seconds"
+},{
+"type":"float",
+"column":"MaxRSS_MB"
+},{
+"type":"float",
+"column":"ReqMem_MB"
+},{
+"type":"int",
+"column":"AllocCPUS"
+},{
+"type":"int",
+"column":"CPU_Time_Seconds"
+},{
+"type":"float",
+"column":"Peak_Memory_Gb"
+},{
+"type":"float",
+"column":"CPU_Time_Hours"
+},{
+"type":"float",
+"column":"Walltime_Hours"
+},{
+"type":"int",
+"column":"num_spacers"
+},{
+"type":"int",
+"column":"total_spacer_bp"
+},{
+"type":"float",
+"column":"total_spacer_Mbp"
+},{
+"type":"int",
+"column":"num_contigs"
+},{
+"type":"int",
+"column":"total_contig_bp"
+},{
+"type":"float",
+"column":"total_contig_Mbp"
+},{
+"type":"int",
+"column":"search_space_size"
+},{
+"type":"str",
+"column":"max_distance_setting"
+},{
+"type":"str",
+"column":"tool_display"
+},{
+"type":"str",
+"column":"base_tool"
+},{
+"type":"float",
+"column":"size_normalized"
+}]
+},
+"ggtitle":{
+"text":"Memory vs CPU Time (marker size ∝ search space) - Simulated Runs"
+},
+"guides":{
+"x":{
+"title":"Total CPU Time (hours)"
+},
+"y":{
+"title":"Peak Memory (GB)"
+}
+},
+"ggsize":{
+"width":700.0,
+"height":500.0
+},
+"theme":{
+"name":"minimal",
+"axis_title":{
+"face":"bold",
+"size":11.0,
+"blank":false
+},
+"plot_title":{
+"face":"bold",
+"size":14.0,
+"blank":false
+}
+},
+"kind":"plot",
+"scales":[{
+"name":"Tool",
+"aesthetic":"color",
+"breaks":["blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper"],
+"values":["#7C3018","#0275DC","#70FC28","#116B28","#305566","#172CBB","#8B7937","#F97762","#EBA60A","#ED3415","#E1FC16"]
+},{
+"name":"Tool",
+"aesthetic":"shape",
+"breaks":["blastn","bowtie1","bowtie2","indelfree_bruteforce","indelfree_indexed","minimap2","mmseqs2","mummer4","sassy","strobealign","x_mapper"],
+"values":[3.0,15.0,17.0,1.0,13.0,8.0,4.0,6.0,18.0,17.0,24.0]
+},{
+"aesthetic":"size",
+"guide":"none",
+"scale_mapper_kind":"identity"
+},{
+"aesthetic":"x",
+"trans":"log10"
+},{
+"aesthetic":"y",
+"trans":"log10"
+}],
+"layers":[{
+"geom":"point",
+"mapping":{
+"shape":"base_tool",
+"size":"size_normalized"
+},
+"data_meta":{
+},
+"alpha":0.7,
+"data":{
+}
+}],
+"metainfo_list":[],
+"spec_id":"35"
+};
+           fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
+       } else {
+           fig.updateView({});
+       }
+   }
+   
+   const renderImmediately = 
+       forceImmediateRender || (
+           sizing.width_mode === 'FIXED' && 
+           (sizing.height_mode === 'FIXED' || sizing.height_mode === 'SCALED')
+       );
+   
+   if (renderImmediately) {
+       renderPlot();
+   }
+   
+   if (!renderImmediately || responsive) {
+       // Set up observer for initial sizing or continuous monitoring
+       var observer = new ResizeObserver(function(entries) {
+           for (let entry of entries) {
+               if (entry.contentBoxSize && 
+                   entry.contentBoxSize[0].inlineSize > 0) {
+                   if (!responsive && observer) {
+                       observer.disconnect();
+                       observer = null;
+                   }
+                   renderPlot();
+                   if (!responsive) {
+                       break;
+                   }
+               }
+           }
+       });
+       
+       observer.observe(containerDiv);
+   }
+   
+   // ----------
+   })();
+   
+   </script>
+   </body>
+</html>

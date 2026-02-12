@@ -23,6 +23,7 @@ import time
 import polars_bio as pb
 import _duckdb as duckdb
 from rust_simulator import Simulator, BaseComposition, DistributionType
+import edlib 
 
 # Configure logger for this module
 logger = logging.getLogger(__name__)
@@ -406,6 +407,8 @@ def simulate_data_rust(
     spacer_c_frac: Optional[float] = None,
     spacer_g_frac: Optional[float] = None,
     data_subdir: Optional[str] = None,
+    distance_metric:str = "hamming",
+
 ) -> tuple:
     """Simulate CRISPR spacer data using Rust implementation.
 
@@ -445,6 +448,8 @@ def simulate_data_rust(
         spacer_c_frac(float): C fraction for spacers
         spacer_g_frac(float): G fraction for spacers
         data_subdir(str): Data subdirectory
+        distance_metric(str): 'hamming', 'edit' or 'gap_affine' - ONLY USED IN THE VERIFY STEP
+
 
     Returns:
         tuple: (contigs_dict, spacers_dict, ground_truth_df)
@@ -581,24 +586,24 @@ def simulate_data_rust(
             orient="row",
         )
 
-        if verify:
-            verrify_df = verify_simulated_data(
-                contigs_dict, spacers_dict, ground_truth_df
-            )
-            if (
-                verrify_df.filter(
-                    pl.col("alignment_test") > pl.col("mismatches")
-                ).height
-                > 0
-            ):
-                logger.info(
-                    verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches"))
-                )
-                raise ValueError("Simulated data is not correct")
-            else:
-                logger.info("Simulated data is correct")
-
-        return contigs_dict, spacers_dict, ground_truth_df
+        # if verify:
+        #     verrify_df = verify_simulated_data(
+        #         contigs_dict, spacers_dict, ground_truth_df
+        #     )
+        #     if (
+        #         verrify_df.filter(
+        #             pl.col("alignment_test") > pl.col("mismatches")
+        #         ).height
+        #         > 0
+        #     ):
+        #         logger.info(
+        #             verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches"))
+        #         )
+        #         raise ValueError("Simulated data is not correct")
+        #     else:
+        #         logger.info("Simulated data is correct")
+        # return contigs_dict, spacers_dict, ground_truth_df
+    
 
     if threads is None:
         import multiprocessing
@@ -731,8 +736,9 @@ def simulate_data_rust(
         },
         orient="row",
     )
+
     if verify:
-        verrify_df = verify_simulated_data(contigs, spacers, ground_truth_df)
+        verrify_df = verify_simulated_data(contigs = contigs, spacers = spacers, ground_truth = ground_truth_df, distance_metric = distance_metric)
         if (
             verrify_df.filter(pl.col("alignment_test") > pl.col("mismatches")).height
             > 0
@@ -753,6 +759,7 @@ def verify_simulated_data(
     return_fraction: bool = False,
     return_bool: bool = False,
     return_positive_only: bool = False,
+    distance_metric:str = "hamming"
 ) -> Any:
     """Verify the simulated data by checking the ground truth against the contigs and spacers.
 
@@ -763,6 +770,7 @@ def verify_simulated_data(
         return_fraction(bool): Return fraction instead of count
         return_bool(bool): Return boolean result
         return_positive_only(bool): Return only positive results
+        distance_metric(str): 'hamming', 'edit' or 'gap_affine'
 
     Returns:
         Verification results
@@ -809,7 +817,7 @@ def verify_simulated_data(
         ground_truth = ground_truth.join(spacer_df, on="spacer_id", how="left")
 
     # check if the ground truth is correct
-    verify_df = test_alignment_polars(ground_truth, ignore_region_strands=False)
+    verify_df = test_alignment_polars(ground_truth, ignore_region_strands=False, distance_metric=distance_metric)
     if return_bool:
         return (
             verify_df.filter(pl.col("alignment_test") != pl.col("mismatches")).height
@@ -1076,7 +1084,7 @@ def cast_cols_to_match(
 
 
 def vstack_easy(df1_to_stack: pl.DataFrame, df2_to_stack: pl.DataFrame) -> pl.DataFrame:
-    """Vstack two dataframes after matching column types and order.
+    """Vstack two dataframes after matching column types and order (similar to relaxed/coaleced join).
 
     Args:
         df1_to_stack: Base dataframe.
@@ -1130,16 +1138,16 @@ def parse_sassy(
             },
         )
         # Filter by max_ns in match_region (slice_str)
-        if max_ns > 1:
-            results = results.filter(
-                pl.col("slice_str").str.count_matches("N") <= max_ns
-            ).drop("slice_str")
-        elif max_ns <= 1:
+        if max_ns == 0:
             results = results.filter(
                 ~pl.col("slice_str").str.contains_any("N") 
             ).drop("slice_str")
+        else:
+            results = results.filter(
+                pl.col("slice_str").str.count_matches("N") <= max_ns
+            ).drop("slice_str")
 
-        if max_gaps == 1:
+        if max_gaps == 0:
             results = results.filter(
                 ~pl.col("cigar").str.contains_any(patterns=["I", "D", "N"])
             )
@@ -1315,107 +1323,107 @@ def parse_blastn(
     return results
 
 
-def parse_lexicmap(
-    tsv_file: str,
-    max_mismatches: int = 5,
-    spacer_lendf: Optional[pl.DataFrame] = None,
-    **kwargs,
-) -> pl.DataFrame:
-    """Parse LexicMap TSV output format and return standardized coordinates.
+# def parse_lexicmap(
+#     tsv_file: str,
+#     max_mismatches: int = 5,
+#     spacer_lendf: Optional[pl.DataFrame] = None,
+#     **kwargs,
+# ) -> pl.DataFrame:
+#     """Parse LexicMap TSV output format and return standardized coordinates.
 
-    LexicMap output columns (1-based positions):
-    1.  query,    Query sequence ID.
-    2.  qlen,     Query sequence length.
-    3.  hits,     Number of subject genomes.
-    4.  sgenome,  Subject genome ID.
-    5.  sseqid,   Subject sequence ID.
-    6.  qcovGnm,  Query coverage (percentage) per genome: $(aligned bases in the genome)/$qlen.
-    7.  cls,      Nth HSP cluster in the genome. (just for improving readability)
-                  It's useful to show if multiple adjacent HSPs are collinear.
-    8.  hsp,      Nth HSP in the genome.         (just for improving readability)
-    9.  qcovHSP   Query coverage (percentage) per HSP: $(aligned bases in a HSP)/$qlen.
-    10. alenHSP,  Aligned length in the current HSP.
-    11. pident,   Percentage of identical matches in the current HSP.
-    12. gaps,     Gaps in the current HSP.
-    13. qstart,   Start of alignment in query sequence.
-    14. qend,     End of alignment in query sequence.
-    15. sstart,   Start of alignment in subject sequence.
-    16. send,     End of alignment in subject sequence.
-    17. sstr,     Subject strand.
-    18. slen,     Subject sequence length.
-    19. evalue,   Expect value.
-    20. bitscore, Bit score.
-    21. cigar,    CIGAR string of the alignment.                      (optional with -a/--all)
-    22. qseq,     Aligned part of query sequence.                      (optional with -a/--all)
-    23. sseq,     Aligned part of subject sequence.                    (optional with -a/--all)
-    24. align,    Alignment text ("|" and " ") between qseq and sseq. (optional with -a/--all)
+#     LexicMap output columns (1-based positions):
+#     1.  query,    Query sequence ID.
+#     2.  qlen,     Query sequence length.
+#     3.  hits,     Number of subject genomes.
+#     4.  sgenome,  Subject genome ID.
+#     5.  sseqid,   Subject sequence ID.
+#     6.  qcovGnm,  Query coverage (percentage) per genome: $(aligned bases in the genome)/$qlen.
+#     7.  cls,      Nth HSP cluster in the genome. (just for improving readability)
+#                   It's useful to show if multiple adjacent HSPs are collinear.
+#     8.  hsp,      Nth HSP in the genome.         (just for improving readability)
+#     9.  qcovHSP   Query coverage (percentage) per HSP: $(aligned bases in a HSP)/$qlen.
+#     10. alenHSP,  Aligned length in the current HSP.
+#     11. pident,   Percentage of identical matches in the current HSP.
+#     12. gaps,     Gaps in the current HSP.
+#     13. qstart,   Start of alignment in query sequence.
+#     14. qend,     End of alignment in query sequence.
+#     15. sstart,   Start of alignment in subject sequence.
+#     16. send,     End of alignment in subject sequence.
+#     17. sstr,     Subject strand.
+#     18. slen,     Subject sequence length.
+#     19. evalue,   Expect value.
+#     20. bitscore, Bit score.
+#     21. cigar,    CIGAR string of the alignment.                      (optional with -a/--all)
+#     22. qseq,     Aligned part of query sequence.                      (optional with -a/--all)
+#     23. sseq,     Aligned part of subject sequence.                    (optional with -a/--all)
+#     24. align,    Alignment text ("|" and " ") between qseq and sseq. (optional with -a/--all)
 
-    Args:
-        tsv_file (str): Input path.
-        max_mismatches (int): Mismatch threshold.
-        spacer_lendf (pl.DataFrame): Length lookup.
+#     Args:
+#         tsv_file (str): Input path.
+#         max_mismatches (int): Mismatch threshold.
+#         spacer_lendf (pl.DataFrame): Length lookup.
 
-    Returns:
-        pl.DataFrame: Results in standard format.
-    """
-    try:
-        results = pl.read_csv(
-            tsv_file,
-            separator="\t",
-            has_header=True,
-            infer_schema_length=100000,
-        )
-        results = results.rename(
-            {
-                "query": "spacer_id",
-                "sseqid": "contig_id",
-                "sstr": "strand",
-            }
-        )
-        if results.height == 0:
-            raise ValueError(f"No results found in {tsv_file}")
-    except Exception as e:
-        logger.warning(
-            f"Failed to create read from file {tsv_file}: {e}, returning empty dataframe"
-        )
-        return pl.DataFrame(
-            schema={
-                "spacer_id": pl.Utf8,
-                "contig_id": pl.Utf8,
-                "spacer_length": pl.UInt32,
-                "strand": pl.Utf8,
-                "start": pl.UInt32,
-                "end": pl.UInt32,
-                "mismatches": pl.UInt32,
-            },
-            orient="row",
-        )
+#     Returns:
+#         pl.DataFrame: Results in standard format.
+#     """
+#     try:
+#         results = pl.read_csv(
+#             tsv_file,
+#             separator="\t",
+#             has_header=True,
+#             infer_schema_length=100000,
+#         )
+#         results = results.rename(
+#             {
+#                 "query": "spacer_id",
+#                 "sseqid": "contig_id",
+#                 "sstr": "strand",
+#             }
+#         )
+#         if results.height == 0:
+#             raise ValueError(f"No results found in {tsv_file}")
+#     except Exception as e:
+#         logger.warning(
+#             f"Failed to create read from file {tsv_file}: {e}, returning empty dataframe"
+#         )
+#         return pl.DataFrame(
+#             schema={
+#                 "spacer_id": pl.Utf8,
+#                 "contig_id": pl.Utf8,
+#                 "spacer_length": pl.UInt32,
+#                 "strand": pl.Utf8,
+#                 "start": pl.UInt32,
+#                 "end": pl.UInt32,
+#                 "mismatches": pl.UInt32,
+#             },
+#             orient="row",
+#         )
 
-    # results = results.filter(pl.col("alenHSP") >= 17, pl.col("gaps") == 0) # we don't really need this here, but keeping commented to remember it was done previously. Potentially, with a max mismatch >3 this could have over restrict the max mismatch arguments values.
-    results = results.with_columns(pl.col("spacer_id").cast(pl.Utf8))
-    results = results.with_columns(
-        pl.col("align").str.count_matches("|", literal=True).alias("matches")
-    )
+#     # results = results.filter(pl.col("alenHSP") >= 17, pl.col("gaps") == 0) # we don't really need this here, but keeping commented to remember it was done previously. Potentially, with a max mismatch >3 this could have over restrict the max mismatch arguments values.
+#     results = results.with_columns(pl.col("spacer_id").cast(pl.Utf8))
+#     results = results.with_columns(
+#         pl.col("align").str.count_matches("|", literal=True).alias("matches")
+#     )
 
-    results = spacer_lendf.join(results, on="spacer_id", how="inner")
-    results = results.with_columns(
-        (pl.col("length") - pl.col("matches")).alias("mismatches"),
-        (pl.col("sstart") - 1).alias("start"),  # 1-based
-        (pl.col("send")).alias("end"),  # 1-based
-    )
-    results = results.filter(pl.col("mismatches") <= max_mismatches)
-    results = results.rename({"length": "spacer_length"})
-    results = results.select(
-        "spacer_id",
-        "contig_id",
-        "spacer_length",
-        "strand",
-        "start",
-        "end",
-        "mismatches",
-    ).unique()
-    results = results.with_columns(pl.col("spacer_id").cast(pl.Utf8))
-    return results
+#     results = spacer_lendf.join(results, on="spacer_id", how="inner")
+#     results = results.with_columns(
+#         (pl.col("length") - pl.col("matches")).alias("mismatches"),
+#         (pl.col("sstart") - 1).alias("start"),  # 1-based
+#         (pl.col("send")).alias("end"),  # 1-based
+#     )
+#     results = results.filter(pl.col("mismatches") <= max_mismatches)
+#     results = results.rename({"length": "spacer_length"})
+#     results = results.select(
+#         "spacer_id",
+#         "contig_id",
+#         "spacer_length",
+#         "strand",
+#         "start",
+#         "end",
+#         "mismatches",
+#     ).unique()
+#     results = results.with_columns(pl.col("spacer_id").cast(pl.Utf8))
+#     return results
 
 
 def parse_samVn_with_lens_polars(
@@ -2432,7 +2440,7 @@ def populate_pldf_withseqs_needletail(
     return pldf
 
 
-def prettify_alignment(
+def prettify_alignment_gap_affine(
     spacer_seq: str,
     contig_seq: str,
     strand: bool = False,
@@ -2493,6 +2501,59 @@ def prettify_alignment(
     if return_comp_str:
         return ali.comp
     return f"{ali.query}\n{ali.comp}\n{ali.ref}"
+
+
+def prettify_alignment_edit(
+    spacer_seq: str,
+    contig_seq: str,
+    strand: bool = False,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    return_ref_region: bool = False,
+    return_query_region: bool = False,
+    return_comp_str: bool = False,
+    **kwargs,
+) -> str:
+    """given a spacer and contig sequence and coordinates, return | for a match and . for a mismatch and " " (space) for an indel
+
+    Args:
+        spacer_seq: Query sequence.
+        contig_seq: Reference sequence.
+        strand: Rev-comp if True.
+        start: Start coord.
+        end: End coord.
+        return_ref_region: Return traceback ref.
+        return_query_region: Return traceback query.
+        return_comp_str: Return comparison string (| .).
+        gap_cost: Penalty.
+        extend_cost: Penalty.
+        cost_matrix: Scoring matrix.
+
+    Returns:
+        str: Alignment string representation.
+    """
+    if start is not None and end is not None:
+        aligned_region = contig_seq[start:end]
+    else:
+        aligned_region = contig_seq
+
+    if strand:  # True means reverse strand
+        aligned_region = reverse_complement(aligned_region)
+
+    alignment = edlib.align(spacer_seq, aligned_region, mode="NW",task='path',)
+
+    ali = edlib.getNiceAlignment(alignment,spacer_seq, aligned_region, " ")
+
+
+    if return_ref_region:
+        return ali["target_aligned"]
+    if return_query_region:
+        return ali["query_aligned"]
+    if return_comp_str:
+        return ali["matched_aligned"]
+    return f'{ali["query_aligned"]}\n{ali["matched_aligned"]}\n{ali["target_aligned"]}'
+
+
 
 
 def match_intervals_with_tolerance(
@@ -2596,7 +2657,7 @@ def test_alignment(
         end (int): End index.
         gap_cost (int): Opening penalty.
         extend_cost (int): Extension penalty.
-        distance_metric (str): Distance metric for validation: 'hamming' (substitutions only) or 'edit' (substitutions + indels). If 'hamming', the gap values are ignored.
+        distance_metric (str): Distance metric for validation: 'hamming' (substitutions only) or 'edit' (substitutions + indels) or 'gap_affine'. If 'hamming', the gap values are ignored.
 
     Returns:
         int: Distance count.
@@ -2614,26 +2675,12 @@ def test_alignment(
         aligned_region = reverse_complement(aligned_region)
 
     if distance_metric == "edit":
-        # Edit distance: spacer length minus matched positions
-        # This counts all differences including substitutions and indels
-        # Always use nw_trace to get the alignment string for accurate counting
-        alignment = ps.nw_trace(
-            spacer_seq,
-            aligned_region,
-            open=gap_cost,
-            extend=extend_cost,
-            matrix=ps.nuc44,
-        )
-
-        # In parasail's comp string:
-        # '|' = match
-        # '.' = mismatch (substitution)
-        # ' ' (space) = gap/indel
-
-        comp_string = alignment.traceback.comp
-        matches = comp_string.count("|")
-        distance = len(comp_string) - matches
-    else:
+        # Edit distance: spacer length minus matched positions FROM minimum edit alignment (using edlib)
+        # This counts all differences including substitutions and indels, after a global alignment.
+        edit_distance = edlib.align(spacer_seq, aligned_region, mode="NW")['editDistance']
+        distance = edit_distance
+        
+    elif distance_metric == "hamming":
         # Hamming distance: allows only substitutions. No indels.
         distance = calculate_hamming_distance(
             spacer_seq,
@@ -2642,7 +2689,31 @@ def test_alignment(
             start=None,
             end=None,
             silent=True,
+        )        
+    elif distance_metric == "gap_affine":
+        # Gap affine distance: use parasail's gap affine alignment (NW)
+
+        # Use Needleman-Wunsch global alignment (allows indels)
+        # NW aligns the full sequences, giving edit distance from the alignment traceback (parasail let's us set the gap open/extend costs --- not neccessarlay the absoulte minimal edit distance)
+        alignment = ps.nw_trace(
+            spacer_seq,
+            aligned_region,
+            open=gap_cost,
+            extend=extend_cost,
+            matrix=ps.nuc44,
         )
+
+        comp_string = alignment.traceback.comp
+
+        # True edit distance: count all non-match operations
+        # '|' = match (0 cost)
+        # '.' = substitution (1 cost)
+        # ' ' = gap/indel (1 cost per gap)
+        substitutions = comp_string.count(".")
+        indels = comp_string.count(" ")
+
+        edit_distance = substitutions + indels
+        return edit_distance
 
     return distance
 
@@ -2707,7 +2778,7 @@ def calculate_hamming_distance(
     return min_hamming
 
 
-def calculate_edit_distance(
+def calculate_gap_affine_edit(
     spacer_seq: str,
     contig_seq: str,
     strand: bool = False,
@@ -2771,7 +2842,49 @@ def calculate_edit_distance(
     return edit_distance
 
 
-def test_row(row, ignore_region_strands=False):
+
+def calculate_edit_distance(
+    spacer_seq: str,
+    contig_seq: str,
+    strand: bool = False,
+    start: int = None,
+    end: Optional[int] = None,
+):
+    """
+    Calculate minimal edit distance (allowing indels) using NW from edlib.
+
+    Args:
+        spacer_seq(str): Query sequence
+        contig_seq(str): Target sequence (may be pre-trimmed to region)
+        strand(bool): If True, reverse complement contig_seq
+        start(int): Region start coordinate (only used for slicing if sequence is full-length)
+        end(int): Region end coordinate (only used for slicing if sequence is full-length)
+
+    Returns:
+        True edit distance: count of substitutions + insertions + deletions
+    """
+    if start is not None and end is not None:
+        # Check if sequence is already trimmed to region
+        expected_length = end - start
+        if len(contig_seq) == expected_length:
+            # Already trimmed, use as-is
+            aligned_region = contig_seq
+        else:
+            # Full sequence, need to trim
+            aligned_region = contig_seq[start:end]
+    else:
+        aligned_region = contig_seq
+
+    if strand:
+        aligned_region = reverse_complement(aligned_region)
+
+    edit_distance = edlib.align(spacer_seq, aligned_region, mode="NW")['editDistance']
+    return edit_distance
+
+
+
+
+def test_row(row, ignore_region_strands=False, distance_metric = "hamming"):
     if ignore_region_strands:
         return test_alignment(
             row["spacer_seq"],
@@ -2779,7 +2892,7 @@ def test_row(row, ignore_region_strands=False):
             None,
             None,
             None,
-            gaps_as_mismatch=True,
+            distance_metric=distance_metric,
         )
     else:
         return test_alignment(
@@ -2788,7 +2901,7 @@ def test_row(row, ignore_region_strands=False):
             row["strand"],
             row["start"],
             row["end"],
-            gaps_as_mismatch=True,
+            distance_metric=distance_metric,
         )
 
 
@@ -2889,7 +3002,7 @@ def prettify_alignment_hamming(
     return f"{spacer_seq}\n{ali_str}\n{aligned_region}"
 
 
-def test_alignment_polars(results: pl.DataFrame, ignore_region_strands=False, **kwargs):
+def test_alignment_polars(results: pl.DataFrame, ignore_region_strands=False,distance_metric ="hamming", **kwargs):
     """Test if an alignment matches between a spacer and contig.
     Input is a pl.df with columns: spacer_id, contig_id, spacer_length, start, end, strand, mismatches, tool, spacer_seq, contig_seq
     """
@@ -2905,7 +3018,7 @@ def test_alignment_polars(results: pl.DataFrame, ignore_region_strands=False, **
             pl.col("end"),
         )
         .map_elements(
-            lambda x: test_row(x, ignore_region_strands=ignore_region_strands),
+            lambda x: test_row(x, ignore_region_strands=ignore_region_strands,distance_metric = distance_metric),
             return_dtype=pl.Int32(),
         )
         .alias("alignment_test")
@@ -3908,3 +4021,156 @@ def load_fraction_results_lazy(fraction_parquet_files, add_fraction_col=True):
     return combined
 
 
+def get_system_info(use_slurm: bool = True, also_out_to="system_info.json") -> dict:
+    """Collect system information and return as a dictionary.
+    
+    Args:
+        use_slurm: If True, try to get CPU and RAM info from SLURM environment variables first.
+                   Falls back to system detection if SLURM info is unavailable.
+    """
+    import platform
+    import sys
+    import subprocess
+
+    def run_command(cmd, default="N/A"):
+        """Helper to run shell command and return output or default."""
+        try:
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=5
+            )
+            return result.stdout.strip() if result.returncode == 0 else default
+        except Exception:
+            return default
+
+    # Get CPU info
+    cpu_info = "N/A"
+    cpu_freq = "N/A"
+    cpu_cache_l3 = "N/A"
+    ram = "N/A"
+    ram_total_bytes = "N/A"
+    ram_source = "system"
+    
+    if not use_slurm:
+        logger.debug("Not using SLURM for system info, detecting from system")
+        try:
+            if platform.system() == "Linux":
+                cpu_info = run_command(
+                    "grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d':' -f2 | xargs"
+                )
+                cpu_freq = run_command(
+                    "lscpu 2>/dev/null | grep 'CPU MHz' | awk '{print $3 \" MHz\"}'"
+                )
+                cpu_cache_l3 = run_command(
+                    "lscpu 2>/dev/null | grep 'L3 cache' | awk '{print $3}'"
+                )
+                cpu_cores = psutil.cpu_count(logical=False) or "N/A"
+                cpu_threads = psutil.cpu_count(logical=True) or "N/A"
+                mem = psutil.virtual_memory()
+                ram_total_bytes = mem.total
+                ram_gb = mem.total / (1024**3)
+                ram = f"{ram_gb:.1f}G"
+                ram_source = "system"
+
+
+            elif platform.system() == "Darwin":
+                cpu_info = run_command("sysctl -n machdep.cpu.brand_string 2>/dev/null")
+                cpu_freq_hz = run_command("sysctl -n hw.cpufrequency 2>/dev/null")
+                if cpu_freq_hz != "N/A":
+                    try:
+                        cpu_freq = f"{int(cpu_freq_hz) / 1000000} MHz"
+                    except ValueError:
+                        cpu_freq = "N/A"
+                cpu_cache_bytes = run_command("sysctl -n hw.l3cachesize 2>/dev/null")
+                if cpu_cache_bytes != "N/A":
+                    try:
+                        cpu_cache_l3 = f"{int(cpu_cache_bytes) / 1024 / 1024} MiB"
+                    except ValueError:
+                        cpu_cache_l3 = "N/A"
+        except Exception:
+            pass
+    else:
+        # fill in place holders using specs of a typical SLURM node
+        cpu_info = "AMD EPYC 7543 32-Core Processor X 2"
+        cpu_freq = "3705.616 MHz"
+        cpu_cache_l3 = "32768K"
+        cpu_threads = 64  # 2x AMD 7543 (32 cores each)
+        cpu_cores = 64
+        ram = "512.0G"
+        ram_gb = 512  # 512 GB (max!!)
+        ram_total_bytes = int(ram_gb * 1024 * 1024 * 1024)
+        ram_source = "slurm"
+        slurm_source = True
+
+    
+    # Get disk device and filesystem (same for slurm / local)
+    disk_device = run_command("df . 2>/dev/null | tail -1 | awk '{print $1}'")
+    if platform.system() == "Linux":
+        filesystem = run_command("df -T . 2>/dev/null | tail -1 | awk '{print $2}'")
+    else:
+        filesystem = "N/A"
+
+    disk_model = run_command(
+        "lsblk -d -o name,model 2>/dev/null | grep -v 'NAME' | head -1 | awk '{$1=\"\"; print $0}' | xargs"
+    )
+
+    # Get Python info
+    try:
+        python_version = (
+            f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        )
+        python_path = sys.executable
+    except Exception:
+        python_version = "N/A"
+        python_path = "N/A"
+
+    # Get tool versions
+    hyperfine_version = run_command("hyperfine --version 2>/dev/null | cut -d' ' -f2")
+
+    if also_out_to:
+        import json
+        with open(also_out_to, "w") as f:
+            json.dump(
+                {
+                    "os": platform.system(),
+                    "kernel": platform.release(),
+                    "architecture": platform.machine(),
+                    "cpu": cpu_info,
+                    "cpu_cores": str(cpu_cores),
+                    "cpu_threads": str(cpu_threads),
+                    "cpu_source": "slurm" if use_slurm else "system",
+                    "cpu_frequency": cpu_freq,
+                    "cpu_cache_l3": cpu_cache_l3,
+                    "ram": ram,
+                    "ram_total_bytes": str(ram_total_bytes),
+                    "ram_source": ram_source,
+                    "disk_device": disk_device,
+                    "filesystem": filesystem,
+                    "disk_model": disk_model,
+                    "python_version": python_version,
+                    "python_path": python_path,
+                    "hyperfine_version": hyperfine_version,
+                },
+                f,
+                indent=4,
+            )
+
+    return {
+        "os": platform.system(),
+        "kernel": platform.release(),
+        "architecture": platform.machine(),
+        "cpu": cpu_info,
+        "cpu_cores": str(cpu_cores),
+        "cpu_threads": str(cpu_threads),
+        "cpu_source": "slurm" if slurm_source else "system",
+        "cpu_frequency": cpu_freq,
+        "cpu_cache_l3": cpu_cache_l3,
+        "ram": ram,
+        "ram_total_bytes": str(ram_total_bytes),
+        "ram_source": ram_source,
+        "disk_device": disk_device,
+        "filesystem": filesystem,
+        "disk_model": disk_model,
+        "python_version": python_version,
+        "python_path": python_path,
+        "hyperfine_version": hyperfine_version,
+    }

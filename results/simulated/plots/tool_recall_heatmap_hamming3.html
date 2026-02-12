@@ -1,0 +1,170 @@
+<html lang="en">
+   <head>
+       <meta charset="UTF-8">
+       <style> html, body { margin: 0; padding: 0; } </style>
+       <script type="text/javascript" data-lets-plot-script="library" src="https://cdn.jsdelivr.net/gh/JetBrains/lets-plot@v4.8.2/js-package/distr/lets-plot.min.js"></script>
+   </head>
+   <body>
+          <div id="eIewML" ></div>
+   <script type="text/javascript" data-lets-plot-script="plot">
+   
+   (function() {
+   // ----------
+   
+   const forceImmediateRender = false;
+   const responsive = false;
+   
+   let sizing = {
+       width_mode: "MIN",
+       height_mode: "SCALED",
+       width: null, 
+       height: null 
+   };
+   
+   const preferredWidth = document.body.dataset.letsPlotPreferredWidth;
+   if (preferredWidth !== undefined) {
+       sizing = {
+           width_mode: 'FIXED',
+           height_mode: 'SCALED',
+           width: parseFloat(preferredWidth)
+       };
+   }
+   
+   const containerDiv = document.getElementById("eIewML");
+   let fig = null;
+   
+   function renderPlot() {
+       if (fig === null) {
+           const plotSpec = {
+"data":{
+"tool":["bowtie2","strobealign","mmseqs2","minimap2","indelfree_indexed","indelfree_bruteforce","bowtie1","mummer4","x_mapper","sassy","blastn","x_mapper","indelfree_indexed","mummer4","strobealign","sassy","mmseqs2","bowtie1","indelfree_bruteforce","blastn","bowtie2","minimap2","minimap2","bowtie1","strobealign","bowtie2","mmseqs2","blastn","indelfree_indexed","mummer4","sassy","blastn","indelfree_indexed","strobealign","x_mapper","bowtie1","minimap2","bowtie2","mmseqs2","indelfree_bruteforce","mummer4","strobealign","indelfree_bruteforce","indelfree_indexed","mummer4","blastn","bowtie1","mmseqs2","x_mapper","bowtie2","sassy","indelfree_bruteforce","blastn","minimap2","sassy","x_mapper","strobealign","bowtie1","bowtie2","mummer4","indelfree_indexed","mmseqs2"],
+"simulation":["ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_10000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_100000_nc_20000","ns_500000_nc_100000","ns_500000_nc_100000","ns_500000_nc_100000","ns_500000_nc_100000","ns_500000_nc_100000","ns_500000_nc_100000","ns_500000_nc_100000","ns_500000_nc_100000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_50000_nc_5000","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_500_nc_5000_HIGH_INSERTION_RATE","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000","ns_75000_nc_5000"],
+"recall":[0.9763789364275077,0.5858393547806794,0.722493728700067,2.2486732827631698E-4,1.0,1.0,1.0,0.5093544808562948,0.44852037297994185,0.9838994992954158,0.7790903367013462,0.41293530681303453,1.0,0.5073672430790547,0.5478604353734247,0.9829374383842691,0.7199814819749007,1.0,1.0,0.7773740374623644,0.9764028403186699,3.0641336495164E-4,2.2794033116756984E-4,1.0,0.3506640661648015,0.9702118325477651,0.6991907787895245,0.7729694480672642,1.0,0.5029797417204804,0.9831596874373872,0.7765477860148267,1.0,0.5855640152274093,0.4680424764576237,1.0,2.304147465437788E-4,0.9769384892807053,0.7203265878581446,1.0,0.5082348226808255,0.1881777487354255,1.0,1.0,0.5234038696814536,0.7753695944060613,1.0,0.5289176768556036,0.054723105284621675,0.9777802156394657,0.9825499450288688,1.0,0.7780005595449034,3.0641744714299035E-4,0.9832536203887505,0.4738146307669762,0.586229866375348,1.0,0.9769454177269155,0.5084064960498794,1.0,0.7228121128149105],
+"label":["0.98","0.59","0.72","0.0","1.0","1.0","1.0","0.51","0.45","0.98","0.78","0.41","1.0","0.51","0.55","0.98","0.72","1.0","1.0","0.78","0.98","0.0","0.0","1.0","0.35","0.97","0.7","0.77","1.0","0.5","0.98","0.78","1.0","0.59","0.47","1.0","0.0","0.98","0.72","1.0","0.51","0.19","1.0","1.0","0.52","0.78","1.0","0.53","0.05","0.98","0.98","1.0","0.78","0.0","0.98","0.47","0.59","1.0","0.98","0.51","1.0","0.72"]
+},
+"mapping":{
+"x":"simulation",
+"y":"tool",
+"fill":"recall"
+},
+"data_meta":{
+"series_annotations":[{
+"type":"str",
+"column":"tool"
+},{
+"type":"str",
+"column":"simulation"
+},{
+"type":"float",
+"column":"recall"
+},{
+"type":"str",
+"column":"label"
+}]
+},
+"ggtitle":{
+"text":"Tool Recall Across Simulations (Hamming Distance ≤ 3)"
+},
+"guides":{
+"x":{
+"title":"Simulation"
+},
+"y":{
+"title":"Tool"
+}
+},
+"ggsize":{
+"width":900.0,
+"height":600.0
+},
+"theme":{
+"name":"minimal",
+"axis_text_x":{
+"angle":45.0,
+"hjust":1.0,
+"blank":false
+},
+"plot_title":{
+"face":"bold",
+"size":14.0,
+"blank":false
+}
+},
+"kind":"plot",
+"scales":[{
+"name":"Recall\n(Augmented)",
+"aesthetic":"fill",
+"limits":[0.0,1.0],
+"low":"#440154",
+"high":"#FDE724",
+"scale_mapper_kind":"color_gradient"
+}],
+"layers":[{
+"geom":"tile",
+"mapping":{
+},
+"data_meta":{
+},
+"color":"white",
+"size":0.5,
+"data":{
+}
+},{
+"geom":"text",
+"mapping":{
+"label":"label"
+},
+"data_meta":{
+},
+"color":"white",
+"size":6.0,
+"fontface":"bold",
+"data":{
+}
+}],
+"metainfo_list":[],
+"spec_id":"44"
+};
+           fig = LetsPlot.buildPlotFromProcessedSpecs(plotSpec, containerDiv, sizing);
+       } else {
+           fig.updateView({});
+       }
+   }
+   
+   const renderImmediately = 
+       forceImmediateRender || (
+           sizing.width_mode === 'FIXED' && 
+           (sizing.height_mode === 'FIXED' || sizing.height_mode === 'SCALED')
+       );
+   
+   if (renderImmediately) {
+       renderPlot();
+   }
+   
+   if (!renderImmediately || responsive) {
+       // Set up observer for initial sizing or continuous monitoring
+       var observer = new ResizeObserver(function(entries) {
+           for (let entry of entries) {
+               if (entry.contentBoxSize && 
+                   entry.contentBoxSize[0].inlineSize > 0) {
+                   if (!responsive && observer) {
+                       observer.disconnect();
+                       observer = null;
+                   }
+                   renderPlot();
+                   if (!responsive) {
+                       break;
+                   }
+               }
+           }
+       });
+       
+       observer.observe(containerDiv);
+   }
+   
+   // ----------
+   })();
+   
+   </script>
+   </body>
+</html>

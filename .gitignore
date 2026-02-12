@@ -224,3 +224,5 @@ temp_sassy_partitioned_*/*
 sassy_parsed_*.parquet
 .nfs3*
 draft/reviewers_comments.txt
+.github/copilot-instructions.md
+.github/zotero-research-workflow.md

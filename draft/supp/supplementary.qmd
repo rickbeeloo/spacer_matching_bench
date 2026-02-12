@@ -1,5 +1,5 @@
 ---
-title: "Supplementary material for: Tool Choice drastically Impacts CRISPR Spacer-Protospacer Detection"
+title: "Supplementary Material for: Computational Tool Choice Impacts CRISPR Spacer-Protospacer Detection"
 author:
   - name: Uri Neri
     affiliations:
@@ -52,266 +52,296 @@ format:
   odt: default
   docx: default
 ---
-# Supplementary Materials
-## Tables 
 
-### 1. Tool Configuration Details
+# Supplementary Materials
+
+::: callout-note
+## Cross-reference formatting note
+
+In Quarto, cross-references between files require using the `@` symbol with labeled sections. For example, to reference Supplementary Table S1 from the main text, use `[@tbl-supp-tool-config]`. Figure references work similarly with `[@fig-supp-*]` notation.
+:::
+
+## Tables
+
+### Supplementary Table S1: Tool Configuration Details {#tbl-supp-tool-config}
 
 For full version and build information see the git repo at [code.jgi.doe.gov/spacersdb/spacer_matching_bench](https://code.jgi.doe.gov/spacersdb/spacer_matching_bench)
 
+**Note on tool versions:** Following reviewer suggestions, we added three tools to the benchmark compared to the initial version: Sassy (exhaustive edit distance search), X-mapper (dynamic gapped x-mer approach), and indelfree.sh (BBTools suite, both bruteforce exhaustive mode and indexed heuristic mode). We also updated versions of existing tools where newer releases were available.
+
+**Note on BLASTn parameters:** The parameters for BLASTn were specifically chosen to enable the highest possible recall for short spacers. We used `blastn-short` (sets word-size at 7, compared to 11 with default blastn and 28 in megablastn), a very high number of max target sequences (`-max_target_seqs 1000000`, allowing up to 1M reported alignments per query compared to default value of 500), the `--ungapped` flag (used by CRISPRTarget, aligns with our hamming distance focus), and `perc_identity=84` and `qcov_hsp_perc=80`. The ungapped flag considerably reduced total CPU time. The perc_identity and qcov_hsp_perc arguments control output size - we cannot restrict blastn to a specific "n" distance, so these values allow a range of distances to be reported. For example, 85% identity over at least 80% of the spacer allows for 3 mismatches for a 20bp spacer (20 \* 0.15 = 3), but allows more for a 30bp spacer (30 \* 0.15 = 4.5). This range exceeds our desired threshold to capture all valid matches.
+
 | Tool | Version | Command |
-|:------------------- |:---------------------------------------- |:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| bbmapskimmer| 39.13| `bbmapskimmer.sh sam=1.4 maxindel=0 tipsearch=0 midpad=100 in={spacers_file} ref=./{contigs_file} outm={output_dir}/bbmap_skimmer_output.sam t={threads} minid=0.85 path={output_dir}`|
-| blastn| 2.16.0+, Dec 14 2024| `makeblastdb -in {contigs_file} -dbtype nucl -out {output_dir}/contigs_blastdb``blastn -query {spacers_file} -db {output_dir}/contigs_blastdb -max_target_seqs 1000000 -out {output_dir}/blastn_output.tsv -evalue 1e-5 -num_threads {threads} -task blastn-short -outfmt 6 qaccver saccver nident length mismatch qlen gapopen qstart qend sstart send evalue bitscore""`|
-| bowtie1 | bowtie-align-s version 1.3.1 | `bowtie-build --threads {threads} {contigs_file} {results_dir}/simulated_data/bt1_contigs_index``bowtie --threads {threads} -f --all -v 3 -x {results_dir}/simulated_data/bt1_contigs_index {spacers_file} -S {output_dir}/bowtie1_output.sam` |
-| bowtie2 | bowtie2-align-s 2.5.4 | `bowtie2-build --large-index --threads {threads} {contigs_file} {results_dir}/simulated_data/contigs_bt2indx``bowtie2 --all --xeq --very-sensitive -x {results_dir}/simulated_data/contigs_bt2indx -f {spacers_file} -S {output_dir}/bowtie2_output.sam --threads {threads}` |
-| hisat2 | hisat2-align-s 2.2.1 | `hisat2-build -p {threads} {contigs_file} {output_dir}/hisat2_idx``hisat2 -a --no-spliced-alignment --no-unal --no-softclip --secondary -p {threads} -x {output_dir}/hisat2_idx -f {spacers_file} -S {output_dir}/hisat2_output.sam` |
-| lexicmap | v0.5.0 (06741c8) | `mkdir -p {output_dir}/tmp_lexicmap_contigs {output_dir}/tmp_lexicmap_spacers``cp {contigs_file} {output_dir}/tmp_lexicmap_contigs/simulated_contigs.fa``cp {spacers_file} {output_dir}/tmp_lexicmap_spacers/simulated_spacers.fa``lexicmap index -k 15 -m 40000 --seed-max-desert 200 --seed-in-desert-dist 50 -I {output_dir}/tmp_lexicmap_contigs -O {output_dir}/tmp_lexicmap.lmi``lexicmap search -d {output_dir}/tmp_lexicmap.lmi {output_dir}/tmp_lexicmap_spacers/simulated_spacers.fa -o {output_dir}/lexicmap_output.tsv --threads {threads} --align-min-match-len 17 --align-min-match-pident 85 --seed-min-prefix 15 --seed-min-single-prefix 15 --seed-max-dist 100 --seed-max-gap 100 --align-max-gap 20 --align-band 100 --top-n-genomes 0 -a` |
-| minimap2 | 2.28-r1209 | `minimap2 -N 100 --eqx -t {threads} -a {contigs_file} {spacers_file} -o {output_dir}/minimap2_output.sam` |
-| mmseqs2 | db8ad2d14d0a285ce0ad62bbefd0dce927663315 | `mkdir -p {output_dir}/tmp_spacers {output_dir}/tmp_contigs {output_dir}/tmp_mmseqs {output_dir}/tmp_mmseqs_outputs``mmseqs createdb {spacers_file} {output_dir}/tmp_spacers/mmdb``mmseqs createdb {contigs_file} {output_dir}/tmp_contigs/mmdb``mmseqs search {output_dir}/tmp_spacers/mmdb {output_dir}/tmp_contigs/mmdb {output_dir}/tmp_mmseqs_outputs/mmseqs_output {output_dir}/tmp_mmseqs --min-seq-id 0.85 --min-aln-len 17 --threads {threads} -a --search-type 3 -v 1``mmseqs convertalis {output_dir}/tmp_spacers/mmdb {output_dir}/tmp_contigs/mmdb {output_dir}/tmp_mmseqs_outputs/mmseqs_output {output_dir}/mmseqs_output.tsv --format-mode 0 --search-type 4 --format-output query,target,nident,alnlen,mismatch,qlen,gapopen,qstart,qend,tstart,tend,evalue,bits` |
-| mummer4 | 4.1.0-r1304 // 4.1 | `nucmer --maxmatch --nosimplify --batch=10000000 --threads {threads} --sam-long={output_dir}/mummer4_output.sam -c 1 {contigs_file} {spacers_file}` |
-| spacer\_containment | 0.1.0 | `spacer-containment --n-threads {threads} {contigs_file} {spacers_file} > {output_dir}/spacer_containment_output.tsv` |
-| strobealign | 0.15.0 | `strobealign --eqx -k 15 -N 1000 -t {threads} {contigs_file} {spacers_file} -o {output_dir}/strobealign_output.sam` |
-    
+|:-----|:--------|:--------|
 
-### 2. Recall values for each tool at different mismatch thresholds 
-#### A. IMG/VR4 dataset  
-Every row lists the results for a specific mismatch threshold and tool.  
-The values are for exact mismatches (not max), and represent the total number of unique spacer-contig pairs (aligning at that mismatch threshold).  
-The fraction is tool_matches divided by total_possible.  
+### Supplementary Table S2: IMG/VR4 Contig Dataset Statistics and Filtering Steps {#tbl-supp-contig-stats}
 
+Summary of IMG/VR4 v1.1 high-confidence viral contigs after taxonomic filtering and length cutoff.
 
-| mismatches | tool          | total_possible | tool_matches | fraction       |
-|------------|---------------|----------------|--------------|----------------|
-| 0          | mummer4       | 16866829       | 16866546     | 0.9999832      |
-| 0          | mmseqs2       | 16866829       | 15803286     | 0.9369447      |
-| 0          | bowtie1       | 16866829       | 16866784     | 0.9999973      |
-| 0          | lexicmap      | 16866829       | 6033115      | 0.3576911      |
-| 0          | minimap2      | 16866829       | 5110         | 0.000303       |
-| 0          | strobealign   | 16866829       | 4233236      | 0.25098        |
-| 0          | blastn        | 16866829       | 16850968     | 0.9990596      |
-| 0          | bbmap_skimmer | 16866829       | 14978104     | 0.8880213      |
-| 0          | bowtie2       | 16866829       | 16866667     | 0.9999904      |
-| 1          | mummer4       | 12197007       | 8032640      | 0.6585747      |
-| 1          | mmseqs2       | 12197007       | 9805301      | 0.8039104      |
-| 1          | bowtie1       | 12197007       | 11992384     | 0.9832235      |
-| 1          | lexicmap      | 12197007       | 835330       | 0.0684865      |
-| 1          | minimap2      | 12197007       | 1086         | 0.000089038237 |
-| 1          | strobealign   | 12197007       | 1311189      | 0.1075009      |
-| 1          | blastn        | 12197007       | 7318398      | 0.6000159      |
-| 1          | bbmap_skimmer | 12197007       | 2413864      | 0.1979063      |
-| 1          | bowtie2       | 12197007       | 12112313     | 0.9930562      |
-| 2          | mummer4       | 12359867       | 3129926      | 0.253233       |
-| 2          | mmseqs2       | 12359867       | 6756086      | 0.5466148      |
-| 2          | bowtie1       | 12359867       | 11173197     | 0.9039901      |
-| 2          | lexicmap      | 12359867       | 426554       | 0.0345112      |
-| 2          | minimap2      | 12359867       | 667          | 0.000053964982 |
-| 2          | strobealign   | 12359867       | 375251       | 0.0303604      |
-| 2          | blastn        | 12359867       | 3217012      | 0.2602789      |
-| 2          | bbmap_skimmer | 12359867       | 1047205      | 0.0847262      |
-| 2          | bowtie2       | 12359867       | 5243454      | 0.4242322      |
-| 3          | mummer4       | 16472212       | 673444       | 0.0408836      |
-| 3          | mmseqs2       | 16472212       | 3560155      | 0.216131       |
-| 3          | bowtie1       | 16472212       | 14523177     | 0.8816774      |
-| 3          | lexicmap      | 16472212       | 430208       | 0.0261172      |
-| 3          | minimap2      | 16472212       | 392          | 0.000023797654 |
-| 3          | strobealign   | 16472212       | 88246        | 0.0053573      |
-| 3          | blastn        | 16472212       | 1972148      | 0.1197258      |
-| 3          | bbmap_skimmer | 16472212       | 630914       | 0.0383017      |
-| 3          | bowtie2       | 16472212       | 2998722      | 0.1820473      |
-  
+<PLACE_HOLDER> <!-- Should include:
+- Starting dataset: 5,457,198 high-confidence contigs from IMG/VR4 v1.1
+- Taxonomic filtering steps (removal of eukaryotic virus families, orders, classes)
+- Length filtering: contigs ≤1000 bp removed
+- Final dataset: 5,115,894 prokaryotic viral contigs
+- Size statistics: total ~79 Gbp, range 1,001-2,473,870 bp, median 7,664 bp, GC% 44.45%
+- HQ subset selection: 421,431 contigs (~18.9 Gbp) via stratified sampling by taxonomic class
+-->
 
-#### B. Synthetic dataset   
+### Supplementary Table S3: CRISPR Spacer Dataset Composition and Statistics {#tbl-supp-spacer-stats}
 
-| mismatches | tool               | total_possible | tool_matches | recall           | false_positives | false_negatives | precision    | f1_score         |
-|------------|--------------------|----------------|--------------|------------------|-----------------|-----------------|--------------|------------------|
-| 0          | minimap2           | 1899024        | 176          | 0.00009267918678 | 49              | 1898848         | 0.7822222222 | 0.0001853364146  |
-| 0          | bbmapskimmer       | 1899024        | 377426       | 0.1987473565     | 1010            | 1521598         | 0.9973311207 | 0.3314446796     |
-| 0          | mmseqs2map         | 1899024        | 1021533      | 0.5379252711     | 57809           | 877491          | 0.9464405165 | 0.6859687493     |
-| 0          | mmseqs2            | 1899024        | 1021533      | 0.5379252711     | 134608          | 877491          | 0.8835712945 | 0.6687252571     |
-| 0          | minimap2_mod       | 1899024        | 176          | 0.00009267918678 | 49              | 1898848         | 0.7822222222 | 0.0001853364146  |
-| 0          | bowtie1            | 1899024        | 1899024      | 1                | 0               | 0               | 1            | 1                |
-| 0          | bbmapskimmermod    | 1899024        | 1899024      | 1                | 1130            | 0               | 0.9994053114 | 0.9997025672     |
-| 0          | bwa_mem            | 1899024        | 683227       | 0.3597779702     | 15626           | 1215797         | 0.9776405052 | 0.5259887208     |
-| 0          | lexicmap           | 1899024        | 1427612      | 0.7517609045     | 469844          | 471412          | 0.7523821369 | 0.7520713924     |
-| 0          | hisat2             | 1899024        | 1875654      | 0.9876936784     | 3               | 23370           | 0.9999984006 | 0.9938079536     |
-| 0          | minimap2_og        | 1899024        | 48           | 0.00002527614185 | 6               | 1898976         | 0.8888888889 | 0.00005055084625 |
-| 0          | spacer_containment | 1899024        | 1899024      | 1                | 0               | 0               | 1            | 1                |
-| 0          | bowtie2            | 1899024        | 1899024      | 1                | 3               | 0               | 0.9999984202 | 0.9999992101     |
-| 0          | blastn             | 1899024        | 1745238      | 0.919018401      | 596453          | 153786          | 0.7452896219 | 0.8230866729     |
-| 0          | mummer4            | 1899024        | 1860393      | 0.9796574451     | 250245          | 38631           | 0.881436324  | 0.9279550246     |
-| 0          | strobealign        | 1899024        | 42016        | 0.0221250495     | 193             | 1857008         | 0.9954275155 | 0.04328795152    |
-| 1          | minimap2           | 1992339        | 86           | 0.00004316534485 | 49              | 1992253         | 0.637037037  | 0.00008632484037 |
-| 1          | bbmapskimmer       | 1992339        | 814246       | 0.4086884812     | 1010            | 1178093         | 0.9987611253 | 0.5800309518     |
-| 1          | mmseqs2map         | 1992339        | 982267       | 0.4930220209     | 57809           | 1010072         | 0.9444184848 | 0.6478447046     |
-| 1          | mmseqs2            | 1992339        | 971696       | 0.4877161969     | 134608          | 1020643         | 0.8783263913 | 0.627175186      |
-| 1          | minimap2_mod       | 1992339        | 86           | 0.00004316534485 | 49              | 1992253         | 0.637037037  | 0.00008632484037 |
-| 1          | bowtie1            | 1992339        | 1924529      | 0.9659646275     | 0               | 67810           | 1            | 0.9826876984     |
-| 1          | bbmapskimmermod    | 1992339        | 1903036      | 0.9551768048     | 1130            | 89303           | 0.9994065643 | 0.9767912527     |
-| 1          | bwa_mem            | 1992339        | 569097       | 0.2856426542     | 15626           | 1423242         | 0.9732762351 | 0.4416634136     |
-| 1          | lexicmap           | 1992339        | 848885       | 0.4260745787     | 469844          | 1143454         | 0.643714516  | 0.512756005      |
-| 1          | hisat2             | 1992339        | 1638156      | 0.8222275426     | 3               | 354183          | 0.9999981687 | 0.9024414832     |
-| 1          | minimap2_og        | 1992339        | 12           | 0.00000602       | 6               | 1992327         | 0.6666666667 | 0.00001204603392 |
-| 1          | spacer_containment | 0              | 0            | 0                | 0               | 0               | 0            | 0                |
-| 1          | bowtie2            | 1992339        | 1924529      | 0.9659646275     | 3               | 67810           | 0.9999984412 | 0.9826869458     |
-| 1          | blastn             | 1992339        | 1534121      | 0.7700100234     | 596453          | 458218          | 0.7200505591 | 0.7441927589     |
-| 1          | mummer4            | 1992339        | 1605268      | 0.8057203117     | 250245          | 387071          | 0.8651343321 | 0.8343709685     |
-| 1          | strobealign        | 1992339        | 39698        | 0.01992532395    | 193             | 1952641         | 0.9951618159 | 0.03906841253    |
-| 2          | minimap2           | 2137067        | 91           | 0.00004258172533 | 49              | 2136976         | 0.65         | 0.00008515787193 |
-| 2          | bbmapskimmer       | 2137067        | 804812       | 0.3765965222     | 1010            | 1332255         | 0.9987466215 | 0.5469536907     |
-| 2          | mmseqs2map         | 2137067        | 912682       | 0.4270722443     | 57809           | 1224385         | 0.9404332446 | 0.5873949899     |
-| 2          | mmseqs2            | 2137067        | 901193       | 0.4216961845     | 134608          | 1235874         | 0.8700445356 | 0.5680620814     |
-| 2          | minimap2_mod       | 2137067        | 91           | 0.00004258172533 | 49              | 2136976         | 0.65         | 0.00008515787193 |
-| 2          | bowtie1            | 2137067        | 1934586      | 0.9052528536     | 0               | 202481          | 1            | 0.9502705658     |
-| 2          | bbmapskimmermod    | 2137067        | 1734297      | 0.811531412      | 1130            | 402770          | 0.9993488634 | 0.8957002903     |
-| 2          | bwa_mem            | 2137067        | 515856       | 0.2413850385     | 15626           | 1621211         | 0.9705991924 | 0.3866190952     |
-| 2          | lexicmap           | 2137067        | 562385       | 0.2631574022     | 469844          | 1574682         | 0.544825809  | 0.3548958507     |
-| 2          | hisat2             | 2137067        | 1115625      | 0.5220355749     | 3               | 1021442         | 0.9999973109 | 0.6859696344     |
-| 2          | minimap2_og        | 2137067        | 26           | 0.00001216620724 | 6               | 2137041         | 0.8125       | 0.00002433205013 |
-| 2          | spacer_containment | 0              | 0            | 0                | 0               | 0               | 0            | 0                |
-| 2          | bowtie2            | 2137067        | 1573821      | 0.7364397092     | 3               | 563246          | 0.9999980938 | 0.8482173149     |
-| 2          | blastn             | 2137067        | 1355458      | 0.6342608819     | 596453          | 781609          | 0.6944261291 | 0.6629813122     |
-| 2          | mummer4            | 2137067        | 1432751      | 0.6704286763     | 250245          | 704316          | 0.851309807  | 0.7501190425     |
-| 2          | strobealign        | 2137067        | 34729        | 0.01625077735    | 193             | 2102338         | 0.9944733979 | 0.03197898332    |
-| 3          | minimap2           | 2609997        | 220          | 0.00008429128463 | 49              | 2609777         | 0.8178438662 | 0.000168565196   |
-| 3          | bbmapskimmer       | 2609997        | 760618       | 0.291424856      | 1010            | 1849379         | 0.9986738933 | 0.4511877804     |
-| 3          | mmseqs2map         | 2609997        | 860977       | 0.3298766244     | 57809           | 1749020         | 0.9370811048 | 0.4879738992     |
-| 3          | mmseqs2            | 2609997        | 862278       | 0.3303750924     | 134608          | 1747719         | 0.8649715213 | 0.4781291769     |
-| 3          | minimap2_mod       | 2609997        | 228          | 0.00008735642225 | 49              | 2609769         | 0.8231046931 | 0.0001746943041  |
-| 3          | bowtie1            | 2609997        | 2238309      | 0.8575906409     | 0               | 371688          | 1            | 0.9233365221     |
-| 3          | bbmapskimmermod    | 2609997        | 1534102      | 0.5877792197     | 1130            | 1075895         | 0.9992639549 | 0.7401772013     |
-| 3          | bwa_mem            | 2609997        | 497712       | 0.1906944721     | 15626           | 2112285         | 0.969560017  | 0.3187054863     |
-| 3          | lexicmap           | 2609997        | 443019       | 0.1697392756     | 469844          | 2166978         | 0.4853072148 | 0.2515109882     |
-| 3          | hisat2             | 2609997        | 564049       | 0.2161109764     | 3               | 2045948         | 0.9999946813 | 0.3554129127     |
-| 3          | minimap2_og        | 2609997        | 35           | 0.0000134099771  | 6               | 2609962         | 0.8536585366 | 0.0000268195329  |
-| 3          | spacer_containment | 0              | 0            | 0                | 0               | 0               | 0            | 0                |
-| 3          | bowtie2            | 2609997        | 1415300      | 0.5422611597     | 3               | 1194697         | 0.9999978803 | 0.7032022458     |
-| 3          | blastn             | 2609997        | 1270806      | 0.4868994102     | 596453          | 1339191         | 0.6805729682 | 0.5676718061     |
-| 3          | mummer4            | 2609997        | 1338301      | 0.5127595932     | 250245          | 1271696         | 0.842469151  | 0.6375073448     |
-| 3          | strobealign        | 2609997        | 30913        | 0.01184407492    | 193             | 2579084         | 0.9937954092 | 0.02340915898    |
+Detailed statistics on the iPHoP spacer dataset before and after complexity filtering.
 
+<PLACE_HOLDER> <!-- Should include:
+- Raw iPHoP dataset: 3,882,812 unique spacers
+- Length distribution: range 25-40 bp, median 34 bp (or 25-100 bp based on table in main text)
+- GC content: 47.6% (raw), 46.73% (filtered)
+- Complexity filtering criteria (entropy ≤1, N fraction >0, homopolymer ≥95%, non-unique 6-mers ≥4)
+- Filtered spacers removed: 55,833 (~1.4%)
+- Final dataset: 3,826,979 spacers
+- Total length: 132 Mbp
+- See also Figure S7 for distributions
+-->
 
+### Supplementary Table S4: Complete Simulation Parameters and Dataset Statistics {#tbl-supp-simulation-params}
 
+Comprehensive table of all synthetic dataset generation parameters and resulting statistics.
 
-# Figures 
+<PLACE_HOLDER> <!-- Should include for each simulation run (ns_[n]_nc_[m]):
+- Dataset name
+- Number of spacers, number of contigs
+- Spacer length range and distribution type
+- Contig length range and distribution type
+- GC content (spacers and contigs)
+- Insertion/injection range (occurrences per spacer)
+- Mismatch range (substitution mutations)
+- Indel parameters (if used - note: not used in current project)
+- Reverse complement proportion (typically 50%)
+- Contig utilization percentage (<2% for most)
+- Total spacer bp, total contig bp
+- Tools evaluated on dataset
+- Maximum distance threshold used (≤3 or ≤5 hamming)
+- Whether exhaustive tools included
 
-### Supplementary figure 1.
+Specific datasets:
+1. ns_50000_nc_5000: 50k spacers, 5k contigs, 25-40bp spacers, 10-150kbp contigs, 1-5 insertions, 0-5 mismatches, all tools, ≤5 hamming
+2. ns_75000_nc_5000: 75k spacers, 5k contigs, similar parameters
+3. ns_75000_nc_10000: 75k spacers, 10k contigs, similar parameters
+4. ns_100000_nc_10000: 100k spacers, 10k contigs, all tools, ≤5 hamming
+5. ns_100000_nc_20000: 100k spacers, 20k contigs, all tools, ≤5 hamming
+6. ns_500000_nc_100000: 500k spacers, 100k contigs, 10-550kbp contigs, heuristic tools only, ≤3 hamming
+7. ns_500_nc_5000_HIGH_INSERTION_RATE: 500 spacers, 5k contigs, 100-2500 insertions per spacer
+8. ns_100_nc_50000: 100 spacers, 50k contigs, 2.5-850kbp contigs, 1-3 insertions, 25-45bp spacers
+-->
 
-Benchmarking framework pipeline overview. 
+### Supplementary Table S5: Recall Values for Each Tool at Different Mismatch Thresholds {#tbl-supp-recall}
 
-![](figures/supp/workflow.svg)  
+#### A. IMG/VR4 dataset
 
+Every row lists the results for a specific mismatch threshold and tool.\
+The values are for exact mismatches (not max), and represent the total number of unique spacer-contig pairs (aligning at that mismatch threshold).\
+The fraction is tool_matches divided by total_possible.
 
-### Supplementary figure 2.
+| mismatches | tool | total_possible | tool_matches | fraction |
+|------------|------|----------------|--------------|----------|
 
-IMG/VR v4 based results in a tool vs tool comparison. Unlike the similar matrix in the main text(figure 1) which showcases the values for up to 1 and 3 mismatches, here the matrixes are separated for each mismatch threshold at an **exact** mismatch value. From top left to bottom right, the mismatch threshold is 0, 1, 2, 3. Like the main text figure, the value of a cell(i,j) is the fraction of spacer-contig pairs identified by the tool listed in row i, which were not identified by the tool listed in the j column.  
+#### B. Synthetic dataset
 
+## Supplementary Figures
 
-![](figures/supp/real_data_matrix_combined.svg)  
+### Supplementary Figure S1: Benchmarking framework pipeline overview {#fig-supp-workflow}
 
+![](figures/supp/workflow.svg)
 
-### Supplementary figure 3
+### Supplementary Figure S2: IMG/VR4 tool-vs-tool comparison matrices {#fig-supp-real-matrix}
 
-Simulated dataset performance metrics.  
-Precision = True Positives / (True Positives + False Positives)  
-Recall = True Positives / (True Positives + False Negatives)  
-F1 = 2 * (Precision * Recall) / (Precision + Recall)  
+IMG/VR v4 based results in a tool vs tool comparison. Unlike the similar matrix in the main text (figure 1) which showcases the values for up to 1 and 3 mismatches, here the matrixes are separated for each mismatch threshold at an **exact** mismatch value. From top left to bottom right, the mismatch threshold is 0, 1, 2, 3. Like the main text figure, the value of a cell(i,j) is the fraction of spacer-contig pairs identified by the tool listed in row i, which were not identified by the tool listed in the j column.
+
+![](figures/supp/real_data_matrix_combined.svg)
+
+### Supplementary Figure S3: Simulated dataset performance metrics {#fig-supp-sim-performance}
+
+Performance metrics for tools on simulated datasets.\
+Precision = True Positives / (True Positives + False Positives)\
+Recall = True Positives / (True Positives + False Negatives)\
+F1 = 2 \* (Precision \* Recall) / (Precision + Recall)\
 Note: Because of the various prefiltering steps, the number of False Negatives and False Positives may not be indicative of the actual raw tool-reported results. As such, we recommend focusing on the recall rate between tools, which is equivalent to the fraction of detected spacer-protospacer pairs out of all the spacer-protospacer pairs in the reference file.
 
 ![](figures/supp/simulated_tool_performance_by_mismatches.svg)
 
+### Supplementary Figure S4: Simulated dataset recall vs spacer occurrence frequency {#fig-supp-sim-recall}
 
-### Supplementary figure 4.
+**Simulated dataset** recall (detection fraction) for different values of spacer occurrences.
 
-**Simulated dataset** recall (detection fraction) for different values of spacer occurrences.   
+#### A. For exact mismatches, in a contig dependent manner
 
-#### A. for exact mismatches, in a contig dependent manner
- Per contigs manner means the that the recall measure is the fraction of occurences each tool identified out of the total number of spacer-contig pairs, identified by all tools.  
-1. 0 mismatches  
+Per contigs manner means the that the recall measure is the fraction of occurences each tool identified out of the total number of spacer-contig pairs, identified by all tools.\
+1. 0 mismatches
 
-![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_0.svg)  
+![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_0.svg)
 
-2. exactly 1 mismatch  
+2.  exactly 1 mismatch
 
-![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_1.svg)  
+![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_1.svg)
 
-3. exactly 2 mismatches  
+3.  exactly 2 mismatches
 
-![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_2.svg)  
+![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_2.svg)
 
-4. exactly 3 mismatches  
+4.  exactly 3 mismatches
 
-![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_3.svg)  
+![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_3.svg)
 
-#### B. up to 1 and 3 mismatches, in a contig independent manner  
+#### B. Up to 1 and 3 mismatches, in a contig independent manner
 
-Per contig independent manner means that the recall measure is the fraction of occurences each tool identified out of the total number of times the spacer occurs in the reference file (regardless of in which contig).  
+Per contig independent manner means that the recall measure is the fraction of occurences each tool identified out of the total number of times the spacer occurs in the reference file (regardless of in which contig).\
 1. up to 1 mismatches
 
-![](figures/supp/simulated_recall_vs_occurrences_max_nm_1.svg)  
+![](figures/supp/simulated_recall_vs_occurrences_max_nm_1.svg)
 
-2. up to 3 mismatches
+2.  up to 3 mismatches
 
-![](figures/supp/simulated_recall_vs_occurrences_max_nm_3.svg)  
+![](figures/supp/simulated_recall_vs_occurrences_max_nm_3.svg)
 
+### Supplementary Figure S5: IMG/VR4 recall vs occurrence frequency by mismatch threshold {#fig-supp-real-recall}
 
-### Supplementary figure 5.
+Tool recall versus occurrence frequency for **IMG/VR4 dataset**.\
+Similar to main text figure, except for exact values for different mismatch thresholds (0-3).
 
-Tool recall versus occurrence frequency for **IMG/VR4 dataset**.  
-Similar to main text figure, except for exact values for different mismatch thresholds (0-3).  
+#### A. 0 mismatches
 
-#### A. 0 mismatches    
+![](figures/supp/real_data_recall_vs_occurrences_exact_nm_0.svg)
 
-![](figures/supp/real_data_recall_vs_occurrences_exact_nm_0.svg) 
-
-#### B. 1 mismatch  
+#### B. 1 mismatch
 
 ![](figures/supp/real_data_recall_vs_occurrences_exact_nm_1.svg)
 
-#### C. 2 mismatches  
+#### C. 2 mismatches
 
 ![](figures/supp/real_data_recall_vs_occurrences_exact_nm_2.svg)
 
-#### D. 3 mismatches  
+#### D. 3 mismatches
 
 ![](figures/supp/real_data_recall_vs_occurrences_exact_nm_3.svg)
 
+### Supplementary Figure S6: Comparison of simulated vs real spacer characteristics {#fig-supp-spacer-comparison}
 
-### Supplementary figure 6.
-Distributions of spacers characteristics.  
-(A) Spacer size (length in bp)  
-(B) Mismatches observed in spacer alignments  
+Distributions of spacer sequence features comparing simulated and real datasets to validate that synthetic sequences mimic real data characteristics. Features analyzed include k-mer repeatability, Shannon entropy, base frequencies, GC content, and linguistic complexity (LCC). Most features show similar distributions between simulated and real sequences, with some complexity measures (k-mer repeatability and LCC) showing real spacers have slightly wider range of values, suggesting a minor fraction of real spacers have more extreme complexity values.
+
+<PLACE_HOLDER> <!-- Should show side-by-side comparisons of:
+- k-mer repeatability distributions
+- Shannon entropy distributions  
+- Base frequency patterns (A, T, C, G)
+- GC content distributions
+- Linguistic complexity (LCC) measures
+- Any other relevant sequence features
+
+Referenced in main text for validation that simulated sequences match real data characteristics
+See notebooks: spacer_inspection.ipynb for generation code
+-->
+
+### Supplementary Figure S7: Spacer characteristic distributions by dataset {#fig-supp-spacer-distributions}
+
+Distributions of spacers characteristics for both real (IMG/VR4) and simulated datasets.\
+(A) Spacer size (length in bp)\
+(B) Mismatches observed in spacer alignments\
 (C) Spacer occurrence rate.
 
-#### 1. IMG/VR4 dataset  
+#### 1. IMG/VR4 dataset
 
-**Note:** the horizontal axis is logarithmic.    
-
+**Note:** the horizontal axis is logarithmic.
 
 ![](figures/supp/real_data_spacer_distributions.svg)
 
 #### 2. Synthetic dataset
-  
 
 ![](figures/supp/simulated_spacer_distributions.svg)
 
-### Supplementary figure 7.
-Upset plot of tool performance for IMG/VR4 dataset. 
-The panels (from top to bottom) are sorted by number of mismatches. The sets in each panel are sorted from left to right by the set size. Each row in each panel represents a tool, and the vertical lines connecting the dots indicate the intersection of the connected tool results'.  
+### Supplementary Figure S8: Upset plots showing tool result overlaps {#fig-supp-upset}
 
-#### A. 0 mismatches    
+Upset plot of tool performance for IMG/VR4 dataset. The panels (from top to bottom) are sorted by number of mismatches. The sets in each panel are sorted from left to right by the set size. Each row in each panel represents a tool, and the vertical lines connecting the dots indicate the intersection of the connected tool results'.
 
-![](figures/supp/upset_0.svg)   
+#### A. 0 mismatches
 
-#### B. 1 mismatch     
+![](figures/supp/upset_0.svg)
 
-![](figures/supp/upset_1.svg)  
-  
-#### C. 2 mismatches  
+#### B. 1 mismatch
 
-![](figures/supp/upset_2.svg)    
+![](figures/supp/upset_1.svg)
 
-#### D. 3 mismatches   
+#### C. 2 mismatches
 
-![](figures/supp/upset_3.svg)  
+![](figures/supp/upset_2.svg)
 
+#### D. 3 mismatches
+
+![](figures/supp/upset_3.svg)
+
+### Supplementary Figure S9: Tool-vs-tool comparison matrices for IMG/VR4 at exact mismatch levels {#fig-supp-real-matrix-exact}
+
+\<merge matrices for exact mismatch values 0, 1, 2, 3 into single combined figure similar to main text Figure 3 panel B but showing separate panels for each exact hamming distance value\>
+
+IMG/VR4 based results in a tool vs tool comparison at exact mismatch values. Unlike the main text figure which shows cumulative results (up to X mismatches), these matrices show results for exact mismatch values. Cell(i,j) represents the number of spacer-contig pairs identified by tool i (row) but not by tool j (column) at the specified exact hamming distance.
+
+### Supplementary Figure S10: Distribution of spacer occurrence frequencies showing rarity of ultra-high occurrence spacers {#fig-supp-occurrence-distribution}
+
+Distribution of spacer occurrence frequencies in the IMG/VR4 dataset demonstrating that ultra-high occurrence spacers (\>1000 occurrences) represent less than 0.01% of all spacers. This figure contextualizes the occurrence-dependent performance analysis presented in the main text, showing that while performance degradation at high occurrence frequencies is measurable, it affects only an extremely small fraction of analyses.
+
+![](figures/supp/fraction_1_matched_spacers_distributions.png)
+
+## Supplementary Notes
+
+### Supplementary Note 1: Coordinate Tolerance Matching Example {#note-supp-coord-tolerance}
+
+To illustrate the necessity for coordinate tolerance matching, consider the following case from our synthetic dataset where three different tools detected the same biological match but reported slightly different coordinates:
+
+| Source | Spacer ID | Contig ID | Query Start | Query End | Target Start | Target End | Strand | Mismatches/Cost (tool-reported) | Notes |
+|:-------|:-------|:-------|-------:|-------:|-------:|-------:|:-------|-------:|:-------|
+| Ground Truth | 1c47e31b_spacer_10034 | 1c47e31b_contig_1828 | \- | \- | 5001 | 5036 | reverse | 1 |  |
+| BLASTn | 1c47e31b_spacer_10034 | 1c47e31b_contig_1828 | 1 | 34 | 5036 | 5003 | reverse | 0 |  |
+| MMseqs2 | 1c47e31b_spacer_10034 | 1c47e31b_contig_1828 | 1 | 35 | 5036 | 5002 | reverse | 1 |  |
+| Sassy | 1c47e31b_spacer_10034 | 1c47e31b_contig_1828 | \- | \- | 5000 | 5036 | reverse | 1 | CIGAR: 34=1I1= |
+
+In this example, BLASTn reports the ungapped alignment at contig positions 5003-5036 (0 reported mismatches), MMseqs2 reports 5002-5036 (1 reported mismatch over the terminal base), and Sassy reports 5000-5036 (1 reported insertion, suggesting the position 5000 in the contig matches that of the last position in the spacer). The ground truth planned occurrence was at 5001-5036. Despite these coordinate variations, all three tools detected the same biological match. Critically, all three alignment regions are acceptable matches to the ground truth occurrence, under a maximum hamming distance of 1.
+
+This example demonstrates why a 5bp coordinate tolerance is necessary when aggregating results across tools to avoid double-counting essentially identical matches while accounting for valid algorithmic differences in gap versus substitution placement at alignment boundaries.
+
+### Supplementary Note 2: Anecdotal observations on frame-preserving indels {#note-supp-frame-indels}
+
+<PLACE_HOLDER> <!-- Should describe:
+- Observations of indels in multiples of 3bp (frame-preserving) in phage escape contexts
+- Why these are rare but potentially strong indicators of selection
+- Any specific examples from the datasets
+- Why this hasn't been previously reported in literature
+- Potential biological significance
+
+Referenced in main text introduction regarding phage mutation patterns
+-->
+
+### Supplementary Note 3: Non-planned Match Rate Analysis {#note-supp-nonplanned}
+
+Detailed analysis of non-planned match rates across distance thresholds using exhaustive search tools on synthetic and semi-synthetic datasets.
+
+**Methodology:** Using synthetic datasets with known ground truth, we quantified non-planned matches (validated alignments occurring outside planned insertion regions) as a function of distance metric, threshold, and search space size. For hamming distance, we used indelfree.sh (bruteforce mode); for edit distance, we used Sassy. Non-planned matches represent chance similarities arising from sequence composition rather than true biological relationships.
+
+**Key Findings:**
+
+**Semi-synthetic dataset (3,826,979 real iPHoP spacers × 400,000 simulated contigs, \~xxx Gbp):** - Hamming distance ≤3: 54,388 non-planned matches (\~0.36 per million spacer-bp × million contig-bp) - Hamming distance ≤2: 2,217 non-planned matches - Hamming distance ≤1: 47 non-planned matches\
+- Hamming distance = 0: 1 exact non-planned match
+
+These rates demonstrate dramatic increase in background matches with allowed distance threshold. At hamming ≤3, approximately 1 in \~2.8 million spacer-contig position comparisons yields a non-planned match.
+
+**Edit distance analysis:** Due to computational requirements of exhaustive tools (Sassy), edit distance non-planned match rates could only be evaluated on smaller synthetic datasets. Results show substantially higher non-planned match rates when allowing indels compared to substitutions-only (hamming distance), validating our recommendation to use hamming distance for natural CRISPR spacer-protospacer matching.
+
+**Validation approach:** All non-planned matches were independently verified using parasail Needleman-Wunsch alignment to ensure they represent true sequence similarity within the specified distance threshold, not tool artifacts.
+
+**Implications:** As CRISPR spacer databases continue growing (366,799 in 2017 → 3,826,979 in 2023) and viral contig databases expand through metagenomic sequencing, researchers must account for these increasing background match rates when interpreting results. The choice of distance threshold directly impacts false discovery rates.
+
+**Complete analysis available in:** `distance_metric_analysis.ipynb` notebook in project repository, including per-distance breakdowns, tool-specific validation analyses, and detailed comparison tables.
+
+## References and Data Availability
+
+All analysis notebooks, source code, and generated data are available in the project repository at [code.jgi.doe.gov/spacersdb/spacer_matching_bench](https://code.jgi.doe.gov/spacersdb/spacer_matching_bench).
+
+Key analysis notebooks referenced in supplementary materials: - `spacer_inspection.ipynb`: Complexity filtering, spacer feature analysis, simulated vs real comparison - `distance_metric_analysis.ipynb`: Non-planned match rate analysis, coordinate tolerance examples, hamming vs edit distance comparison - `Prepare_all_jobs.ipynb`: Simulation parameter definitions, dataset generation commands - `Performance_simulated_v2.ipynb`: Per-tool performance metrics on simulated datasets - `Performance_imgvr4_v2.ipynb`: Per-tool performance metrics on real IMG/VR4 datasets
+
+Dataset availability: - Filtered IMG/VR4 HQ contig subset (421,431 contigs, \~18.9 Gbp): \[Zenodo DOI\] - Filtered iPHoP spacer dataset (3,826,979 spacers, 132 Mbp): \[Zenodo DOI\] - All synthetic datasets and ground truth files: \[Zenodo DOI\]
