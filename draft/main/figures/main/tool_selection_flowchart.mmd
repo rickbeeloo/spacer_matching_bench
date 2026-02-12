@@ -1,0 +1,16 @@
+flowchart TD
+    Start([Tool Selection for<br/>Spacer-Protospacer Matching]) --> Q1{Dataset Scale<br/>and Computational<br/>Resources}
+    
+    Q1 -->|Small experimental dataset<br/><1M spacers, <10 Gbp contigs<br/>Computational cost acceptable| Q2{Distance Metric<br/>Requirements}
+    Q1 -->|Large-scale metagenomic<br/>>1M spacers or >10 Gbp contigs<br/>Efficiency critical| Q3{Distance Threshold<br/>and Biological<br/>Constraints}
+    
+    Q2 -->|Edit distance needed:<br/>Indel tolerance required for<br/>low-accuracy long reads: ONT R9, PacBio CLR<br/>or mutation type characterization| Sassy[<b>Sassy - Exhaustive Edit Distance</b><br/>✓ Perfect recall, arbitrary thresholds<br/>✓ Supports indels and substitutions<br/>⚠ ~1M CPU-seconds per 5% IMG/VR4<br/>Applications: Experimental phage-host studies,<br/>low-accuracy long-read assemblies,<br/>off-target analysis, methodological validation]
+    Q2 -->|Hamming distance sufficient:<br/>Substitutions only<br/>High-quality assembled data: Illumina<br/>Historical infection inference| Q3
+    
+    Q3 -->|≤3 substitutions:<br/>Biologically relevant threshold<br/>Indels ~4× rarer than substitutions<br/>Most escape mutations ≤3 nt| Bowtie1[<b>Bowtie1 - Hamming ≤3</b><br/>✓ >99% recall at intended threshold<br/>✓ Scales to millions of spacers<br/>✓ Low non-planned match rate<br/>✓ Ungapped alignment only<br/><b>PRIMARY RECOMMENDATION</b><br/>Applications: Large-scale host prediction,<br/>metagenomic spacer-protospacer matching,<br/>high-throughput CRISPR target identification]
+    Q3 -->|>3 substitutions:<br/>Extended divergence detection<br/>Accepts higher non-planned matches<br/>Conserved indel-free constraint| Indelfree[<b>Indelfree.sh Indexed - Hamming ≤5</b><br/>✓ Near-perfect recall for hamming ≤5<br/>✓ Maintains substitution-only constraint<br/>⚠ 10-100× slower than Bowtie1<br/>⚠ Higher non-planned match frequency<br/>Applications: Divergent phage detection,<br/>extended mismatch tolerance,<br/>sensitivity-prioritized analyses]
+    
+    style Bowtie1 fill:#90EE90,stroke:#228B22,stroke-width:3px
+    style Sassy fill:#FFE4B5,stroke:#FF8C00,stroke-width:2px
+    style Indelfree fill:#ADD8E6,stroke:#4169E1,stroke-width:2px
+    style Start fill:#F0F0F0,stroke:#333,stroke-width:2px

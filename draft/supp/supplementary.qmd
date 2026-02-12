@@ -52,170 +52,296 @@ format:
   odt: default
   docx: default
 ---
-# Supplementary Materials
-## Tables 
 
-### 1. Tool Configuration Details
+# Supplementary Materials
+
+::: callout-note
+## Cross-reference formatting note
+
+In Quarto, cross-references between files require using the `@` symbol with labeled sections. For example, to reference Supplementary Table S1 from the main text, use `[@tbl-supp-tool-config]`. Figure references work similarly with `[@fig-supp-*]` notation.
+:::
+
+## Tables
+
+### Supplementary Table S1: Tool Configuration Details {#tbl-supp-tool-config}
 
 For full version and build information see the git repo at [code.jgi.doe.gov/spacersdb/spacer_matching_bench](https://code.jgi.doe.gov/spacersdb/spacer_matching_bench)
 
 **Note on tool versions:** Following reviewer suggestions, we added three tools to the benchmark compared to the initial version: Sassy (exhaustive edit distance search), X-mapper (dynamic gapped x-mer approach), and indelfree.sh (BBTools suite, both bruteforce exhaustive mode and indexed heuristic mode). We also updated versions of existing tools where newer releases were available.
 
-**Note on BLASTn parameters:** The parameters for BLASTn were specifically chosen to enable the highest possible recall for short spacers. We used `blastn-short` (sets word-size at 7, compared to 11 with default blastn and 28 in megablastn), a very high number of max target sequences (`-max_target_seqs 1000000`, allowing up to 1M reported alignments per query compared to default value of 500), the `--ungapped` flag (used by CRISPRTarget, aligns with our hamming distance focus), and `perc_identity=84` and `qcov_hsp_perc=80`. The ungapped flag considerably reduced total CPU time. The perc_identity and qcov_hsp_perc arguments control output size - we cannot restrict blastn to a specific "n" distance, so these values allow a range of distances to be reported. For example, 85% identity over at least 80% of the spacer allows for 3 mismatches for a 20bp spacer (20 * 0.15 = 3), but allows more for a 30bp spacer (30 * 0.15 = 4.5). This range exceeds our desired threshold to capture all valid matches.
+**Note on BLASTn parameters:** The parameters for BLASTn were specifically chosen to enable the highest possible recall for short spacers. We used `blastn-short` (sets word-size at 7, compared to 11 with default blastn and 28 in megablastn), a very high number of max target sequences (`-max_target_seqs 1000000`, allowing up to 1M reported alignments per query compared to default value of 500), the `--ungapped` flag (used by CRISPRTarget, aligns with our hamming distance focus), and `perc_identity=84` and `qcov_hsp_perc=80`. The ungapped flag considerably reduced total CPU time. The perc_identity and qcov_hsp_perc arguments control output size - we cannot restrict blastn to a specific "n" distance, so these values allow a range of distances to be reported. For example, 85% identity over at least 80% of the spacer allows for 3 mismatches for a 20bp spacer (20 \* 0.15 = 3), but allows more for a 30bp spacer (30 \* 0.15 = 4.5). This range exceeds our desired threshold to capture all valid matches.
 
 | Tool | Version | Command |
-|:------------------- |:---------------------------------------- |:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|:-----|:--------|:--------|
 
+### Supplementary Table S2: IMG/VR4 Contig Dataset Statistics and Filtering Steps {#tbl-supp-contig-stats}
 
-### 2. Recall values for each tool at different mismatch thresholds 
-#### A. IMG/VR4 dataset  
-Every row lists the results for a specific mismatch threshold and tool.  
-The values are for exact mismatches (not max), and represent the total number of unique spacer-contig pairs (aligning at that mismatch threshold).  
-The fraction is tool_matches divided by total_possible.  
+Summary of IMG/VR4 v1.1 high-confidence viral contigs after taxonomic filtering and length cutoff.
 
+<PLACE_HOLDER> <!-- Should include:
+- Starting dataset: 5,457,198 high-confidence contigs from IMG/VR4 v1.1
+- Taxonomic filtering steps (removal of eukaryotic virus families, orders, classes)
+- Length filtering: contigs ≤1000 bp removed
+- Final dataset: 5,115,894 prokaryotic viral contigs
+- Size statistics: total ~79 Gbp, range 1,001-2,473,870 bp, median 7,664 bp, GC% 44.45%
+- HQ subset selection: 421,431 contigs (~18.9 Gbp) via stratified sampling by taxonomic class
+-->
 
-| mismatches | tool          | total_possible | tool_matches | fraction       |
-|------------|---------------|----------------|--------------|----------------|
-  
+### Supplementary Table S3: CRISPR Spacer Dataset Composition and Statistics {#tbl-supp-spacer-stats}
 
-#### B. Synthetic dataset   
+Detailed statistics on the iPHoP spacer dataset before and after complexity filtering.
 
+<PLACE_HOLDER> <!-- Should include:
+- Raw iPHoP dataset: 3,882,812 unique spacers
+- Length distribution: range 25-40 bp, median 34 bp (or 25-100 bp based on table in main text)
+- GC content: 47.6% (raw), 46.73% (filtered)
+- Complexity filtering criteria (entropy ≤1, N fraction >0, homopolymer ≥95%, non-unique 6-mers ≥4)
+- Filtered spacers removed: 55,833 (~1.4%)
+- Final dataset: 3,826,979 spacers
+- Total length: 132 Mbp
+- See also Figure S7 for distributions
+-->
 
+### Supplementary Table S4: Complete Simulation Parameters and Dataset Statistics {#tbl-supp-simulation-params}
 
-# Figures 
+Comprehensive table of all synthetic dataset generation parameters and resulting statistics.
 
-### Supplementary figure 1.
+<PLACE_HOLDER> <!-- Should include for each simulation run (ns_[n]_nc_[m]):
+- Dataset name
+- Number of spacers, number of contigs
+- Spacer length range and distribution type
+- Contig length range and distribution type
+- GC content (spacers and contigs)
+- Insertion/injection range (occurrences per spacer)
+- Mismatch range (substitution mutations)
+- Indel parameters (if used - note: not used in current project)
+- Reverse complement proportion (typically 50%)
+- Contig utilization percentage (<2% for most)
+- Total spacer bp, total contig bp
+- Tools evaluated on dataset
+- Maximum distance threshold used (≤3 or ≤5 hamming)
+- Whether exhaustive tools included
 
-Benchmarking framework pipeline overview. 
+Specific datasets:
+1. ns_50000_nc_5000: 50k spacers, 5k contigs, 25-40bp spacers, 10-150kbp contigs, 1-5 insertions, 0-5 mismatches, all tools, ≤5 hamming
+2. ns_75000_nc_5000: 75k spacers, 5k contigs, similar parameters
+3. ns_75000_nc_10000: 75k spacers, 10k contigs, similar parameters
+4. ns_100000_nc_10000: 100k spacers, 10k contigs, all tools, ≤5 hamming
+5. ns_100000_nc_20000: 100k spacers, 20k contigs, all tools, ≤5 hamming
+6. ns_500000_nc_100000: 500k spacers, 100k contigs, 10-550kbp contigs, heuristic tools only, ≤3 hamming
+7. ns_500_nc_5000_HIGH_INSERTION_RATE: 500 spacers, 5k contigs, 100-2500 insertions per spacer
+8. ns_100_nc_50000: 100 spacers, 50k contigs, 2.5-850kbp contigs, 1-3 insertions, 25-45bp spacers
+-->
 
-![](figures/supp/workflow.svg)  
+### Supplementary Table S5: Recall Values for Each Tool at Different Mismatch Thresholds {#tbl-supp-recall}
 
+#### A. IMG/VR4 dataset
 
-### Supplementary figure 2.
+Every row lists the results for a specific mismatch threshold and tool.\
+The values are for exact mismatches (not max), and represent the total number of unique spacer-contig pairs (aligning at that mismatch threshold).\
+The fraction is tool_matches divided by total_possible.
 
-IMG/VR v4 based results in a tool vs tool comparison. Unlike the similar matrix in the main text(figure 1) which showcases the values for up to 1 and 3 mismatches, here the matrixes are separated for each mismatch threshold at an **exact** mismatch value. From top left to bottom right, the mismatch threshold is 0, 1, 2, 3. Like the main text figure, the value of a cell(i,j) is the fraction of spacer-contig pairs identified by the tool listed in row i, which were not identified by the tool listed in the j column.  
+| mismatches | tool | total_possible | tool_matches | fraction |
+|------------|------|----------------|--------------|----------|
 
+#### B. Synthetic dataset
 
-![](figures/supp/real_data_matrix_combined.svg)  
+## Supplementary Figures
 
+### Supplementary Figure S1: Benchmarking framework pipeline overview {#fig-supp-workflow}
 
-### Supplementary figure 3
+![](figures/supp/workflow.svg)
 
-Simulated dataset performance metrics.  
-Precision = True Positives / (True Positives + False Positives)  
-Recall = True Positives / (True Positives + False Negatives)  
-F1 = 2 * (Precision * Recall) / (Precision + Recall)  
+### Supplementary Figure S2: IMG/VR4 tool-vs-tool comparison matrices {#fig-supp-real-matrix}
+
+IMG/VR v4 based results in a tool vs tool comparison. Unlike the similar matrix in the main text (figure 1) which showcases the values for up to 1 and 3 mismatches, here the matrixes are separated for each mismatch threshold at an **exact** mismatch value. From top left to bottom right, the mismatch threshold is 0, 1, 2, 3. Like the main text figure, the value of a cell(i,j) is the fraction of spacer-contig pairs identified by the tool listed in row i, which were not identified by the tool listed in the j column.
+
+![](figures/supp/real_data_matrix_combined.svg)
+
+### Supplementary Figure S3: Simulated dataset performance metrics {#fig-supp-sim-performance}
+
+Performance metrics for tools on simulated datasets.\
+Precision = True Positives / (True Positives + False Positives)\
+Recall = True Positives / (True Positives + False Negatives)\
+F1 = 2 \* (Precision \* Recall) / (Precision + Recall)\
 Note: Because of the various prefiltering steps, the number of False Negatives and False Positives may not be indicative of the actual raw tool-reported results. As such, we recommend focusing on the recall rate between tools, which is equivalent to the fraction of detected spacer-protospacer pairs out of all the spacer-protospacer pairs in the reference file.
 
 ![](figures/supp/simulated_tool_performance_by_mismatches.svg)
 
+### Supplementary Figure S4: Simulated dataset recall vs spacer occurrence frequency {#fig-supp-sim-recall}
 
-### Supplementary figure 4.
+**Simulated dataset** recall (detection fraction) for different values of spacer occurrences.
 
-**Simulated dataset** recall (detection fraction) for different values of spacer occurrences.   
+#### A. For exact mismatches, in a contig dependent manner
 
-#### A. for exact mismatches, in a contig dependent manner
- Per contigs manner means the that the recall measure is the fraction of occurences each tool identified out of the total number of spacer-contig pairs, identified by all tools.  
-1. 0 mismatches  
+Per contigs manner means the that the recall measure is the fraction of occurences each tool identified out of the total number of spacer-contig pairs, identified by all tools.\
+1. 0 mismatches
 
-![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_0.svg)  
+![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_0.svg)
 
-2. exactly 1 mismatch  
+2.  exactly 1 mismatch
 
-![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_1.svg)  
+![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_1.svg)
 
-3. exactly 2 mismatches  
+3.  exactly 2 mismatches
 
-![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_2.svg)  
+![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_2.svg)
 
-4. exactly 3 mismatches  
+4.  exactly 3 mismatches
 
-![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_3.svg)  
+![](figures/supp/simulated_recall_vs_occurrences_with_contig_id_exact_nm_3.svg)
 
-#### B. up to 1 and 3 mismatches, in a contig independent manner  
+#### B. Up to 1 and 3 mismatches, in a contig independent manner
 
-Per contig independent manner means that the recall measure is the fraction of occurences each tool identified out of the total number of times the spacer occurs in the reference file (regardless of in which contig).  
+Per contig independent manner means that the recall measure is the fraction of occurences each tool identified out of the total number of times the spacer occurs in the reference file (regardless of in which contig).\
 1. up to 1 mismatches
 
-![](figures/supp/simulated_recall_vs_occurrences_max_nm_1.svg)  
+![](figures/supp/simulated_recall_vs_occurrences_max_nm_1.svg)
 
-2. up to 3 mismatches
+2.  up to 3 mismatches
 
-![](figures/supp/simulated_recall_vs_occurrences_max_nm_3.svg)  
+![](figures/supp/simulated_recall_vs_occurrences_max_nm_3.svg)
 
+### Supplementary Figure S5: IMG/VR4 recall vs occurrence frequency by mismatch threshold {#fig-supp-real-recall}
 
-### Supplementary figure 5.
+Tool recall versus occurrence frequency for **IMG/VR4 dataset**.\
+Similar to main text figure, except for exact values for different mismatch thresholds (0-3).
 
-Tool recall versus occurrence frequency for **IMG/VR4 dataset**.  
-Similar to main text figure, except for exact values for different mismatch thresholds (0-3).  
+#### A. 0 mismatches
 
-#### A. 0 mismatches    
+![](figures/supp/real_data_recall_vs_occurrences_exact_nm_0.svg)
 
-![](figures/supp/real_data_recall_vs_occurrences_exact_nm_0.svg) 
-
-#### B. 1 mismatch  
+#### B. 1 mismatch
 
 ![](figures/supp/real_data_recall_vs_occurrences_exact_nm_1.svg)
 
-#### C. 2 mismatches  
+#### C. 2 mismatches
 
 ![](figures/supp/real_data_recall_vs_occurrences_exact_nm_2.svg)
 
-#### D. 3 mismatches  
+#### D. 3 mismatches
 
 ![](figures/supp/real_data_recall_vs_occurrences_exact_nm_3.svg)
 
+### Supplementary Figure S6: Comparison of simulated vs real spacer characteristics {#fig-supp-spacer-comparison}
 
-### Supplementary figure 6.
-Distributions of spacers characteristics.  
-(A) Spacer size (length in bp)  
-(B) Mismatches observed in spacer alignments  
+Distributions of spacer sequence features comparing simulated and real datasets to validate that synthetic sequences mimic real data characteristics. Features analyzed include k-mer repeatability, Shannon entropy, base frequencies, GC content, and linguistic complexity (LCC). Most features show similar distributions between simulated and real sequences, with some complexity measures (k-mer repeatability and LCC) showing real spacers have slightly wider range of values, suggesting a minor fraction of real spacers have more extreme complexity values.
+
+<PLACE_HOLDER> <!-- Should show side-by-side comparisons of:
+- k-mer repeatability distributions
+- Shannon entropy distributions  
+- Base frequency patterns (A, T, C, G)
+- GC content distributions
+- Linguistic complexity (LCC) measures
+- Any other relevant sequence features
+
+Referenced in main text for validation that simulated sequences match real data characteristics
+See notebooks: spacer_inspection.ipynb for generation code
+-->
+
+### Supplementary Figure S7: Spacer characteristic distributions by dataset {#fig-supp-spacer-distributions}
+
+Distributions of spacers characteristics for both real (IMG/VR4) and simulated datasets.\
+(A) Spacer size (length in bp)\
+(B) Mismatches observed in spacer alignments\
 (C) Spacer occurrence rate.
 
-#### 1. IMG/VR4 dataset  
+#### 1. IMG/VR4 dataset
 
-**Note:** the horizontal axis is logarithmic.    
-
+**Note:** the horizontal axis is logarithmic.
 
 ![](figures/supp/real_data_spacer_distributions.svg)
 
 #### 2. Synthetic dataset
-  
 
 ![](figures/supp/simulated_spacer_distributions.svg)
 
-### Supplementary figure 7.
-Upset plot of tool performance for IMG/VR4 dataset. 
-The panels (from top to bottom) are sorted by number of mismatches. The sets in each panel are sorted from left to right by the set size. Each row in each panel represents a tool, and the vertical lines connecting the dots indicate the intersection of the connected tool results'.  
+### Supplementary Figure S8: Upset plots showing tool result overlaps {#fig-supp-upset}
 
-#### A. 0 mismatches    
+Upset plot of tool performance for IMG/VR4 dataset. The panels (from top to bottom) are sorted by number of mismatches. The sets in each panel are sorted from left to right by the set size. Each row in each panel represents a tool, and the vertical lines connecting the dots indicate the intersection of the connected tool results'.
 
-![](figures/supp/upset_0.svg)   
+#### A. 0 mismatches
 
-#### B. 1 mismatch     
+![](figures/supp/upset_0.svg)
 
-![](figures/supp/upset_1.svg)  
-  
-#### C. 2 mismatches  
+#### B. 1 mismatch
 
-![](figures/supp/upset_2.svg)    
+![](figures/supp/upset_1.svg)
 
-#### D. 3 mismatches   
+#### C. 2 mismatches
 
-![](figures/supp/upset_3.svg)  
+![](figures/supp/upset_2.svg)
 
+#### D. 3 mismatches
 
+![](figures/supp/upset_3.svg)
 
+### Supplementary Figure S9: Tool-vs-tool comparison matrices for IMG/VR4 at exact mismatch levels {#fig-supp-real-matrix-exact}
 
-supplementary note nnn: Coordinate Tolerance Matching Example
-To illustrate the necessity for this coordinate tolerance matching, consider the following case from our synthetic dataset where three different tools detected the same biological match but reported slightly different coordinates:
+\<merge matrices for exact mismatch values 0, 1, 2, 3 into single combined figure similar to main text Figure 3 panel B but showing separate panels for each exact hamming distance value\>
 
-| Source | Spacer ID | Contig ID | Query Start | Query End | Target Start | Target End | Strand | Mismatches/Cost (tool - reported) | Notes |
+IMG/VR4 based results in a tool vs tool comparison at exact mismatch values. Unlike the main text figure which shows cumulative results (up to X mismatches), these matrices show results for exact mismatch values. Cell(i,j) represents the number of spacer-contig pairs identified by tool i (row) but not by tool j (column) at the specified exact hamming distance.
+
+### Supplementary Figure S10: Distribution of spacer occurrence frequencies showing rarity of ultra-high occurrence spacers {#fig-supp-occurrence-distribution}
+
+Distribution of spacer occurrence frequencies in the IMG/VR4 dataset demonstrating that ultra-high occurrence spacers (\>1000 occurrences) represent less than 0.01% of all spacers. This figure contextualizes the occurrence-dependent performance analysis presented in the main text, showing that while performance degradation at high occurrence frequencies is measurable, it affects only an extremely small fraction of analyses.
+
+![](figures/supp/fraction_1_matched_spacers_distributions.png)
+
+## Supplementary Notes
+
+### Supplementary Note 1: Coordinate Tolerance Matching Example {#note-supp-coord-tolerance}
+
+To illustrate the necessity for coordinate tolerance matching, consider the following case from our synthetic dataset where three different tools detected the same biological match but reported slightly different coordinates:
+
+| Source | Spacer ID | Contig ID | Query Start | Query End | Target Start | Target End | Strand | Mismatches/Cost (tool-reported) | Notes |
 |:-------|:-------|:-------|-------:|-------:|-------:|-------:|:-------|-------:|:-------|
 | Ground Truth | 1c47e31b_spacer_10034 | 1c47e31b_contig_1828 | \- | \- | 5001 | 5036 | reverse | 1 |  |
 | BLASTn | 1c47e31b_spacer_10034 | 1c47e31b_contig_1828 | 1 | 34 | 5036 | 5003 | reverse | 0 |  |
 | MMseqs2 | 1c47e31b_spacer_10034 | 1c47e31b_contig_1828 | 1 | 35 | 5036 | 5002 | reverse | 1 |  |
 | Sassy | 1c47e31b_spacer_10034 | 1c47e31b_contig_1828 | \- | \- | 5000 | 5036 | reverse | 1 | CIGAR: 34=1I1= |
 
-In this example, BLASTn reports the ungapped alignment at contig positions 5003-5036 (0 reported mismatches), MMseqs2 reports 5002-5036 (1 reported mismatch over the terminal base), and Sassy reports 5000-5036 (1 reported insertion, suggesting the position 5000 in the contig matches that of the last position in the spacer). The ground truth planned occurrence was at 5001-5036. Despite these coordinate variations, all three tools detected the same biological match. 
-Critically, all three alignment regions are acceptable matches to the ground truth occurrence, under a maximum hamming distance of 1. 
+In this example, BLASTn reports the ungapped alignment at contig positions 5003-5036 (0 reported mismatches), MMseqs2 reports 5002-5036 (1 reported mismatch over the terminal base), and Sassy reports 5000-5036 (1 reported insertion, suggesting the position 5000 in the contig matches that of the last position in the spacer). The ground truth planned occurrence was at 5001-5036. Despite these coordinate variations, all three tools detected the same biological match. Critically, all three alignment regions are acceptable matches to the ground truth occurrence, under a maximum hamming distance of 1.
+
+This example demonstrates why a 5bp coordinate tolerance is necessary when aggregating results across tools to avoid double-counting essentially identical matches while accounting for valid algorithmic differences in gap versus substitution placement at alignment boundaries.
+
+### Supplementary Note 2: Anecdotal observations on frame-preserving indels {#note-supp-frame-indels}
+
+<PLACE_HOLDER> <!-- Should describe:
+- Observations of indels in multiples of 3bp (frame-preserving) in phage escape contexts
+- Why these are rare but potentially strong indicators of selection
+- Any specific examples from the datasets
+- Why this hasn't been previously reported in literature
+- Potential biological significance
+
+Referenced in main text introduction regarding phage mutation patterns
+-->
+
+### Supplementary Note 3: Non-planned Match Rate Analysis {#note-supp-nonplanned}
+
+Detailed analysis of non-planned match rates across distance thresholds using exhaustive search tools on synthetic and semi-synthetic datasets.
+
+**Methodology:** Using synthetic datasets with known ground truth, we quantified non-planned matches (validated alignments occurring outside planned insertion regions) as a function of distance metric, threshold, and search space size. For hamming distance, we used indelfree.sh (bruteforce mode); for edit distance, we used Sassy. Non-planned matches represent chance similarities arising from sequence composition rather than true biological relationships.
+
+**Key Findings:**
+
+**Semi-synthetic dataset (3,826,979 real iPHoP spacers × 400,000 simulated contigs, \~xxx Gbp):** - Hamming distance ≤3: 54,388 non-planned matches (\~0.36 per million spacer-bp × million contig-bp) - Hamming distance ≤2: 2,217 non-planned matches - Hamming distance ≤1: 47 non-planned matches\
+- Hamming distance = 0: 1 exact non-planned match
+
+These rates demonstrate dramatic increase in background matches with allowed distance threshold. At hamming ≤3, approximately 1 in \~2.8 million spacer-contig position comparisons yields a non-planned match.
+
+**Edit distance analysis:** Due to computational requirements of exhaustive tools (Sassy), edit distance non-planned match rates could only be evaluated on smaller synthetic datasets. Results show substantially higher non-planned match rates when allowing indels compared to substitutions-only (hamming distance), validating our recommendation to use hamming distance for natural CRISPR spacer-protospacer matching.
+
+**Validation approach:** All non-planned matches were independently verified using parasail Needleman-Wunsch alignment to ensure they represent true sequence similarity within the specified distance threshold, not tool artifacts.
+
+**Implications:** As CRISPR spacer databases continue growing (366,799 in 2017 → 3,826,979 in 2023) and viral contig databases expand through metagenomic sequencing, researchers must account for these increasing background match rates when interpreting results. The choice of distance threshold directly impacts false discovery rates.
+
+**Complete analysis available in:** `distance_metric_analysis.ipynb` notebook in project repository, including per-distance breakdowns, tool-specific validation analyses, and detailed comparison tables.
+
+## References and Data Availability
+
+All analysis notebooks, source code, and generated data are available in the project repository at [code.jgi.doe.gov/spacersdb/spacer_matching_bench](https://code.jgi.doe.gov/spacersdb/spacer_matching_bench).
+
+Key analysis notebooks referenced in supplementary materials: - `spacer_inspection.ipynb`: Complexity filtering, spacer feature analysis, simulated vs real comparison - `distance_metric_analysis.ipynb`: Non-planned match rate analysis, coordinate tolerance examples, hamming vs edit distance comparison - `Prepare_all_jobs.ipynb`: Simulation parameter definitions, dataset generation commands - `Performance_simulated_v2.ipynb`: Per-tool performance metrics on simulated datasets - `Performance_imgvr4_v2.ipynb`: Per-tool performance metrics on real IMG/VR4 datasets
+
+Dataset availability: - Filtered IMG/VR4 HQ contig subset (421,431 contigs, \~18.9 Gbp): \[Zenodo DOI\] - Filtered iPHoP spacer dataset (3,826,979 spacers, 132 Mbp): \[Zenodo DOI\] - All synthetic datasets and ground truth files: \[Zenodo DOI\]
