@@ -1117,7 +1117,7 @@ def parse_sassy(
         results = pl.scan_csv(
             sassy_file,
             separator="\t",
-            skip_lines=1,
+            skip_lines=0,
             schema={
                 "spacer_id": pl.Utf8,
                 "contig_id": pl.Utf8,
